@@ -1,0 +1,603 @@
+import { useState, useEffect, useCallback } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Circle, CheckCircle2, X, Plus, Clock } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
+import Modal from '../components/ui/Modal'
+import TaskForm from '../components/TaskForm'
+
+interface Subtask {
+  id: string
+  title: string
+  completed: boolean
+}
+
+interface Task {
+  id: string
+  title: string
+  description?: string
+  status: 'todo' | 'doing' | 'done' | 'canceled'
+  priority: 'low' | 'medium' | 'high'
+  dueDate: string
+  source: 'user' | 'whatsapp'
+  progress: number
+  subtasks?: Subtask[]
+  timerAt?: string
+  timerFired?: boolean
+  whatsappMessage?: string
+  reminderDaysBefore?: number
+  reminderFired?: boolean
+}
+
+const MONTHS_PT = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+]
+const DAYS_PT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+
+const STATUS_CONFIG = {
+  todo:     { label: 'A Fazer',      dot: 'bg-slate-400',  bar: 'bg-slate-100 border-slate-200',  text: 'text-slate-600' },
+  doing:    { label: 'Em Progresso', dot: 'bg-[#2383e2]',  bar: 'bg-blue-50 border-blue-200',    text: 'text-blue-700'  },
+  done:     { label: 'Concluído',    dot: 'bg-[#6366f1]',  bar: 'bg-indigo-50 border-indigo-200', text: 'text-indigo-700'},
+  canceled: { label: 'Cancelado',    dot: 'bg-red-300',    bar: 'bg-red-50 border-red-200',       text: 'text-red-500'   },
+}
+
+function toDateKey(y: number, m: number, d: number) {
+  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
+
+function todayKey() {
+  const t = new Date()
+  return toDateKey(t.getFullYear(), t.getMonth(), t.getDate())
+}
+
+export default function CalendarPage() {
+  const { user } = useAuth()
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [loading, setLoading] = useState(true)
+  const [currentDate, setCurrentDate] = useState(new Date())
+  const [selectedDay, setSelectedDay] = useState<string | null>(todayKey())
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [newTaskDate, setNewTaskDate] = useState<string | null>(null)
+
+  const mapDbTask = useCallback((dbTask: any): Task => ({
+    id: dbTask.id,
+    title: dbTask.title,
+    status: dbTask.status,
+    priority: dbTask.priority,
+    dueDate: dbTask.due_date,
+    source: dbTask.source || 'user',
+    progress: dbTask.progress || 0,
+    description: dbTask.description || '',
+    subtasks: dbTask.subtasks || [],
+    timerAt: dbTask.timer_at || undefined,
+    timerFired: dbTask.timer_fired || false,
+    whatsappMessage: dbTask.whatsapp_message || undefined,
+    reminderDaysBefore: dbTask.reminder_days_before ?? undefined,
+    reminderFired: dbTask.reminder_fired || false,
+  }), [])
+
+  const fetchTasks = useCallback(async () => {
+    if (!user) return
+    try {
+      setLoading(true)
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setTasks((data || []).map(mapDbTask))
+    } catch (err) {
+      console.error('Erro ao buscar tarefas:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [user, mapDbTask])
+
+  useEffect(() => {
+    fetchTasks()
+    const channel = supabase
+      .channel('calendar-tasks-realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks' }, (payload) => {
+        const t = mapDbTask(payload.new)
+        setTasks(prev => prev.some(x => x.id === t.id) ? prev : [t, ...prev])
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks' }, (payload) => {
+        const t = mapDbTask(payload.new)
+        setTasks(prev => prev.map(x => x.id === t.id ? t : x))
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks' }, (payload) => {
+        const id = (payload.old as any).id
+        setTasks(prev => prev.filter(x => x.id !== id))
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [fetchTasks, mapDbTask])
+
+  // Calcular dias do calendário
+  const year = currentDate.getFullYear()
+  const month = currentDate.getMonth()
+  const firstDay = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const daysInPrevMonth = new Date(year, month, 0).getDate()
+
+  const calendarDays: { day: number; month: 'prev' | 'current' | 'next'; key: string }[] = []
+
+  // Dias do mês anterior
+  for (let i = firstDay - 1; i >= 0; i--) {
+    const d = daysInPrevMonth - i
+    const prevMonth = month === 0 ? 11 : month - 1
+    const prevYear = month === 0 ? year - 1 : year
+    calendarDays.push({ day: d, month: 'prev', key: toDateKey(prevYear, prevMonth, d) })
+  }
+  // Dias do mês atual
+  for (let d = 1; d <= daysInMonth; d++) {
+    calendarDays.push({ day: d, month: 'current', key: toDateKey(year, month, d) })
+  }
+  // Dias do próximo mês
+  const remaining = 42 - calendarDays.length
+  for (let d = 1; d <= remaining; d++) {
+    const nextMonth = month === 11 ? 0 : month + 1
+    const nextYear = month === 11 ? year + 1 : year
+    calendarDays.push({ day: d, month: 'next', key: toDateKey(nextYear, nextMonth, d) })
+  }
+
+  // Agrupar tarefas por data
+  const tasksByDate: Record<string, Task[]> = {}
+  for (const task of tasks) {
+    if (!task.dueDate || task.dueDate === 'Sem prazo') continue
+    if (!tasksByDate[task.dueDate]) tasksByDate[task.dueDate] = []
+    tasksByDate[task.dueDate].push(task)
+  }
+
+  const today = todayKey()
+  const selectedTasks = selectedDay ? (tasksByDate[selectedDay] || []) : []
+
+  // Formatar data selecionada para exibição
+  const formatSelectedDate = (key: string) => {
+    if (!key) return ''
+    const [y, m, d] = key.split('-').map(Number)
+    const date = new Date(y, m - 1, d)
+    const dayName = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'][date.getDay()]
+    return `${dayName}, ${d} de ${MONTHS_PT[m - 1]}`
+  }
+
+  const handlePrevMonth = () => {
+    setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
+  }
+
+  const handleNextMonth = () => {
+    setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
+  }
+
+  const handleToday = () => {
+    setCurrentDate(new Date())
+    setSelectedDay(todayKey())
+  }
+
+  const openNewTask = (dateKey?: string) => {
+    setEditingTask(null)
+    setNewTaskDate(dateKey || selectedDay || null)
+    setIsModalOpen(true)
+  }
+
+  const handleAddTask = async (newTask: any) => {
+    try {
+      if (editingTask) {
+        const { error } = await supabase
+          .from('tasks')
+          .update({
+            title: newTask.title,
+            status: newTask.status,
+            priority: newTask.priority,
+            due_date: newTask.dueDate,
+            source: newTask.source,
+            progress: newTask.progress,
+            description: newTask.description,
+            subtasks: newTask.subtasks,
+          })
+          .eq('id', editingTask.id)
+        if (error) throw error
+        setTasks(prev => prev.map(t => t.id === editingTask.id ? { ...t, ...newTask } : t))
+      } else {
+        const { id: _id, ...taskData } = newTask
+        const { data, error } = await supabase
+          .from('tasks')
+          .insert([{
+            user_id: user?.id,
+            title: taskData.title,
+            status: taskData.status,
+            priority: taskData.priority,
+            due_date: taskData.dueDate,
+            source: taskData.source,
+            progress: taskData.progress,
+            description: taskData.description,
+            subtasks: taskData.subtasks,
+          }])
+          .select()
+        if (error) throw error
+        if (data?.[0]) setTasks(prev => [{ ...newTask, id: data[0].id }, ...prev])
+      }
+      setIsModalOpen(false)
+      setEditingTask(null)
+      setNewTaskDate(null)
+    } catch (err) {
+      console.error('Erro ao salvar tarefa:', err)
+    }
+  }
+
+  {/* openNewTask was moved up/refactored */}
+
+  const openEditTask = (task: Task) => {
+    setEditingTask(task)
+    setNewTaskDate(null)
+    setIsModalOpen(true)
+  }
+
+  // Contagem de tarefas do mês para mini-stats
+  const monthTasks = tasks.filter(t => {
+    if (!t.dueDate) return false
+    const [y, m] = t.dueDate.split('-').map(Number)
+    return y === year && m === month + 1
+  })
+  const stats = {
+    total: monthTasks.length,
+    done: monthTasks.filter(t => t.status === 'done').length,
+    doing: monthTasks.filter(t => t.status === 'doing').length,
+    todo: monthTasks.filter(t => t.status === 'todo').length,
+    overdue: monthTasks.filter(t => {
+      if (t.status === 'done' || t.status === 'canceled') return false
+      const [y, m, d] = t.dueDate.split('-').map(Number)
+      const due = new Date(y, m - 1, d)
+      due.setHours(0, 0, 0, 0)
+      const now = new Date(); now.setHours(0, 0, 0, 0)
+      return due < now
+    }).length,
+  }
+
+  const monthStats = stats
+
+  return (
+    <div className="flex h-full min-h-0 overflow-hidden bg-white">
+      {/* Área principal do calendário */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Header */}
+        <div className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-[#e9e9e7]">
+          <div className="flex items-center justify-between gap-4">
+            {/* Título + navegação */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1 bg-[#f7f7f5] rounded-lg p-0.5 border border-[#e9e9e7]">
+                <button
+                  onClick={handlePrevMonth}
+                  className="p-1.5 rounded-md hover:bg-white transition-colors text-[#37352f]/50 hover:text-[#37352f]"
+                >
+                  <ChevronLeft size={15} />
+                </button>
+                <button
+                  onClick={handleNextMonth}
+                  className="p-1.5 rounded-md hover:bg-white transition-colors text-[#37352f]/50 hover:text-[#37352f]"
+                >
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+
+              <AnimatePresence mode="wait">
+                <motion.h1
+                  key={`${year}-${month}`}
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 8 }}
+                  transition={{ duration: 0.18 }}
+                  className="text-xl font-bold text-[#37352f] tracking-tight"
+                >
+                  {MONTHS_PT[month]}{' '}
+                  <span className="font-normal text-[#37352f]/40">{year}</span>
+                </motion.h1>
+              </AnimatePresence>
+
+              <button
+                onClick={handleToday}
+                className="px-3 py-1.5 text-xs font-semibold text-[#37352f]/60 hover:text-[#37352f] bg-[#f7f7f5] hover:bg-[#e9e9e7] border border-[#e9e9e7] rounded-lg transition-colors"
+              >
+                Hoje
+              </button>
+            </div>
+
+            {/* Stats do mês + botão novo */}
+            <div className="flex items-center gap-3">
+              {!loading && monthStats.total > 0 && (
+                <div className="hidden sm:flex items-center gap-2">
+                  {monthStats.doing > 0 && (
+                    <span className="flex items-center gap-1 text-[11px] font-medium text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#2383e2]" />
+                      {monthStats.doing} em progresso
+                    </span>
+                  )}
+                  {monthStats.overdue > 0 && (
+                    <span className="flex items-center gap-1 text-[11px] font-medium text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full">
+                      <Clock size={10} />
+                      {monthStats.overdue} atrasada{monthStats.overdue > 1 ? 's' : ''}
+                    </span>
+                  )}
+                  <span className="text-[11px] text-[#37352f]/40">
+                    {monthStats.done}/{monthStats.total} concluída(s)
+                  </span>
+                </div>
+              )}
+
+              <button
+                onClick={() => openNewTask()}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#37352f] hover:bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg transition-colors"
+              >
+                <Plus size={13} />
+                Nova tarefa
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Grade do calendário */}
+        <div className="flex-1 overflow-auto custom-scrollbar">
+          {/* Dias da semana */}
+          <div className="grid grid-cols-7 border-b border-[#e9e9e7] bg-[#f7f7f5]/50 sticky top-0 z-10">
+            {DAYS_PT.map(d => (
+              <div key={d} className="py-2 text-center text-[11px] font-semibold text-[#37352f]/40 tracking-wider uppercase">
+                {d}
+              </div>
+            ))}
+          </div>
+
+          {/* Células dos dias */}
+          {loading ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="w-5 h-5 border-2 border-[#37352f]/20 border-t-[#37352f]/60 rounded-full animate-spin" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-7">
+              {calendarDays.map(({ day, month: dm, key }) => {
+                const isToday = key === today
+                const isSelected = key === selectedDay
+                const dayTasks = tasksByDate[key] || []
+                const isCurrentMonth = dm === 'current'
+
+                const MAX_VISIBLE = 3
+                const visible = dayTasks.slice(0, MAX_VISIBLE)
+                const overflow = dayTasks.length - MAX_VISIBLE
+
+                return (
+                  <motion.div
+                    key={key}
+                    onClick={() => {
+                      setSelectedDay(key)
+                      if (dm === 'prev') handlePrevMonth()
+                      else if (dm === 'next') handleNextMonth()
+                    }}
+                    whileTap={{ scale: 0.98 }}
+                    className={`min-h-[96px] p-1.5 border-b border-r border-[#e9e9e7] cursor-pointer transition-colors relative group
+                      ${isSelected ? 'bg-[#37352f]/[0.04]' : 'hover:bg-[#f7f7f5]'}
+                      ${!isCurrentMonth ? 'bg-[#fafaf9]' : ''}
+                    `}
+                  >
+                    {/* Número do dia */}
+                    <div className="flex items-center justify-between mb-1">
+                      <span
+                        className={`w-6 h-6 flex items-center justify-center text-xs font-semibold rounded-full transition-colors
+                          ${isToday ? 'bg-[#37352f] text-white' : ''}
+                          ${isSelected && !isToday ? 'bg-[#37352f] text-white' : ''}
+                          ${!isToday && !isSelected ? (isCurrentMonth ? 'text-[#37352f]' : 'text-[#37352f]/25') : ''}
+                        `}
+                      >
+                        {day}
+                      </span>
+                      {/* Botão "+" ao hover */}
+                      {isCurrentMonth && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSelectedDay(key); openNewTask(key) }}
+                          className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded text-[#37352f]/30 hover:text-[#37352f] hover:bg-[#e9e9e7] transition-all"
+                        >
+                          <Plus size={11} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Tarefas do dia */}
+                    <div className="space-y-0.5">
+                      {visible.map(task => {
+                        const cfg = STATUS_CONFIG[task.status]
+                        return (
+                          <div
+                            key={task.id}
+                            onClick={(e) => { e.stopPropagation(); setSelectedDay(key); openEditTask(task) }}
+                            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border truncate cursor-pointer hover:opacity-80 transition-opacity ${cfg.bar} ${cfg.text}`}
+                            title={task.title}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
+                            <span className="truncate">{task.title}</span>
+                          </div>
+                        )
+                      })}
+                      {overflow > 0 && (
+                        <div className="px-1.5 text-[9px] font-semibold text-[#37352f]/40">
+                          +{overflow} mais
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Painel lateral - tarefas do dia selecionado */}
+      <AnimatePresence>
+        {selectedDay && (
+          <motion.div
+            key="side-panel"
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 300, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            className="flex-shrink-0 border-l border-[#e9e9e7] bg-[#f7f7f5] overflow-hidden"
+          >
+            <div className="w-[300px] h-full flex flex-col overflow-hidden">
+              {/* Header do painel */}
+              <div className="flex-shrink-0 px-4 pt-5 pb-3 border-b border-[#e9e9e7]">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-[#37352f]/40 uppercase tracking-wider mb-0.5">
+                      {selectedDay === today ? 'Hoje' : ''}
+                    </p>
+                    <h2 className="text-sm font-bold text-[#37352f] leading-snug">
+                      {formatSelectedDate(selectedDay)}
+                    </h2>
+                  </div>
+                  <button
+                    onClick={() => setSelectedDay(null)}
+                    className="p-1 rounded-md hover:bg-[#e9e9e7] text-[#37352f]/30 hover:text-[#37352f] transition-colors flex-shrink-0 mt-0.5"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                {/* Resumo do dia */}
+                {selectedTasks.length > 0 && (
+                  <div className="flex gap-2 mt-2 flex-wrap">
+                    {(['todo', 'doing', 'done', 'canceled'] as const).map(s => {
+                      const count = selectedTasks.filter(t => t.status === s).length
+                      if (!count) return null
+                      return (
+                        <span key={s} className={`flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${STATUS_CONFIG[s].bar} ${STATUS_CONFIG[s].text}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${STATUS_CONFIG[s].dot}`} />
+                          {count}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Lista de tarefas */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+                <AnimatePresence initial={false}>
+                  {selectedTasks.length === 0 ? (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="flex flex-col items-center justify-center py-10 text-center gap-2"
+                    >
+                      <CalendarIcon size={28} className="text-[#37352f]/15" />
+                      <p className="text-xs text-[#37352f]/35 font-medium">Nenhuma tarefa</p>
+                      <p className="text-[10px] text-[#37352f]/25">neste dia</p>
+                    </motion.div>
+                  ) : (
+                    selectedTasks.map((task, i) => {
+                      const isDone = task.status === 'done'
+                      const isCanceled = task.status === 'canceled'
+
+                      return (
+                        <motion.div
+                          key={task.id}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -8 }}
+                          transition={{ delay: i * 0.04 }}
+                          onClick={() => openEditTask(task)}
+                          className="bg-white border border-[#e9e9e7] rounded-xl p-3 cursor-pointer hover:border-[#d3d1d1] hover:shadow-sm transition-all group"
+                        >
+                          <div className="flex items-start gap-2">
+                            {/* Ícone status */}
+                            <div className="flex-shrink-0 mt-0.5">
+                              {isDone ? (
+                                <CheckCircle2 size={14} className="text-[#6366f1]" />
+                              ) : isCanceled ? (
+                                <X size={14} className="text-red-300" />
+                              ) : (
+                                <Circle size={14} className={task.status === 'doing' ? 'text-[#2383e2]' : 'text-slate-300'} />
+                              )}
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-xs font-medium leading-snug ${isDone || isCanceled ? 'line-through text-[#37352f]/35' : 'text-[#37352f]'}`}>
+                                {task.title}
+                              </p>
+                              {task.description && (
+                                <p className="text-[10px] text-[#37352f]/40 mt-0.5 line-clamp-2 leading-relaxed">
+                                  {task.description}
+                                </p>
+                              )}
+
+                              <div className="flex items-center gap-2 mt-1.5 opacity-50">
+                                {task.priority === 'high' && (
+                                  <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">Urgente</span>
+                                )}
+                                {task.priority === 'medium' && (
+                                  <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tighter">Média</span>
+                                )}
+                                
+                                {(task.priority === 'high' || task.priority === 'medium') && ((task.subtasks?.length ?? 0) > 0 || task.source === 'whatsapp') && (
+                                  <span className="text-[9px]">•</span>
+                                )}
+
+                                {task.subtasks && task.subtasks.length > 0 && (
+                                  <span className="text-[9px] font-bold tracking-tight">
+                                    {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
+                                  </span>
+                                )}
+
+                                {(task.subtasks && task.subtasks.length > 0) && task.source === 'whatsapp' && (
+                                  <span className="text-[9px]">•</span>
+                                )}
+
+                                {task.source === 'whatsapp' && (
+                                  <div className="flex items-center gap-0.5">
+                                    <svg viewBox="0 0 24 24" width="10" height="10" fill="#25D366">
+                                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                                    </svg>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )
+                    })
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Botão adicionar tarefa para esse dia */}
+              <div className="flex-shrink-0 p-3 border-t border-[#e9e9e7]">
+                <button
+                  onClick={() => openNewTask(selectedDay)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-[#37352f]/50 hover:text-[#37352f] hover:bg-white border border-dashed border-[#e9e9e7] hover:border-[#d3d1d1] transition-all"
+                >
+                  <Plus size={13} />
+                  Adicionar tarefa neste dia
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de criação/edição */}
+      <Modal 
+        isOpen={isModalOpen} 
+        onClose={() => { setIsModalOpen(false); setEditingTask(null); setNewTaskDate(null) }}
+        title={editingTask ? 'Editar Tarefa' : 'Nova Tarefa'}
+        hideScrollbar={true}
+      >
+        <TaskForm
+          onSubmit={handleAddTask}
+          onCancel={() => { setIsModalOpen(false); setEditingTask(null); setNewTaskDate(null) }}
+          initialData={editingTask || (newTaskDate ? { dueDate: newTaskDate } as any : undefined)}
+          isEditing={!!editingTask}
+        />
+      </Modal>
+    </div>
+  )
+}
