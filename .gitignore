@@ -28,3 +28,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Frontend files
+src/
+index.html
+vite.config.ts
+tsconfig.json
+tailwind.config.js
+postcss.config.js
+public/
+INSTRUCOES_STRIPE.md
+restore_tasks.py
