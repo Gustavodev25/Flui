@@ -1496,17 +1496,20 @@ async function checkTaskTimers() {
   }
 }
 
-setInterval(checkTaskTimers, 60_000); // verifica a cada 1 minuto
-setTimeout(checkTaskTimers, 5_000);   // roda logo ao iniciar
+// Em ambiente não-serverless (local), faz listen e inicia timers
+if (!process.env.VERCEL) {
+  setInterval(checkTaskTimers, 60_000);
+  setTimeout(checkTaskTimers, 5_000);
 
-// ================== FRONTEND (SPA) ==================
-const distPath = path.join(__dirname, 'dist');
-app.use(express.static(distPath));
+  // Serve o frontend React em modo local
+  const distPath = path.join(__dirname, 'dist');
+  app.use(express.static(distPath));
+  app.get(/^(?!\/api).*/, (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
 
-// Catch-all: qualquer rota não-API serve o index.html do React
-app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
-});
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => console.log(`🚀 Rodando na porta ${PORT}`));
+}
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🚀 Rodando na porta ${PORT}`));
+export default app;
