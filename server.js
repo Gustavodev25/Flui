@@ -41,23 +41,20 @@ dotenv.config();
 
 const app = express();
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, ngrok-skip-browser-warning');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Permite qualquer origem (incluindo flui.ia.br) — reflete o origin de volta
+    callback(null, origin || '*');
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning', 'stripe-signature'],
+  optionsSuccessStatus: 200,
+};
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
-});
+// Responde preflight OPTIONS para TODAS as rotas antes de qualquer outra coisa
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
 
 // Webhook do Stripe precisa do body RAW — deve ficar ANTES do express.json()
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
