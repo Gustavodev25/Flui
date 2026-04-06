@@ -839,8 +839,10 @@ export async function queryEngineLoop(
               result._hint?.includes('não encontrada')
             ) {
               console.log(`[AutoRecover] ID inválido em ${toolCall.function.name} — buscando por título...`);
-              const searchResult = await executeTool('TaskSearch', { query: userMessage.substring(0, 120) }, { userId });
-              const found = searchResult.tasks?.[0];
+              // Extrai palavras-chave relevantes (remove stopwords curtas e limita tamanho)
+              const searchQuery = userMessage.substring(0, 120).replace(/[,()!?]/g, ' ').replace(/\s+/g, ' ').trim();
+              const searchResult = await executeTool('TaskSearch', { query: searchQuery }, { userId });
+              const found = searchResult.tasks_raw?.[0];
               if (found?.id) {
                 args.task_id = found.id;
                 console.log(`[AutoRecover] Retentando ${toolCall.function.name} com ID real: ${found.id}`);

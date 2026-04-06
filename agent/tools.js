@@ -811,11 +811,14 @@ async function executeTaskSearch(args, userId) {
   const parsed = taskSearchSchema.parse(args);
   const limit = parsed.limit || 10;
 
+  // Sanitiza a query: remove caracteres que quebram o filtro .or() do PostgREST
+  const sanitized = parsed.query.replace(/[,()]/g, ' ').replace(/\s+/g, ' ').trim();
+
   const { data, error } = await supabase
     .from('tasks')
     .select('id, title, description, status, priority, due_date, tags')
     .eq('user_id', userId)
-    .or(`title.ilike.%${parsed.query}%,description.ilike.%${parsed.query}%`)
+    .or(`title.ilike.%${sanitized}%,description.ilike.%${sanitized}%`)
     .order('created_at', { ascending: false })
     .limit(limit);
 

@@ -40,7 +40,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
 
 const app = express();
-app.use(cors());
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, ngrok-skip-browser-warning');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
 
 // Webhook do Stripe precisa do body RAW — deve ficar ANTES do express.json()
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
@@ -145,6 +162,7 @@ requireEnv('NVIDIA_API_KEY'); // validação na inicialização; consumido pelo 
 const WHATSAPP_ACCESS_TOKEN = requireEnv('WHATSAPP_ACCESS_TOKEN');
 const WHATSAPP_PHONE_NUMBER_ID = requireEnv('WHATSAPP_PHONE_NUMBER_ID');
 const WHATSAPP_VERIFY_TOKEN = requireEnv('WHATSAPP_VERIFY_TOKEN');
+console.log(`[ENV Check] PHONE_ID=${WHATSAPP_PHONE_NUMBER_ID} | TOKEN=...${WHATSAPP_ACCESS_TOKEN.slice(-10)}`);
 const SUPABASE_URL = requireEnv('VITE_SUPABASE_URL');
 const SUPABASE_KEY = requireEnv('VITE_SUPABASE_ANON_KEY');
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_KEY;
@@ -154,6 +172,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const VITE_API_URL = process.env.VITE_API_URL || '';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://flui.ia.br';
 const nimClient = new OpenAI({
   apiKey: process.env.NVIDIA_API_KEY,
   baseURL: 'https://integrate.api.nvidia.com/v1',
@@ -314,7 +333,10 @@ async function sendWhatsAppPayload(to, payload) {
     });
 
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message);
+    if (!response.ok) {
+      console.error('[WhatsApp Debug]', JSON.stringify({ to: to.replace(/\D/g, ''), phoneNumberId: WHATSAPP_PHONE_NUMBER_ID, status: response.status, error: data.error }));
+      throw new Error(data.error?.message);
+    }
 
     return {
       success: true,
@@ -765,13 +787,13 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
       customer_email: userEmail,
       line_items: [
         {
-          price: 'price_1THQn8QqeThKqtb64x84nVD6',
+          price: 'price_1TJFEGJBeIyj93UbSOp5yZuY',
           quantity: 1,
         },
       ],
       mode: 'subscription',
-      success_url: `${VITE_API_URL.replace('/api', '')}/subscription?success=true`,
-      cancel_url: `${VITE_API_URL.replace('/api', '')}/subscription?canceled=true`,
+      success_url: `${FRONTEND_URL}/subscription?success=true`,
+      cancel_url: `${FRONTEND_URL}/subscription?canceled=true`,
       metadata: {
         userId: userId,
       },
@@ -800,7 +822,7 @@ app.post('/api/stripe/create-portal-session', async (req, res) => {
 
     const session = await stripe.billingPortal.sessions.create({
       customer: sub.stripe_customer_id,
-      return_url: `${VITE_API_URL.replace('/api', '')}/dashboard`,
+      return_url: `${FRONTEND_URL}/dashboard`,
     });
 
     res.json({ url: session.url });
