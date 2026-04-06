@@ -52,8 +52,7 @@ const corsOptions = {
   optionsSuccessStatus: 200,
 };
 
-// Responde preflight OPTIONS para TODAS as rotas antes de qualquer outra coisa
-app.options('*', cors(corsOptions));
+// cors() com preflightContinue: false (padrão) já responde OPTIONS automaticamente
 app.use(cors(corsOptions));
 
 // Webhook do Stripe precisa do body RAW — deve ficar ANTES do express.json()
