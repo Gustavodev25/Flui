@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, Loader2 } from 'lucide-react'
 import flowLogo from '../assets/logo/flow.png'
@@ -6,7 +6,6 @@ import gratisLogo from '../assets/logo/gratis.png'
 import { useAuth } from '../contexts/AuthContext'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { useEffect } from 'react'
 import { apiFetch } from '../lib/api'
 
 const CheckoutPreview: React.FC = () => {
@@ -92,12 +91,12 @@ const CheckoutPreview: React.FC = () => {
                 </div>
                 <div className="text-left">
                   <h2 className="text-lg font-bold text-[#37352f]">Flow</h2>
-                  <p className="text-[10px] font-bold text-[#37352f]/40 tracking-widest">Assinatura Mensal</p>
+                  <p className="text-[10px] font-bold text-[#37352f]/40 tracking-widest">ASSINATURA MENSAL</p>
                 </div>
               </div>
               <div className="text-right">
                 <p className="text-xl font-black text-[#37352f]">R$ 9,90</p>
-                <p className="text-[9px] font-bold text-[#37352f]/30 tracking-widest">Mensal</p>
+                <p className="text-[9px] font-bold text-[#37352f]/30 tracking-widest uppercase">Mensal</p>
               </div>
             </div>
             <hr className="-mx-6 border-t border-[#f1f1f0]" />

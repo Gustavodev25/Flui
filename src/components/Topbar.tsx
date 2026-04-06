@@ -111,8 +111,11 @@ export const Topbar: React.FC = () => {
       </motion.div>
 
       {/* Direita: Ações e Perfil */}
-      <div className="flex items-center gap-3 flex-1 lg:flex-none justify-end">
-        {isCalendarPage && <FeedbackWidget variant="topbar" />}
+      <div className="flex items-center gap-2 sm:gap-3 flex-1 lg:flex-none justify-end">
+        {/* Desktop: mostra no calendário apenas */}
+        {isCalendarPage && <div className="hidden lg:block"><FeedbackWidget variant="topbar" /></div>}
+        {/* Mobile: mostra em todas as páginas */}
+        <div className="lg:hidden"><FeedbackWidget variant="topbar" /></div>
         <div className="relative" ref={profileRef}>
           <div 
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}

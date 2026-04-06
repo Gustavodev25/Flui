@@ -39,7 +39,17 @@ export function buildApiUrl(path: string, query?: Record<string, string | number
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit, query?: Record<string, string | number | boolean | undefined | null>): Promise<T> {
-  const response = await fetch(buildApiUrl(path, query), init)
+  const finalInit = { ...init }
+  const headers = new Headers(finalInit.headers || {})
+  
+  // Se for ngrok, adiciona o header para pular a tela de aviso
+  if (API_BASE_URL.includes('ngrok-free.dev')) {
+    headers.set('ngrok-skip-browser-warning', 'true')
+  }
+  
+  finalInit.headers = headers
+
+  const response = await fetch(buildApiUrl(path, query), finalInit)
   const isJson = response.headers.get('content-type')?.includes('application/json')
   const payload = isJson ? await response.json() : null
 

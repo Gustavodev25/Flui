@@ -34,6 +34,7 @@ const MONTHS_PT = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ]
 const DAYS_PT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+const DAYS_PT_SHORT = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
 
 const STATUS_CONFIG = {
   todo:     { label: 'A Fazer',      dot: 'bg-slate-400',  bar: 'bg-slate-100 border-slate-200',  text: 'text-slate-600' },
@@ -260,15 +261,15 @@ export default function CalendarPage() {
   const monthStats = stats
 
   return (
-    <div className="flex h-full min-h-0 overflow-hidden bg-white">
+    <div className="flex h-full min-h-0 overflow-hidden bg-white relative">
       {/* Área principal do calendário */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header */}
-        <div className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-[#e9e9e7]">
-          <div className="flex items-center justify-between gap-4">
+        <div className="flex-shrink-0 px-3 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4 border-b border-[#e9e9e7]">
+          <div className="flex items-center justify-between gap-2 sm:gap-4">
             {/* Título + navegação */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1 bg-[#f7f7f5] rounded-lg p-0.5 border border-[#e9e9e7]">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="flex items-center gap-1 bg-[#f7f7f5] rounded-lg p-0.5 border border-[#e9e9e7] flex-shrink-0">
                 <button
                   onClick={handlePrevMonth}
                   className="p-1.5 rounded-md hover:bg-white transition-colors text-[#37352f]/50 hover:text-[#37352f]"
@@ -290,25 +291,26 @@ export default function CalendarPage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 8 }}
                   transition={{ duration: 0.18 }}
-                  className="text-xl font-bold text-[#37352f] tracking-tight"
+                  className="text-base sm:text-xl font-bold text-[#37352f] tracking-tight truncate"
                 >
-                  {MONTHS_PT[month]}{' '}
+                  <span className="sm:hidden">{MONTHS_PT[month].slice(0, 3)}</span>
+                  <span className="hidden sm:inline">{MONTHS_PT[month]}</span>{' '}
                   <span className="font-normal text-[#37352f]/40">{year}</span>
                 </motion.h1>
               </AnimatePresence>
 
               <button
                 onClick={handleToday}
-                className="px-3 py-1.5 text-xs font-semibold text-[#37352f]/60 hover:text-[#37352f] bg-[#f7f7f5] hover:bg-[#e9e9e7] border border-[#e9e9e7] rounded-lg transition-colors"
+                className="px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-semibold text-[#37352f]/60 hover:text-[#37352f] bg-[#f7f7f5] hover:bg-[#e9e9e7] border border-[#e9e9e7] rounded-lg transition-colors flex-shrink-0"
               >
                 Hoje
               </button>
             </div>
 
             {/* Stats do mês + botão novo */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
               {!loading && monthStats.total > 0 && (
-                <div className="hidden sm:flex items-center gap-2">
+                <div className="hidden lg:flex items-center gap-2">
                   {monthStats.doing > 0 && (
                     <span className="flex items-center gap-1 text-[11px] font-medium text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full">
                       <span className="w-1.5 h-1.5 rounded-full bg-[#2383e2]" />
@@ -329,10 +331,11 @@ export default function CalendarPage() {
 
               <button
                 onClick={() => openNewTask()}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#37352f] hover:bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-[#37352f] hover:bg-[#1a1a1a] text-white text-[11px] sm:text-xs font-semibold rounded-lg transition-colors"
               >
                 <Plus size={13} />
-                Nova tarefa
+                <span className="hidden sm:inline">Nova tarefa</span>
+                <span className="sm:hidden">Nova</span>
               </button>
             </div>
           </div>
@@ -342,9 +345,10 @@ export default function CalendarPage() {
         <div className="flex-1 overflow-auto custom-scrollbar">
           {/* Dias da semana */}
           <div className="grid grid-cols-7 border-b border-[#e9e9e7] bg-[#f7f7f5]/50 sticky top-0 z-10">
-            {DAYS_PT.map(d => (
-              <div key={d} className="py-2 text-center text-[11px] font-semibold text-[#37352f]/40 tracking-wider uppercase">
-                {d}
+            {DAYS_PT.map((d, i) => (
+              <div key={d} className="py-1.5 sm:py-2 text-center text-[10px] sm:text-[11px] font-semibold text-[#37352f]/40 tracking-wider uppercase">
+                <span className="sm:hidden">{DAYS_PT_SHORT[i]}</span>
+                <span className="hidden sm:inline">{d}</span>
               </div>
             ))}
           </div>
@@ -375,15 +379,15 @@ export default function CalendarPage() {
                       else if (dm === 'next') handleNextMonth()
                     }}
                     whileTap={{ scale: 0.98 }}
-                    className={`min-h-[96px] p-1.5 border-b border-r border-[#e9e9e7] cursor-pointer transition-colors relative group
+                    className={`min-h-[52px] sm:min-h-[96px] p-1 sm:p-1.5 border-b border-r border-[#e9e9e7] cursor-pointer transition-colors relative group
                       ${isSelected ? 'bg-[#37352f]/[0.04]' : 'hover:bg-[#f7f7f5]'}
                       ${!isCurrentMonth ? 'bg-[#fafaf9]' : ''}
                     `}
                   >
                     {/* Número do dia */}
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center justify-between mb-0.5 sm:mb-1">
                       <span
-                        className={`w-6 h-6 flex items-center justify-center text-xs font-semibold rounded-full transition-colors
+                        className={`w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center text-[10px] sm:text-xs font-semibold rounded-full transition-colors
                           ${isToday ? 'bg-[#37352f] text-white' : ''}
                           ${isSelected && !isToday ? 'bg-[#37352f] text-white' : ''}
                           ${!isToday && !isSelected ? (isCurrentMonth ? 'text-[#37352f]' : 'text-[#37352f]/25') : ''}
@@ -395,7 +399,7 @@ export default function CalendarPage() {
                       {isCurrentMonth && (
                         <button
                           onClick={(e) => { e.stopPropagation(); setSelectedDay(key); openNewTask(key) }}
-                          className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded text-[#37352f]/30 hover:text-[#37352f] hover:bg-[#e9e9e7] transition-all"
+                          className="opacity-0 group-hover:opacity-100 w-5 h-5 hidden sm:flex items-center justify-center rounded text-[#37352f]/30 hover:text-[#37352f] hover:bg-[#e9e9e7] transition-all"
                         >
                           <Plus size={11} />
                         </button>
@@ -403,26 +407,42 @@ export default function CalendarPage() {
                     </div>
 
                     {/* Tarefas do dia */}
+                    {/* Tarefas do dia - Mobile: apenas dots, Desktop: nomes */}
                     <div className="space-y-0.5">
-                      {visible.map(task => {
-                        const cfg = STATUS_CONFIG[task.status]
-                        return (
-                          <div
-                            key={task.id}
-                            onClick={(e) => { e.stopPropagation(); setSelectedDay(key); openEditTask(task) }}
-                            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border truncate cursor-pointer hover:opacity-80 transition-opacity ${cfg.bar} ${cfg.text}`}
-                            title={task.title}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
-                            <span className="truncate">{task.title}</span>
+                      {/* Mobile: mostrar dots coloridos */}
+                      <div className="flex flex-wrap gap-0.5 sm:hidden">
+                        {dayTasks.slice(0, 4).map(task => {
+                          const cfg = STATUS_CONFIG[task.status]
+                          return (
+                            <span key={task.id} className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
+                          )
+                        })}
+                        {dayTasks.length > 4 && (
+                          <span className="text-[8px] font-bold text-[#37352f]/30">+{dayTasks.length - 4}</span>
+                        )}
+                      </div>
+                      {/* Desktop: mostrar nomes */}
+                      <div className="hidden sm:block space-y-0.5">
+                        {visible.map(task => {
+                          const cfg = STATUS_CONFIG[task.status]
+                          return (
+                            <div
+                              key={task.id}
+                              onClick={(e) => { e.stopPropagation(); setSelectedDay(key); openEditTask(task) }}
+                              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border truncate cursor-pointer hover:opacity-80 transition-opacity ${cfg.bar} ${cfg.text}`}
+                              title={task.title}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
+                              <span className="truncate">{task.title}</span>
+                            </div>
+                          )
+                        })}
+                        {overflow > 0 && (
+                          <div className="px-1.5 text-[9px] font-semibold text-[#37352f]/40">
+                            +{overflow} mais
                           </div>
-                        )
-                      })}
-                      {overflow > 0 && (
-                        <div className="px-1.5 text-[9px] font-semibold text-[#37352f]/40">
-                          +{overflow} mais
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </motion.div>
                 )
@@ -433,15 +453,16 @@ export default function CalendarPage() {
       </div>
 
       {/* Painel lateral - tarefas do dia selecionado */}
+      {/* Painel lateral - Desktop: sidebar fixa */}
       <AnimatePresence>
         {selectedDay && (
           <motion.div
-            key="side-panel"
+            key="side-panel-desktop"
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 300, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="flex-shrink-0 border-l border-[#e9e9e7] bg-[#f7f7f5] overflow-hidden"
+            className="hidden md:block flex-shrink-0 border-l border-[#e9e9e7] bg-[#f7f7f5] overflow-hidden"
           >
             <div className="w-[300px] h-full flex flex-col overflow-hidden">
               {/* Header do painel */}
@@ -509,7 +530,6 @@ export default function CalendarPage() {
                           className="bg-white border border-[#e9e9e7] rounded-xl p-3 cursor-pointer hover:border-[#d3d1d1] hover:shadow-sm transition-all group"
                         >
                           <div className="flex items-start gap-2">
-                            {/* Ícone status */}
                             <div className="flex-shrink-0 mt-0.5">
                               {isDone ? (
                                 <CheckCircle2 size={14} className="text-[#6366f1]" />
@@ -581,6 +601,153 @@ export default function CalendarPage() {
               </div>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Painel lateral - Mobile: bottom sheet overlay */}
+      <AnimatePresence>
+        {selectedDay && (
+          <>
+            {/* Backdrop mobile */}
+            <motion.div
+              key="mobile-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedDay(null)}
+              className="md:hidden fixed inset-0 bg-black/20 backdrop-blur-[1px] z-50"
+            />
+            <motion.div
+              key="side-panel-mobile"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+              className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#f7f7f5] rounded-t-2xl shadow-2xl max-h-[70vh] flex flex-col overflow-hidden"
+            >
+              {/* Handle bar */}
+              <div className="flex justify-center pt-2 pb-1 flex-shrink-0">
+                <div className="w-8 h-1 bg-[#37352f]/10 rounded-full" />
+              </div>
+
+              {/* Header do painel */}
+              <div className="flex-shrink-0 px-4 pt-2 pb-3 border-b border-[#e9e9e7]">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-[#37352f]/40 uppercase tracking-wider mb-0.5">
+                      {selectedDay === today ? 'Hoje' : ''}
+                    </p>
+                    <h2 className="text-sm font-bold text-[#37352f] leading-snug">
+                      {formatSelectedDate(selectedDay)}
+                    </h2>
+                  </div>
+                  <button
+                    onClick={() => setSelectedDay(null)}
+                    className="p-1.5 rounded-md hover:bg-[#e9e9e7] text-[#37352f]/30 hover:text-[#37352f] transition-colors flex-shrink-0"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                {selectedTasks.length > 0 && (
+                  <div className="flex gap-2 mt-2 flex-wrap">
+                    {(['todo', 'doing', 'done', 'canceled'] as const).map(s => {
+                      const count = selectedTasks.filter(t => t.status === s).length
+                      if (!count) return null
+                      return (
+                        <span key={s} className={`flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${STATUS_CONFIG[s].bar} ${STATUS_CONFIG[s].text}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${STATUS_CONFIG[s].dot}`} />
+                          {count}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Lista de tarefas */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                <AnimatePresence initial={false}>
+                  {selectedTasks.length === 0 ? (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="flex flex-col items-center justify-center py-8 text-center gap-2"
+                    >
+                      <CalendarIcon size={28} className="text-[#37352f]/15" />
+                      <p className="text-xs text-[#37352f]/35 font-medium">Nenhuma tarefa</p>
+                      <p className="text-[10px] text-[#37352f]/25">neste dia</p>
+                    </motion.div>
+                  ) : (
+                    selectedTasks.map((task, i) => {
+                      const isDone = task.status === 'done'
+                      const isCanceled = task.status === 'canceled'
+
+                      return (
+                        <motion.div
+                          key={task.id}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -8 }}
+                          transition={{ delay: i * 0.04 }}
+                          onClick={() => openEditTask(task)}
+                          className="bg-white border border-[#e9e9e7] rounded-xl p-3 cursor-pointer hover:border-[#d3d1d1] hover:shadow-sm transition-all"
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className="flex-shrink-0 mt-0.5">
+                              {isDone ? (
+                                <CheckCircle2 size={14} className="text-[#6366f1]" />
+                              ) : isCanceled ? (
+                                <X size={14} className="text-red-300" />
+                              ) : (
+                                <Circle size={14} className={task.status === 'doing' ? 'text-[#2383e2]' : 'text-slate-300'} />
+                              )}
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-xs font-medium leading-snug ${isDone || isCanceled ? 'line-through text-[#37352f]/35' : 'text-[#37352f]'}`}>
+                                {task.title}
+                              </p>
+                              {task.description && (
+                                <p className="text-[10px] text-[#37352f]/40 mt-0.5 line-clamp-2 leading-relaxed">
+                                  {task.description}
+                                </p>
+                              )}
+
+                              <div className="flex items-center gap-2 mt-1.5 opacity-50">
+                                {task.priority === 'high' && (
+                                  <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">Urgente</span>
+                                )}
+                                {task.priority === 'medium' && (
+                                  <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tighter">Média</span>
+                                )}
+                                {task.subtasks && task.subtasks.length > 0 && (
+                                  <span className="text-[9px] font-bold tracking-tight">
+                                    {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )
+                    })
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Botão adicionar */}
+              <div className="flex-shrink-0 p-3 pb-5 border-t border-[#e9e9e7]">
+                <button
+                  onClick={() => openNewTask(selectedDay)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold text-[#37352f]/50 hover:text-[#37352f] hover:bg-white border border-dashed border-[#e9e9e7] hover:border-[#d3d1d1] transition-all"
+                >
+                  <Plus size={13} />
+                  Adicionar tarefa neste dia
+                </button>
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
 

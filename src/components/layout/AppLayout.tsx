@@ -43,7 +43,10 @@ export const AppLayout: React.FC = () => {
         </div>
         <FinlozBottomLogo />
       </main>
-      {!isCalendarPage && <FeedbackWidget />}
+      {/* Feedback flutuante: escondido no mobile, aparece dentro do Topbar */}
+      <div className="hidden lg:block">
+        {!isCalendarPage && <FeedbackWidget />}
+      </div>
     </div>
   )
 }

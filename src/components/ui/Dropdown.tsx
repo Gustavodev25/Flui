@@ -60,7 +60,7 @@ interface DropdownItemProps {
 export const DropdownItem: React.FC<DropdownItemProps> = ({ icon, label, onClick, variant = 'default' }) => {
   return (
     <button
-      onClick={onClick}
+      onClick={(e) => { e.stopPropagation(); onClick?.() }}
       className={`w-full flex items-center gap-2 px-3 py-2 text-[12.5px] font-medium rounded-[8px] transition-all text-left ${variant === 'danger'
         ? 'text-[#eb5757] hover:bg-[#eb5757]/[0.05]'
         : 'text-[#37352f] hover:bg-[#000000]/[0.02]'

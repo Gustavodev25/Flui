@@ -125,18 +125,18 @@ export const FeedbackWidget = ({ variant = 'floating' }: FeedbackWidgetProps) =>
       ) : (
         <button
           onClick={handleOpen}
-          className="flex items-center justify-center px-4 py-2 rounded-full bg-[#f8f8f7] border border-[#e9e9e7] hover:bg-[#efefed] transition-all group active:scale-95 shadow-sm overflow-hidden"
-          style={{ minWidth: '180px' }}
+          className="flex items-center justify-center px-2.5 py-1 sm:px-4 sm:py-2 rounded-full bg-[#f8f8f7] border border-[#e9e9e7] hover:bg-[#efefed] transition-all group active:scale-95 shadow-sm overflow-hidden"
+          style={{ maxWidth: '160px' }}
         >
           <div className="flex items-center justify-center overflow-hidden w-full">
             <AnimatePresence mode="wait">
               <motion.span
                 key={phraseIndex}
-                className="relative inline-flex flex-wrap overflow-hidden"
-                style={{ display: 'inline-flex', flexWrap: 'wrap' }}
+                className="relative inline-flex overflow-hidden whitespace-nowrap"
+                style={{ display: 'inline-flex' }}
               >
                 {/* Camada base - texto escuro */}
-                <span className="text-[#37352f]/60 group-hover:text-[#37352f] flex flex-wrap text-[11px] font-bold tracking-tight uppercase leading-none">
+                <span className="text-[#37352f]/60 group-hover:text-[#37352f] flex text-[9px] sm:text-[11px] font-bold tracking-tight uppercase leading-none whitespace-nowrap">
                   {phrase.split('').map((char, i) => (
                     <motion.span
                       key={i}

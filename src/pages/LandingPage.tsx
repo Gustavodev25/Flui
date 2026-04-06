@@ -1,16 +1,29 @@
-import React from 'react'
-import { motion } from 'framer-motion'
-
+import React, { useEffect, useState, useRef } from 'react'
+import { motion, useInView } from 'framer-motion'
+import NumberFlow from '@number-flow/react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { useEffect } from 'react'
 import logo from '../assets/logo/logo.png'
+import finloz from '../assets/logo/finloz.png'
 import flowIcon from '../assets/logo/flow.png'
 import gratisIcon from '../assets/logo/gratis.png'
+import DeepSeekLandingChat from '../components/DeepSeekLandingChat'
 
 const LandingPage: React.FC = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const [price, setPrice] = useState(0)
+  const priceRef = useRef(null)
+  const isPriceInView = useInView(priceRef, { once: true, amount: 0.5 })
+
+  useEffect(() => {
+    if (isPriceInView) {
+      const timer = setTimeout(() => {
+        setPrice(9.90)
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+  }, [isPriceInView])
 
   useEffect(() => {
     // Se o usuário já estiver logado e cair na Landing Page, joga ele pro dashboard/checkout
@@ -29,21 +42,21 @@ const LandingPage: React.FC = () => {
       {/* Background Grid Moderno com Mockups Transparentes */}
       <div className="absolute top-0 left-0 w-full h-[1000px] pointer-events-none z-0 overflow-hidden">
         <div className="absolute inset-0"
-          style={{ 
+          style={{
             backgroundImage: `
               linear-gradient(to right, rgba(55, 53, 47, 0.05) 1px, transparent 1px),
               linear-gradient(to bottom, rgba(55, 53, 47, 0.05) 1px, transparent 1px)
-            `, 
+            `,
             backgroundSize: '40px 40px',
             maskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)',
             WebkitMaskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)'
-          }} 
+          }}
         />
 
         {/* Mockup Fragments Floating in Background */}
         <div className="absolute inset-0 opacity-[0.05] select-none">
           {/* Calendar Grid Fragment - Top Left */}
-          <motion.div 
+          <motion.div
             animate={{ x: [0, 15, 0], y: [0, 20, 0], rotate: [-2, 2, -2] }}
             transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }}
             className="absolute top-[5%] left-[-5%] w-72 h-64 bg-[#37352f]/5 border border-[#37352f]/10 rounded-3xl p-4 flex flex-col gap-3"
@@ -62,7 +75,7 @@ const LandingPage: React.FC = () => {
           </motion.div>
 
           {/* Task Detail Card - Middle Right */}
-          <motion.div 
+          <motion.div
             animate={{ x: [0, -20, 0], y: [0, -10, 0], rotate: [5, 8, 5] }}
             transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
             className="absolute top-[35%] right-[-8%] w-80 h-48 bg-[#37352f]/5 border border-[#37352f]/10 rounded-2xl p-6 flex flex-col gap-4"
@@ -82,7 +95,7 @@ const LandingPage: React.FC = () => {
           </motion.div>
 
           {/* Stats Bar Table - Bottom Center-ish */}
-          <motion.div 
+          <motion.div
             animate={{ y: [0, 25, 0], x: [0, -10, 0] }}
             transition={{ duration: 25, repeat: Infinity, ease: "easeInOut" }}
             className="absolute bottom-[10%] left-[30%] w-[500px] h-32 bg-[#37352f]/5 border border-[#37352f]/10 rounded-t-3xl p-6 flex flex-col gap-4"
@@ -101,7 +114,7 @@ const LandingPage: React.FC = () => {
           </motion.div>
 
           {/* Icon Pattern - Bottom Right */}
-          <motion.div 
+          <motion.div
             animate={{ rotate: [15, 20, 15], scale: [1, 1.1, 1] }}
             transition={{ duration: 12, repeat: Infinity }}
             className="absolute bottom-[-5%] right-[5%] grid grid-cols-3 gap-8 opacity-[0.4]"
@@ -391,7 +404,7 @@ const LandingPage: React.FC = () => {
             </div>
 
             <div className="absolute -bottom-4 left-0 w-full px-6 pointer-events-none">
-              <motion.div 
+              <motion.div
                 animate={{ y: [0, -5, 0] }}
                 transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
                 className="w-full bg-white border border-[#e9e9e7] rounded-t-2xl shadow-xl shadow-black/5 overflow-hidden"
@@ -414,31 +427,31 @@ const LandingPage: React.FC = () => {
                   {['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map((d, i) => (
                     <div key={i} className="text-[7px] font-bold text-[#37352f]/20 text-center mb-1">{d}</div>
                   ))}
-                  
+
                   {/* Calendar Days Cells */}
                   {Array.from({ length: 28 }).map((_, i) => {
                     const day = i + 1;
                     const hasTask = [3, 8, 12, 19, 21].includes(day);
                     const isToday = day === 12;
-                    
+
                     return (
-                      <div 
-                        key={i} 
+                      <div
+                        key={i}
                         className={`aspect-square rounded-md border flex flex-col items-center justify-start py-1 gap-1 relative ${isToday ? 'border-[#37352f] bg-[#f7f7f5]' : 'border-[#f1f1f0] bg-white'}`}
                       >
                         <span className={`text-[8px] font-bold ${isToday ? 'text-[#37352f]' : (day > 14 ? 'text-[#37352f]/10' : 'text-[#37352f]/30')}`}>{day}</span>
-                        
+
                         {hasTask && (
-                          <motion.div 
+                          <motion.div
                             initial={{ scaleX: 0 }}
                             whileInView={{ scaleX: 1 }}
                             transition={{ delay: 0.5 + (i * 0.05), duration: 0.5 }}
-                            className={`h-[3px] w-[70%] rounded-full ${day === 12 ? 'bg-[#2383e2]' : 'bg-[#37352f]/10'}`} 
+                            className={`h-[3px] w-[70%] rounded-full ${day === 12 ? 'bg-[#2383e2]' : 'bg-[#37352f]/10'}`}
                           />
                         )}
 
                         {day === 19 && (
-                          <motion.div 
+                          <motion.div
                             animate={{ opacity: [0.4, 1, 0.4] }}
                             transition={{ duration: 2, repeat: Infinity }}
                             className="absolute inset-0 bg-blue-50/40 rounded-md ring-1 ring-blue-500/20"
@@ -551,6 +564,24 @@ const LandingPage: React.FC = () => {
             <div className="absolute top-0 right-0 w-full h-full opacity-30 pointer-events-none"
               style={{ backgroundImage: 'radial-gradient(#e9e9e7 1px, transparent 1px)', backgroundSize: '16px 16px' }} />
 
+            {/* Logos Decorativas - Fora do texto */}
+            <motion.img 
+              src={logo} 
+              alt="Logo" 
+              className="absolute top-6 left-6 w-14 h-14 object-contain opacity-80"
+              initial={{ opacity: 0, y: -20, rotate: -12 }}
+              whileInView={{ opacity: 0.8, y: 0, rotate: -12 }}
+              transition={{ delay: 0.4, type: 'spring' }}
+            />
+            <motion.img 
+              src={finloz} 
+              alt="Finloz" 
+              className="absolute bottom-6 right-6 w-14 h-14 object-contain opacity-80"
+              initial={{ opacity: 0, y: 20, rotate: 12 }}
+              whileInView={{ opacity: 0.8, y: 0, rotate: 12 }}
+              transition={{ delay: 0.5, type: 'spring' }}
+            />
+
             <div className="relative z-10 text-center md:text-left mb-6 md:mb-0">
               <h3 className="text-2xl font-bold tracking-tight mb-2">Pronto para acelerar?</h3>
               <p className="text-[#37352f]/60 font-medium text-sm">Crie sua conta em segundos e experimente o futuro.</p>
@@ -572,6 +603,7 @@ const LandingPage: React.FC = () => {
             <p className="text-[#37352f]/60 font-medium">Comece grátis e evolua quando estiver pronto.</p>
           </div>
 
+
           <div className="w-full max-w-2xl grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
 
             {/* Card Gratuito */}
@@ -582,16 +614,16 @@ const LandingPage: React.FC = () => {
               transition={{ duration: 0.6, type: "spring", bounce: 0.3 }}
               className="w-full bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-8 relative overflow-hidden flex flex-col"
             >
-              <div className="flex justify-between items-end pb-6 relative z-10">
+              <div className="flex justify-between items-center pb-6 relative z-10">
                 <div className="flex items-center gap-3">
                   <div className="inline-flex items-center justify-center bg-[#f7f7f5] border border-[#e9e9e7] w-12 h-12 rounded-2xl shadow-sm shrink-0">
                     <img src={gratisIcon} alt="Gratuito" className="w-8 h-8 object-contain" />
                   </div>
                   <h3 className="text-2xl font-extrabold text-[#37352f]">Gratuito</h3>
                 </div>
-                <div className="text-right">
+                <div className="text-right flex flex-col items-end">
                   <span className="text-3xl font-black tracking-tight text-[#37352f]">R$ 0</span>
-                  <span className="block text-[10px] font-bold text-[#37352f]/40 tracking-widest mt-1">para sempre</span>
+                  <span className="text-[10px] font-bold text-[#37352f]/40 tracking-widest uppercase -mt-1">Para Sempre</span>
                 </div>
               </div>
               <hr className="-mx-8 border-t border-[#e9e9e7]" />
@@ -632,25 +664,43 @@ const LandingPage: React.FC = () => {
             </motion.div>
 
             {/* Card Flow */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 30 }}
-              whileInView={{ opacity: 1, scale: 1, y: 0 }}
-              viewport={{ once: true, margin: "-50px" }}
-              transition={{ duration: 0.7, type: "spring", bounce: 0.4, delay: 0.1 }}
-              className="w-full bg-[#fcfcfc] border border-[#e9e9e7] rounded-3xl p-8 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.05)] relative overflow-hidden flex flex-col"
-            >
+            <div className="relative flex flex-col">
+              <motion.div 
+                initial={{ opacity: 0, y: 10, x: '-50%' }}
+                whileInView={{ opacity: 1, y: 0, x: '-50%' }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.5, duration: 0.5 }}
+                className="absolute -top-3 left-1/2 z-20 bg-white border border-[#e9e9e7] px-4 py-1.5 rounded-full shadow-sm flex items-center whitespace-nowrap"
+              >
+                <span className="text-[10px] font-bold text-[#37352f]/60 tracking-tight">Garantia de reembolso em até 7 dias</span>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 30 }}
+                whileInView={{ opacity: 1, scale: 1, y: 0 }}
+                viewport={{ once: true, margin: "-50px" }}
+                transition={{ duration: 0.7, type: "spring", bounce: 0.4, delay: 0.1 }}
+                className="w-full h-full bg-[#fcfcfc] border border-[#e9e9e7] rounded-3xl p-8 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.05)] relative overflow-hidden flex flex-col"
+              >
               <div className="absolute -top-16 -right-16 w-32 h-32 bg-black/5 blur-3xl rounded-full" />
 
-              <div className="flex justify-between items-end pb-6 relative z-10">
+              <div className="flex justify-between items-center pb-6 relative z-10">
                 <div className="flex items-center gap-3">
                   <div className="inline-flex items-center justify-center bg-[#f7f7f5] border border-[#e9e9e7] w-12 h-12 rounded-2xl shadow-sm shrink-0">
                     <img src={flowIcon} alt="Flow" className="w-8 h-8 object-contain" />
                   </div>
                   <h3 className="text-2xl font-extrabold text-[#37352f]">Flow</h3>
                 </div>
-                <div className="text-right">
-                  <span className="text-3xl font-black tracking-tight text-[#37352f]">R$ 9,90</span>
-                  <span className="block text-[10px] font-bold text-[#37352f]/40 tracking-widest mt-1">/ mensal</span>
+                <div ref={priceRef} className="text-right flex flex-col items-end">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-3xl font-black tracking-tight text-[#37352f]">R$</span>
+                    <NumberFlow
+                      value={price}
+                      format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}
+                      className="text-3xl font-black tracking-tight text-[#37352f]"
+                    />
+                  </div>
+                  <span className="text-[10px] font-bold text-[#37352f]/40 tracking-widest uppercase -mt-1">/ mês</span>
                 </div>
               </div>
               <hr className="-mx-8 border-t border-[#e9e9e7]" />
@@ -684,14 +734,15 @@ const LandingPage: React.FC = () => {
                 Cancele com um clique, quando quiser.
               </p>
 
-              <Link
-                to={user ? "/checkout-preview" : "/login"}
-                className="w-full py-3.5 bg-[#202020] text-white text-sm font-bold rounded-xl hover:bg-[#30302E] transition-all flex items-center justify-center gap-2 shadow-xl shadow-[#202020]/10 hover:shadow-[#202020]/20 transform hover:-translate-y-0.5 relative z-10"
-              >
+                <Link
+                  to={user ? "/checkout-preview" : "/login"}
+                  className="w-full py-3.5 bg-[#202020] text-white text-sm font-bold rounded-xl hover:bg-[#30302E] transition-all flex items-center justify-center gap-2 shadow-xl shadow-[#202020]/10 hover:shadow-[#202020]/20 transform hover:-translate-y-0.5 relative z-10"
+                >
                 Assinar agora
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
               </Link>
             </motion.div>
+          </div>
 
           </div>
         </div>
@@ -735,6 +786,7 @@ const LandingPage: React.FC = () => {
           <p className="text-xs font-medium text-[#37352f]/40">© {new Date().getFullYear()} Flui. Feito com extrema clareza.</p>
         </div>
       </footer>
+      <DeepSeekLandingChat />
     </div>
   )
 }

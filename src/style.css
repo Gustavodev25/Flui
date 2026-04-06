@@ -60,6 +60,33 @@ body {
   box-sizing: border-box;
 }
 
+/* Focus preto no lugar do azul padrão */
+*:focus {
+  outline-color: #37352f;
+}
+
+*:focus-visible {
+  outline: 2px solid #37352f;
+  outline-offset: -2px;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: #37352f !important;
+}
+
+/* Caret (cursor de texto) preto */
+input, textarea {
+  caret-color: #37352f;
+}
+
+/* Accent color para checkboxes, radios etc */
+:root {
+  accent-color: #37352f;
+}
+
 
 /* Utilitário para esconder a barra de rolagem mas manter a funcionalidade */
 .hide-scrollbar {

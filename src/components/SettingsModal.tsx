@@ -238,10 +238,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="relative bg-white w-full max-w-3xl h-[500px] rounded-2xl shadow-2xl flex overflow-hidden border border-[#e9e9e7]"
+            className="relative bg-white w-full max-w-3xl max-h-[85vh] sm:h-[500px] rounded-2xl shadow-2xl flex flex-col sm:flex-row overflow-hidden border border-[#e9e9e7]"
           >
             {/* Sidebar */}
-            <div className="w-[240px] border-r border-[#e9e9e7] bg-[#fcfcfa] flex flex-col">
+            {/* Sidebar Desktop */}
+            <div className="hidden sm:flex w-[240px] border-r border-[#e9e9e7] bg-[#fcfcfa] flex-col flex-shrink-0">
               <div className="p-6 pb-4 border-b border-[#e9e9e7]/50">
                 <h2 className="text-lg font-bold text-[#37352f]">Configurações</h2>
               </div>
@@ -261,16 +262,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
               </nav>
             </div>
 
-            {/* Content */}
-            <div className="flex-1 bg-white relative">
+            {/* Tabs Mobile */}
+            <div className="flex sm:hidden items-center border-b border-[#e9e9e7] bg-[#fcfcfa] flex-shrink-0">
+              <div className="flex items-center gap-1 px-4 py-3 flex-1">
+                <h2 className="text-base font-bold text-[#37352f] mr-4">Configurações</h2>
+                <button
+                  onClick={() => setActiveTab('profile')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-colors ${activeTab === 'profile' ? 'bg-[#e9e9e7] text-[#37352f]' : 'text-[#37352f]/50'}`}
+                >
+                  <User size={15} /> Perfil
+                </button>
+                <button
+                  onClick={() => setActiveTab('subscription')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-colors ${activeTab === 'subscription' ? 'bg-[#e9e9e7] text-[#37352f]' : 'text-[#37352f]/50'}`}
+                >
+                  <CreditCard size={15} /> Assinatura
+                </button>
+              </div>
               <button
                 onClick={onClose}
-                className="absolute top-4 right-4 p-2.5 text-[#37352f]/40 hover:text-[#37352f] hover:bg-[#f7f7f5] rounded-xl transition-colors z-10"
+                className="p-2.5 mr-3 text-[#37352f]/40 hover:text-[#37352f] hover:bg-[#f7f7f5] rounded-xl transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 bg-white relative min-h-0">
+              <button
+                onClick={onClose}
+                className="absolute top-4 right-4 p-2.5 text-[#37352f]/40 hover:text-[#37352f] hover:bg-[#f7f7f5] rounded-xl transition-colors z-10 hidden sm:flex"
               >
                 <X size={20} />
               </button>
 
-              <div className="p-8 h-full overflow-y-auto [ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="p-5 sm:p-8 h-full overflow-y-auto [ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {activeTab === 'profile' && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
                     <div className="flex items-center justify-between pb-2">
@@ -283,7 +309,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                     </div>
 
                     {/* Profile Picture Section */}
-                    <div className="flex items-center gap-6 pb-2">
+                    <div className="flex flex-col sm:flex-row items-center sm:items-center gap-4 sm:gap-6 pb-2">
                       <div className="relative group flex-shrink-0">
                         <div
                           onClick={() => setIsAvatarModalOpen(true)}
@@ -318,14 +344,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                         </button>
                       </div>
 
-                      <div className="flex flex-col gap-1.5 min-w-0">
+                      <div className="flex flex-col gap-1.5 min-w-0 text-center sm:text-left">
                         <h4 className="text-xl font-bold text-[#37352f] leading-none truncate">{fullName}</h4>
                         <p className="text-sm text-[#37352f]/40 font-medium truncate">{user?.email}</p>
                       </div>
                     </div>
 
                     {/* Inputs Section */}
-                    <hr className="-mx-8 border-t border-[#e9e9e7]" />
+                    <hr className="-mx-5 sm:-mx-8 border-t border-[#e9e9e7]" />
                     <div className="grid grid-cols-1 gap-6">
                       <div className="space-y-2">
                         <div className="flex items-center justify-between px-1">
@@ -361,7 +387,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
 
                       {isGoogleUser && (
                         <div className="space-y-4 pt-4">
-                          <hr className="-mx-8 border-t border-[#e9e9e7]" />
+                          <hr className="-mx-5 sm:-mx-8 border-t border-[#e9e9e7]" />
                           <div className="space-y-1 px-1">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
@@ -558,8 +584,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                         {/* Card Ativar Flow */}
                       <div className="w-full border border-[#e9e9e7] rounded-3xl bg-[#fcfcfa] flex flex-col group transition-all duration-300 overflow-hidden">
                         {/* Seção Superior: Nome, Preço e Botão */}
-                        <div className="p-5 flex items-center justify-between">
-                          <div className="flex gap-4 items-center">
+                        <div className="p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
+                          <div className="flex gap-3 sm:gap-4 items-center">
                             <div className="w-10 h-10 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm flex-shrink-0">
                               <img src={flowLogo} alt="Flow" className="w-6 h-6 object-contain" />
                             </div>
@@ -568,9 +594,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-5">
-                            <div className="text-right">
-                              <div className="flex items-baseline justify-end gap-0.5">
+                          <div className="flex items-center gap-4 sm:gap-5 w-full sm:w-auto justify-between sm:justify-end">
+                            <div className="text-left sm:text-right">
+                              <div className="flex items-baseline gap-0.5">
                                 <span className="text-[9px] font-bold text-[#37352f]/30 uppercase">R$</span>
                                 <span className="text-xl font-black text-[#37352f] leading-none">9,90</span>
                               </div>
@@ -594,7 +620,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                         </div>
 
                         {/* Seção Inferior: Recursos (Com o mesmo fundo e divisor sutil) */}
-                        <div className="px-14 pb-5 pt-4 border-t border-[#37352f]/5 bg-[#37352f]/[0.02]">
+                        <div className="px-5 sm:px-14 pb-5 pt-4 border-t border-[#37352f]/5 bg-[#37352f]/[0.02]">
                           <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
                             {[
                               'Tarefas Ilimitadas',

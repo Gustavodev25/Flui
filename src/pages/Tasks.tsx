@@ -7,6 +7,7 @@ import Avvvatars from 'avvvatars-react'
 import { supabase } from '../lib/supabase'
 import Modal from '../components/ui/Modal'
 import TaskForm from '../components/TaskForm'
+import TaskDetailModal from '../components/TaskDetailModal'
 import { Dropdown, DropdownItem, DropdownDivider } from '../components/ui/Dropdown'
 import DeleteConfirmation from '../components/ui/DeleteConfirmation'
 import swingingDoodle from '../assets/doodles/SwingingDoodle.png'
@@ -130,7 +131,8 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
   onCancel?: () => void
   onToggleSubtask?: (taskId: string, subtaskId: string) => void
   onStopTimer?: (taskId: string) => void
-}>(({ task, isDragging, isOverlay, dragHandleProps, style, onEdit, onDelete, activeDropdownId, setActiveDropdownId, userEmail, isPending, pendingTarget, onConfirm, onCancel, onToggleSubtask, onStopTimer }, ref) => {
+  onCardClick?: (task: Task) => void
+}>(({ task, isDragging, isOverlay, dragHandleProps, style, onEdit, onDelete, activeDropdownId, setActiveDropdownId, userEmail, isPending, pendingTarget, onConfirm, onCancel, onToggleSubtask, onStopTimer, onCardClick }, ref) => {
 
   const [isSubtasksExpanded, setIsSubtasksExpanded] = useState(false)
 
@@ -200,7 +202,9 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
         className={`w-full transition-all duration-200 ${isOverlay ? 'z-50' : ''}`}
       >
         {/* 1. CARD PRINCIPAL */}
-        <div className={`relative z-10 p-4 rounded-2xl transition-all duration-200 ease-out ${cardStateClasses}`}>
+        <div
+          onClick={() => { if (!isDragging && !isOverlay && onCardClick) { onCardClick(task) } }}
+          className={`relative z-10 p-4 rounded-2xl transition-all duration-200 ease-out ${cardStateClasses}`}>
 
           {/* Overlay de confirmação de alteração */}
           {isPending && (
@@ -536,6 +540,7 @@ const SortableTaskCard: React.FC<{
   onCancel?: () => void
   onToggleSubtask?: (taskId: string, subtaskId: string) => void
   onStopTimer?: (taskId: string) => void
+  onCardClick?: (task: Task) => void
 }> = (props) => {
   const {
     attributes,
@@ -569,6 +574,7 @@ const SortableTaskCard: React.FC<{
         onCancel={props.onCancel}
         onToggleSubtask={props.onToggleSubtask}
         onStopTimer={props.onStopTimer}
+        onCardClick={props.onCardClick}
       />
     </div>
   )
@@ -604,7 +610,9 @@ const Tasks: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null)
   const [pendingStatusTask, setPendingStatusTask] = useState<{ id: string; originalStatus: Task['status']; targetStatus: Task['status'] } | null>(null)
+  const [detailTask, setDetailTask] = useState<Task | null>(null)
   const dragOriginalStatus = useRef<{ id: string; status: Task['status'] } | null>(null)
+  const justDraggedRef = useRef(false)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -783,7 +791,13 @@ const Tasks: React.FC = () => {
     setIsModalOpen(true)
   }
 
+  const handleCardClick = (task: Task) => {
+    if (justDraggedRef.current) return
+    setDetailTask(task)
+  }
+
   const handleDragStart = (event: DragStartEvent) => {
+    justDraggedRef.current = true
     const id = event.active.id as string
     setActiveId(id)
     setActiveDropdownId(null)
@@ -826,6 +840,7 @@ const Tasks: React.FC = () => {
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     setActiveId(null)
+    setTimeout(() => { justDraggedRef.current = false }, 50)
 
     const orig = dragOriginalStatus.current
     dragOriginalStatus.current = null
@@ -1110,6 +1125,7 @@ const Tasks: React.FC = () => {
                                   onCancel={cancelStatusChange}
                                   onToggleSubtask={handleToggleSubtask}
                                   onStopTimer={handleStopTimer}
+                                  onCardClick={handleCardClick}
                                 />
                               ))}
                             </div>
@@ -1235,6 +1251,15 @@ const Tasks: React.FC = () => {
       </Modal>
 
       <DeleteConfirmation isOpen={!!taskToDelete} onConfirm={executeDelete} onCancel={() => setTaskToDelete(null)} />
+
+      <TaskDetailModal
+        task={detailTask ? tasks.find(t => t.id === detailTask.id) || detailTask : null}
+        isOpen={!!detailTask}
+        onClose={() => setDetailTask(null)}
+        onToggleSubtask={handleToggleSubtask}
+        onStopTimer={handleStopTimer}
+        onEdit={(task) => { setDetailTask(null); setTimeout(() => openEditModal(task), 250) }}
+      />
     </>
   )
 }

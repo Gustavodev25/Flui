@@ -5,13 +5,14 @@ import { toaster } from '../components/ui/Toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Navigate, Link } from 'react-router-dom'
-import { Eye, EyeOff, Check } from 'lucide-react'
+import { Eye, EyeOff, Check, ArrowLeft } from 'lucide-react'
 import TermsModal from '../components/TermsModal'
 
 const LoginPage: React.FC = () => {
   const { user, isLoading: authLoading } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [name, setName] = useState('')
   const [isLogin, setIsLogin] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
@@ -141,6 +142,16 @@ const LoginPage: React.FC = () => {
       })
       return
     }
+
+    if (password !== confirmPassword) {
+      toaster.create({
+        title: "Senhas não coincidem",
+        description: "A senha e a confirmação devem ser iguais.",
+        type: "error",
+      })
+      return
+    }
+
     handleLogin(e)
   }
 
@@ -167,16 +178,13 @@ const LoginPage: React.FC = () => {
     <div className="min-h-screen w-full flex flex-col md:flex-row bg-white text-[#37352f] font-sans selection:bg-[#2383e2]/20">
 
       {/* Coluna do Formulário */}
-      <div className="w-full md:w-1/2 flex items-center justify-center p-8 md:p-16 relative">
-        {/* Botão de Voltar */}
+      <div className="w-full md:w-1/2 flex-1 flex items-center justify-center p-8 md:p-16 relative">
         <Link
           to="/"
-          className="absolute top-6 left-6 md:top-10 md:left-10 flex items-center gap-2 text-sm font-medium text-[#37352f]/40 hover:text-[#37352f] transition-colors"
+          className="absolute top-10 left-10 group flex items-center gap-2 text-[#37352f]/30 hover:text-[#37352f] transition-all duration-300 select-none"
         >
-          <div className="w-8 h-8 rounded-full bg-[#f7f7f5] hover:bg-[#f1f1f0] border border-[#e9e9e7] flex items-center justify-center transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-          </div>
-          <span className="hidden sm:inline">Voltar</span>
+          <ArrowLeft size={18} strokeWidth={1.5} className="transform group-hover:-translate-x-0.5 transition-transform" />
+          <span className="text-xs font-medium tracking-tight">voltar</span>
         </Link>
 
         <motion.div
@@ -192,11 +200,11 @@ const LoginPage: React.FC = () => {
           }}
           className="w-full max-w-[380px]"
         >
-          <div className="mb-10 flex flex-col">
-            <h1 className="text-3xl font-bold tracking-tight mb-2">
+          <div className="mb-10 flex flex-col items-center md:items-start text-center md:text-left">
+            <h1 className="text-2xl font-bold tracking-tight mb-2">
               {isLogin ? "Bem-vindo" : "Crie sua conta"}
             </h1>
-            <p className="text-base text-[#37352f]/60 font-medium">
+            <p className="text-sm text-[#37352f]/40 font-medium">
               {isLogin ? "Insira seus dados para acessar sua conta." : "Junte-se ao Flui e transforme sua produtividade."}
             </p>
           </div>
@@ -214,8 +222,8 @@ const LoginPage: React.FC = () => {
             </div>
 
             <div className="relative flex items-center justify-center">
-              <div className="border-t border-[#e9e9e7] w-full"></div>
-              <span className="bg-white px-4 text-xs font-medium text-[#37352f]/40 absolute">ou use e-mail</span>
+              <div className="border-t border-[#f1f1f0] w-full"></div>
+              <span className="bg-white px-4 text-[10px] font-bold text-[#37352f]/20 absolute uppercase tracking-widest">ou use e-mail</span>
             </div>
 
             <form onSubmit={isLogin ? handleLogin : handleCreateAccount} className="space-y-4">
@@ -225,7 +233,7 @@ const LoginPage: React.FC = () => {
                   animate={{ opacity: 1, y: 0 }}
                   className="space-y-1.5"
                 >
-                  <label className="text-xs font-medium text-[#37352f]/60 ml-1">Nome completo</label>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">Nome completo</label>
                   <input
                     type="text"
                     placeholder="Seu nome"
@@ -238,7 +246,7 @@ const LoginPage: React.FC = () => {
               )}
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[#37352f]/60 ml-1">E-mail</label>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">E-mail</label>
                 <input
                   type="email"
                   placeholder="Seu e-mail profissional"
@@ -251,7 +259,7 @@ const LoginPage: React.FC = () => {
 
               <div className="space-y-1.5">
                 <div className="flex justify-between items-center px-1">
-                  <label className="text-xs font-medium text-[#37352f]/60">Senha</label>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">Senha</label>
                 </div>
                 <div className="relative group/pass">
                   <input
@@ -272,6 +280,26 @@ const LoginPage: React.FC = () => {
                   </button>
                 </div>
               </div>
+
+              {!isLogin && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-1.5"
+                >
+                  <label className="text-xs font-medium text-[#37352f]/60 ml-1">Confirme sua senha</label>
+                  <div className="relative group/pass">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Repita sua senha"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 pl-3.5 pr-10 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
+                      required
+                    />
+                  </div>
+                </motion.div>
+              )}
 
               {!isLogin && (
                 <div className="flex items-center gap-2.5 pt-1">
@@ -346,7 +374,7 @@ const LoginPage: React.FC = () => {
               </motion.button>
             </form>
 
-            <p className="pt-6 text-center text-[13px] text-[#37352f]/40 font-medium font-sans">
+            <p className="pt-8 text-center text-[11px] text-[#37352f]/30 font-medium font-sans">
               {isLogin ? (
                 <>
                   Novo por aqui?{" "}
