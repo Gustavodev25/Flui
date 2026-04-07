@@ -1505,14 +1505,10 @@ async function checkTaskTimers() {
           if (!inWindow) {
             await saveMissedFollowup(task.user_id, task.id, task.title, 'timer');
             console.log(`[Timer] Janela 24h fechada — follow-up salvo → "${task.title}"`);
-          } else if (!task.timer_warned) {
-            // Nenhum aviso prévio foi enviado — enviar mensagem combinada agora
+          } else {
             const msg = pickTimerTemplate(TIMER_COMBINED_TEMPLATES, userName, task.title, null);
             await sendTimerMessage(task.user_id, task.title, msg);
-            console.log(`[Timer] Expirado (sem warn prévio, enviando combined) → "${task.title}"`);
-          } else {
-            // Aviso já foi enviado — suprimir fire message (economiza 1 mensagem Meta)
-            console.log(`[Timer] Expirado (warn já enviado, suprimindo fire) → "${task.title}"`);
+            console.log(`[Timer] Expirado (${task.timer_warned ? 'com' : 'sem'} warn previo, enviando final) -> "${task.title}"`);
           }
           continue;
         }
@@ -1557,40 +1553,57 @@ async function checkTaskTimers() {
 
       const userName = (await findBindingByUserId(task.user_id, 'whatsapp'))?.display_name || 'você';
       let changed = false;
-      const updatedSubs = subs.map(s => {
-        if (!s.timer_at || s.timer_fired) return s;
+      const updatedSubs = [];
+
+      for (const s of subs) {
+        if (!s.timer_at || s.timer_fired) {
+          updatedSubs.push(s);
+          continue;
+        }
 
         const subMs = new Date(s.timer_at).getTime();
 
         // Timer da subtarefa expirou
         if (subMs <= now.getTime()) {
-          if (!s.timer_warned) {
-            const msg = pickTimerTemplate(TIMER_COMBINED_TEMPLATES, userName, s.title, null);
-            sendTimerMessage(task.user_id, s.title, msg);
-            console.log(`[Timer] Subtarefa expirada (sem warn prévio) → "${s.title}" (em "${task.title}")`);
+          const inWindow = await isWithin24hWindow(task.user_id);
+          if (!inWindow) {
+            await saveMissedFollowup(task.user_id, task.id, s.title, 'subtask_timer');
+            console.log(`[Timer] Janela 24h fechada - follow-up de subtarefa salvo -> "${s.title}" (em "${task.title}")`);
           } else {
-            console.log(`[Timer] Subtarefa expirada (warn já enviado, suprimindo) → "${s.title}" (em "${task.title}")`);
+            const msg = pickTimerTemplate(TIMER_COMBINED_TEMPLATES, userName, s.title, null);
+            await sendTimerMessage(task.user_id, s.title, msg);
+            console.log(`[Timer] Subtarefa expirada (${s.timer_warned ? 'com' : 'sem'} warn previo, enviando final) -> "${s.title}" (em "${task.title}")`);
           }
+
           changed = true;
-          return { ...s, timer_fired: true };
+          updatedSubs.push({ ...s, timer_fired: true, timer_fired_at: new Date().toISOString() });
+          continue;
         }
 
-        // Aviso prévio da subtarefa
+        // Aviso previo da subtarefa
         if (!s.timer_warned) {
           const warnMs = warnBeforeMs(s.timer_at);
           const timeUntil = subMs - now.getTime();
           if (timeUntil <= warnMs) {
+            const inWindow = await isWithin24hWindow(task.user_id);
+            if (!inWindow) {
+              console.log(`[Timer] Janela 24h fechada - skip warn subtarefa -> "${s.title}" (em "${task.title}")`);
+              updatedSubs.push(s);
+              continue;
+            }
+
             const timeLabel = formatWarnLabel(s.timer_at);
             const msg = pickTimerTemplate(TIMER_WARN_TEMPLATES, userName, s.title, timeLabel);
-            sendTimerMessage(task.user_id, s.title, msg);
-            console.log(`[Timer] Aviso subtarefa → "${s.title}" (faltam ${timeLabel})`);
+            await sendTimerMessage(task.user_id, s.title, msg);
+            console.log(`[Timer] Aviso subtarefa -> "${s.title}" (faltam ${timeLabel})`);
             changed = true;
-            return { ...s, timer_warned: true };
+            updatedSubs.push({ ...s, timer_warned: true });
+            continue;
           }
         }
 
-        return s;
-      });
+        updatedSubs.push(s);
+      }
 
       if (changed) {
         await supabaseAdmin.from('tasks').update({ subtasks: updatedSubs }).eq('id', task.id);

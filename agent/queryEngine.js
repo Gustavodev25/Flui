@@ -682,18 +682,48 @@ Responda APENAS com a frase de ack, nada mais.`,
   }
 }
 
+const ACK_TOPIC_STOPWORDS = new Set([
+  'a', 'o', 'as', 'os', 'um', 'uma', 'uns', 'umas',
+  'de', 'da', 'do', 'das', 'dos', 'pra', 'para', 'por',
+  'com', 'sem', 'que', 'eu', 'me', 'minha', 'meu', 'minhas', 'meus',
+  'isso', 'ai', 'a\u00ed', 'agora', 'hoje', 'amanha', 'amanh\u00e3',
+  'lembrar', 'lembra', 'lembre', 'avisar', 'avisa', 'anotar', 'anota',
+]);
+
+function extractAckTopic(userMessage) {
+  const cleaned = String(userMessage || '')
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/\b(daqui(?:\s+a)?|de\s+aqui(?:\s+a)?|em)\s+(?:uns?|umas?)?\s*\d+(?:[,.]\d+)?\s*(?:h|hora[s]?|min(?:utinho[s]?|uto[s]?)?)\b/gi, ' ')
+    .replace(/\b(daqui(?:\s+a)?|de\s+aqui(?:\s+a)?|em)\s+(?:uns?|umas?)?\s*(um|uma|dois|duas|tr[e\u00ea]s|quatro|cinco|seis|sete|oito|nove|dez|meia)\s*(?:hora[s]?|min(?:utinho[s]?|uto[s]?)?)\b/gi, ' ')
+    .replace(/^\s*(me\s+lembr(?:a|ar|e)(?:\s+de|\s+que)?|me\s+avis(?:a|ar)(?:\s+de|\s+que)?|anota(?:\s+a[i\u00ed]|\s+isso|\s+pra\s+mim)?|registr(?:a|ar)|salva(?:\s+isso|\s+a[i\u00ed])?|tenho\s+que|preciso(?:\s+de)?|cria(?:r)?(?:\s+uma)?\s+tarefa(?:\s+pra|\s+para)?|adiciona(?:r)?(?:\s+uma)?\s+tarefa?)\s+/i, ' ')
+    .replace(/\b(hoje|amanh[\u00e3a]|depois\s+de\s+amanh[\u00e3a]|semana\s+que\s+vem|m[e\u00ea]s\s+que\s+vem)\b/gi, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const words = cleaned
+    .split(' ')
+    .filter(word => word.length > 2 && !ACK_TOPIC_STOPWORDS.has(word))
+    .slice(0, 5);
+
+  return words.join(' ');
+}
+
 function generateQuickAck(userMessage, userName) {
-  const shortName = String(userName || 'você').split(' ')[0];
+  const shortName = String(userName || 'voce').split(' ')[0];
+  const topic = extractAckTopic(userMessage);
+  const topicPart = topic ? `essa de ${topic}` : 'isso';
   const templates = hasMultipleTasks(userMessage)
     ? [
-        `Certo, ${shortName}! Vou organizar isso agora.`,
-        `Recebi tudo, ${shortName}. Já estou separando por partes.`,
-        `Perfeito, ${shortName}. Deixa eu montar isso direitinho.`,
+        `Certo, ${shortName}! Vou separar ${topicPart} por partes.`,
+        `Recebi tudo, ${shortName}. Organizando ${topicPart} agora.`,
+        `Perfeito, ${shortName}. Montando ${topicPart} direitinho.`,
       ]
     : [
-        `Certo, ${shortName}. Já estou cuidando disso.`,
-        `Entendi, ${shortName}. Um instante que eu organizo.`,
-        `Recebi aqui, ${shortName}. Já vou anotar.`,
+        `Certo, ${shortName}. Peguei ${topicPart}, vou organizar.`,
+        `Entendi ${topicPart}, ${shortName}. Um instante.`,
+        `Recebi ${topicPart}, ${shortName}. Ja vou anotar.`,
       ];
 
   const indexBase = `${userMessage}:${shortName}`.length;
