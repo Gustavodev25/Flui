@@ -1,6 +1,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Polyfill: OpenAI SDK v6+ exige globalThis.File (disponível nativamente no Node 20+)
+if (!globalThis.File) {
+  const { File } = await import('node:buffer');
+  globalThis.File = File;
+}
+
 import OpenAI from 'openai';
 import { execSync } from 'child_process';
 import fs from 'fs';

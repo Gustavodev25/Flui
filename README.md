@@ -15,6 +15,26 @@
 
 ---
 
+## Requisitos de Runtime
+
+**Node.js >= 20 (obrigatório)**
+
+O OpenAI SDK v6+ usa `globalThis.File` para uploads de áudio (transcrição via Groq/NVIDIA). Essa API só existe nativamente no Node 20+. Usar Node 18 causa o erro:
+
+```
+`File` is not defined as a global, which is required for file uploads.
+Update to Node 20 LTS or newer, or set `globalThis.File` to `import('node:buffer').File`.
+```
+
+**Como a versão é fixada no Railway:**
+- `nixpacks.toml` → `nixPkgs = ["nodejs_20"]`
+- `package.json` → `"engines": { "node": ">=20.0.0" }`
+- `agent/transcriber.js` → polyfill de segurança no topo do arquivo
+
+Não remova nenhuma dessas configurações.
+
+---
+
 ## Estrutura do projeto local
 
 ```
@@ -34,6 +54,7 @@ taskapp/
 ├── .env                    → NÃO SOBE (ignorado pelo .gitignore)
 ├── .gitignore              → AMBOS
 ├── index.html              → FRONTEND
+├── nixpacks.toml           → BACKEND (fixa Node 20 no Railway)
 ├── package.json            → AMBOS (mesmo arquivo, contém deps dos dois)
 ├── package-lock.json       → AMBOS
 ├── postcss.config.js       → FRONTEND
@@ -73,6 +94,7 @@ README.md
 - `agent/`
 - `supabase/`
 - `railway.json`
+- `nixpacks.toml`
 - `api/` *(existe no repo mas só é usado se o backend estiver no Vercel — não é o caso)*
 
 ---
@@ -86,6 +108,7 @@ server.js
 agent/
 api/
 supabase/
+nixpacks.toml
 package.json
 package-lock.json
 railway.json
@@ -138,7 +161,7 @@ git push origin main
 
 ```bash
 # Adicionar apenas os arquivos do backend
-git add server.js agent/ api/ supabase/ package.json package-lock.json railway.json .gitignore README.md
+git add server.js agent/ api/ supabase/ nixpacks.toml package.json package-lock.json railway.json .gitignore README.md
 
 # Conferir o que vai subir (leia com atenção!)
 git status
@@ -206,6 +229,7 @@ O arquivo `.env` **nunca** é commitado (está no `.gitignore`). As variáveis p
 - [ ] As variáveis de ambiente estão configuradas na plataforma correta?
 - [ ] O `.env` NÃO está na lista de arquivos para commit?
 - [ ] O remote (`git remote -v`) aponta para o repositório certo?
+- [ ] O `nixpacks.toml` está incluído no push do backend?
 
 ---
 
