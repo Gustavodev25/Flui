@@ -633,7 +633,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
       .update({ last_inbound_at: new Date().toISOString() })
       .eq('channel', 'whatsapp')
       .eq('external_user_id', userPhone)
-      .then(() => {})
+      .then(() => { })
       .catch(err => console.error('[24hWindow] Erro ao atualizar last_inbound_at:', err.message));
 
     const result = await processConversationTurn({
@@ -1156,6 +1156,81 @@ REGRAS GERAIS:
     res.json({ content: finalContent });
   } catch (error) {
     console.error('[ChatAgent] Erro:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ================== ADMIN PANEL ==================
+app.get('/api/admin/users', async (req, res) => {
+  const { password } = req.query;
+  if (password !== 'AdminFlui123@') {
+    return res.status(401).json({ error: 'Senha incorreta!' });
+  }
+
+  try {
+    const { data: { users }, error: authError } = await supabaseAdmin.auth.admin.listUsers();
+    if (authError) throw authError;
+
+    const { data: subscriptions, error: subError } = await supabaseAdmin
+      .from('subscriptions')
+      .select('*');
+    if (subError) throw subError;
+
+    const usersData = users.map(u => {
+      const sub = subscriptions?.find(s => s.user_id === u.id);
+      return {
+        id: u.id,
+        email: u.email,
+        name: u.user_metadata?.name || '',
+        createdAt: u.created_at,
+        lastSignIn: u.last_sign_in_at,
+        hasFlow: sub?.status === 'active' && sub?.plan_id === 'flow',
+        subscriptionStatus: sub?.status || 'none',
+      };
+    });
+
+    res.json({ users: usersData });
+  } catch (error) {
+    console.error('Erro ao buscar usuários:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/users/grant', async (req, res) => {
+  const { password, userId } = req.body;
+  if (password !== 'AdminFlui123@') {
+    return res.status(401).json({ error: 'Senha incorreta!' });
+  }
+  if (!userId) {
+    return res.status(400).json({ error: 'userId obrigatório' });
+  }
+
+  try {
+    const { data: existing } = await supabaseAdmin
+      .from('subscriptions')
+      .select('id')
+      .eq('user_id', userId)
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      await supabaseAdmin.from('subscriptions').update({
+        status: 'active',
+        plan_id: 'flow',
+        updated_at: new Date().toISOString()
+      }).eq('user_id', userId);
+    } else {
+      await supabaseAdmin.from('subscriptions').insert({
+        user_id: userId,
+        status: 'active',
+        plan_id: 'flow',
+        updated_at: new Date().toISOString()
+      });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro ao conceder acesso:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

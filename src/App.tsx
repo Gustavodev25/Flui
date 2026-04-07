@@ -15,6 +15,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import { SidebarProvider } from './contexts/SidebarContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import ThankYouModal from './components/ThankYouModal'
+import { AdminPanel } from './pages/AdminPanel'
 
 function App() {
   const [showThankYou, setShowThankYou] = useState(false)
@@ -34,6 +35,7 @@ function App() {
       <SidebarProvider>
         <Router>
             <Routes>
+              <Route path="/admin" element={<AdminPanel />} />
               <Route path="/login" element={<LoginPage />} />
               
               {/* Rotas Protegidas com Layout Persistente */}
