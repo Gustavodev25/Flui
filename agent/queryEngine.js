@@ -414,6 +414,80 @@ function buildSimpleTaskListResponse(userMessage, userName, result, filter = {})
   return `${prefix}você tem ${result.count} tarefa${result.count > 1 ? 's' : ''} ${scope}:\n${result.formatted_list}`;
 }
 
+const TASK_GLUE_WORDS = new Set([
+  'pra', 'para', 'de', 'da', 'do', 'das', 'dos', 'que', 'em',
+  'daqui', 'aqui', 'uns', 'umas', 'um', 'uma',
+]);
+
+function cleanupTaskTitle(text) {
+  const words = String(text || '')
+    .replace(/\b(n[aã]o|não)\b/gi, ' ')
+    .replace(/[.?!,;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(word => word && !TASK_GLUE_WORDS.has(normalizeTextForIntent(word)));
+
+  const title = words.join(' ').trim();
+  if (title.length < 3) return null;
+  return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
+function timerPhraseRegex() {
+  const num = '(?:\\d+(?:[,.]\\d+)?|um|uma|dois|duas|tr[eê]s|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta)';
+  const prefix = '(?:\\b(?:daqui(?:\\s+a)?|de\\s+aqui(?:\\s+a)?|em)\\s+(?:uns?|umas?)?\\s*)?';
+  const hourWord = `(?:meia\\s+hora|${num}\\s+hora[s]?(?:\\s+e\\s+meia|\\s+e\\s+${num}\\s+min(?:utinho[s]?|uto[s]?)?)?)`;
+  const compactHour = '(?:\\d+h\\d+(?:min(?:uto[s]?)?)?|\\d+h\\b)';
+  const minuteWord = `(?:${num}\\s+min(?:utinho[s]?|uto[s]?)?)`;
+  return new RegExp(`${prefix}(?:${compactHour}|${hourWord}|${minuteWord})`, 'gi');
+}
+
+function stripCreationPreamble(text) {
+  return String(text || '')
+    .replace(/^\s*(cria(?:r)?(?:\s+uma)?\s+tarefa|adiciona(?:r)?(?:\s+uma)?\s+tarefa|me\s+lembr(?:a|ar|e)(?:\s+de|\s+que)?|me\s+avis(?:a|ar)(?:\s+de|\s+que)?|n[aã]o\s+deixa\s+(?:eu\s+)?esquecer(?:\s+de|\s+que)?|anota(?:\s+a[ií]|\s+isso|\s+pra\s+mim)?|registr(?:a|ar)|salva(?:\s+isso|\s+a[ií])?|tenho\s+que|preciso(?:\s+de)?)\s+/i, ' ');
+}
+
+function extractSimpleTaskTitle(message) {
+  const text = String(message || '');
+  const matches = [...text.matchAll(timerPhraseRegex())];
+  if (matches.length > 0) {
+    const last = matches[matches.length - 1];
+    const suffix = cleanupTaskTitle(stripCreationPreamble(text.slice(last.index + last[0].length)));
+    if (suffix) return suffix;
+  }
+
+  const withoutTimers = stripCreationPreamble(text)
+    .replace(timerPhraseRegex(), ' ')
+    .replace(/\b(n[aã]o|não)\b[^.?!]*$/i, ' ');
+
+  return cleanupTaskTitle(withoutTimers);
+}
+
+function getSimpleTaskCreateRequest(message, { resolvedDate, resolvedTimerMinutes, sourceChannel }) {
+  if (!isCreationIntent(message)) return null;
+  if (hasMultipleTasks(message)) return null;
+  if (!resolvedTimerMinutes && !resolvedDate) return null;
+
+  const title = extractSimpleTaskTitle(message);
+  const args = {
+    title,
+    description: `Criado a partir da mensagem: ${String(message || '').trim()}`,
+    priority: 'medium',
+    due_date: resolvedDate || (resolvedTimerMinutes ? getTodayISO() : undefined),
+    ...(resolvedTimerMinutes ? { timer_minutes: resolvedTimerMinutes } : {}),
+    source: sourceChannel === 'whatsapp' ? 'whatsapp' : 'user',
+    ...(sourceChannel === 'whatsapp' ? { whatsapp_message: message } : {}),
+  };
+
+  return { args, missingTitle: !title };
+}
+
+function buildMissingTaskTitleResponse(userName, timerMinutes) {
+  const timer = timerMinutes
+    ? ` Peguei o timer de ${timerMinutes} minuto${timerMinutes !== 1 ? 's' : ''},`
+    : '';
+  return `${userName},${timer} mas não entendi o nome da tarefa. Me manda só o que é pra lembrar.`;
+}
 // Extrai subtópicos da mensagem quando o modelo não gerou subtarefas
 // Cobre padrões como "sobre X, sobre Y", "primeiro X, segundo Y", "X, Y e Z"
 function extractSubtasksFromMessage(message) {
@@ -535,6 +609,49 @@ function parsePTNum(str) {
   return isNaN(n) ? null : n;
 }
 
+function parseTimerCandidateMinutes(candidate) {
+  const N = '(\\d+(?:[,.]\\d+)?|um|uma|dois|duas|tr[eê]s|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta)';
+  const PREF = '(?:daqui(?:\\s+a)?|de\\s+aqui(?:\\s+a)?|em)\\s+(?:uns?|umas?)?\\s*';
+  const raw = String(candidate || '').trim().toLowerCase();
+  const lower = /^(daqui(?:\s+a)?|de\s+aqui(?:\s+a)?|em)\b/.test(raw) ? raw : `em ${raw}`;
+
+  const compactFull = lower.match(/(?:daqui(?:\s+a)?|de\s+aqui(?:\s+a)?|em)\s+(\d+)h(\d+)(?:min(?:uto[s]?)?)?\b/i);
+  if (compactFull) return parseInt(compactFull[1]) * 60 + parseInt(compactFull[2]);
+
+  const compactH = lower.match(/(?:daqui(?:\s+a)?|de\s+aqui(?:\s+a)?|em)\s+(\d+)h\b/i);
+  if (compactH) return parseInt(compactH[1]) * 60;
+
+  const horasEMeia = lower.match(new RegExp(PREF + N + '\\s+hora[s]?\\s+e\\s+meia\\b', 'i'));
+  if (horasEMeia) {
+    const h = parsePTNum(horasEMeia[1]);
+    if (h !== null) return Math.round(h * 60 + 30);
+  }
+
+  const horasEMin = lower.match(new RegExp(PREF + N + '\\s+hora[s]?\\s+e\\s+' + N + '\\s+min(?:utinho[s]?|uto[s]?)?\\b', 'i'));
+  if (horasEMin) {
+    const h = parsePTNum(horasEMin[1]);
+    const m = parsePTNum(horasEMin[2]);
+    if (h !== null && m !== null) return Math.round(h * 60 + m);
+  }
+
+  const meiaHora = lower.match(new RegExp(PREF + 'meia\\s+hora\\b', 'i'));
+  if (meiaHora) return 30;
+
+  const horas = lower.match(new RegExp(PREF + N + '\\s+hora[s]?\\b', 'i'));
+  if (horas) {
+    const h = parsePTNum(horas[1]);
+    if (h !== null) return Math.round(h * 60);
+  }
+
+  const minutos = lower.match(new RegExp(PREF + N + '\\s+min(?:utinho[s]?|uto[s]?)?\\b', 'i'));
+  if (minutos) {
+    const m = parsePTNum(minutos[1]);
+    if (m !== null) return Math.round(m);
+  }
+
+  return null;
+}
+
 /**
  * Extrai o número de minutos de timer a partir de expressões naturais em português.
  * Exemplos cobertos:
@@ -551,6 +668,18 @@ function parsePTNum(str) {
 function extractTimerMinutesFromMessage(message) {
   const lower = message.toLowerCase();
 
+  if (/\b(n[aã]o|não)\b/.test(lower)) {
+    const correctedCandidates = [...lower.matchAll(timerPhraseRegex())]
+      .map(match => ({
+        index: match.index,
+        minutes: parseTimerCandidateMinutes(match[0]),
+      }))
+      .filter(item => item.minutes !== null);
+
+    if (correctedCandidates.length > 1) {
+      return correctedCandidates[correctedCandidates.length - 1].minutes;
+    }
+  }
   const N = '(\\d+(?:[,.]\\d+)?|um|uma|dois|duas|tr[eê]s|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta)';
   // "uns/umas" é opcional após o prefixo (ex: "daqui uns 3 minutinhos")
   const PREF = '(?:daqui(?:\\s+a)?|de\\s+aqui(?:\\s+a)?|em)\\s+(?:uns?|umas?)?\\s*';
@@ -839,6 +968,47 @@ export async function queryEngineLoop(
       trace.error_class = err.code || err.name || 'task_list_direct_error';
     }
   }
+  const resolvedDate = extractDateFromMessage(userMessage);
+  const resolvedTimerMinutes = extractTimerMinutesFromMessage(userMessage);
+  const resolvedDateWithTimerFallback = resolvedDate || (resolvedTimerMinutes ? getTodayISO() : null);
+  const creationIntent = isCreationIntent(userMessage);
+  const multipleTasksIntent = hasMultipleTasks(userMessage);
+
+  const simpleTaskCreateRequest = getSimpleTaskCreateRequest(userMessage, {
+    resolvedDate,
+    resolvedTimerMinutes,
+    sourceChannel,
+  });
+
+  if (simpleTaskCreateRequest) {
+    const startedAt = Date.now();
+    const history = await getHistory(sessionId);
+    let content;
+
+    if (simpleTaskCreateRequest.missingTitle) {
+      content = buildMissingTaskTitleResponse(userName, resolvedTimerMinutes);
+    } else {
+      const result = await executeTool('TaskCreate', simpleTaskCreateRequest.args, { userId });
+      trace.tool_count += 1;
+      if (result.success) invalidateContextCache(userId);
+      content = buildMutationResponse('TaskCreate', result, userName)
+        || (result.success
+          ? `Anotado, ${userName}! *${result.task_title}* ficou registrado.`
+          : `${userName}, não consegui criar essa tarefa agora. Tenta de novo em instantes.`);
+    }
+
+    trace.provider = 'direct';
+    trace.model = 'task-create';
+    trace.latency_ms += Date.now() - startedAt;
+
+    await saveHistory(sessionId, [
+      ...history,
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content },
+    ]);
+
+    return returnTelemetry ? { content, telemetry: trace } : content;
+  }
   // Busca histórico, contexto e ACK em paralelo — custo zero extra
   const [history, systemPrompt] = await Promise.all([
     getHistory(sessionId),
@@ -870,18 +1040,6 @@ export async function queryEngineLoop(
       });
   }
 
-  // Data detectada na mensagem — usada para injetar nos args se o modelo esquecer
-  const resolvedDate = extractDateFromMessage(userMessage);
-
-  // Timer detectado na mensagem — injetado se o modelo esquecer de preencher timer_minutes
-  const resolvedTimerMinutes = extractTimerMinutesFromMessage(userMessage);
-
-  // Quando há timer, a tarefa é implicitamente de hoje
-  const resolvedDateWithTimerFallback = resolvedDate || (resolvedTimerMinutes ? getTodayISO() : null);
-
-  // Detecta intenção de criação antes do loop para forçar ferramenta na 1ª chamada
-  const creationIntent = isCreationIntent(userMessage);
-  const multipleTasksIntent = hasMultipleTasks(userMessage);
   const preferredTool = creationIntent
     ? (multipleTasksIntent ? 'TaskBatchCreate' : 'TaskCreate')
     : null;

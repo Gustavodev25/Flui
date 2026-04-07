@@ -19,7 +19,9 @@ const primaryClient = process.env.NVIDIA_API_KEY
     })
   : null;
 
-const fallbackClient = process.env.GROQ_API_KEY
+const useGroqChatFallback = process.env.ENABLE_GROQ_CHAT_FALLBACK === 'true';
+
+const fallbackClient = useGroqChatFallback && process.env.GROQ_API_KEY
   ? new OpenAI({
       apiKey: process.env.GROQ_API_KEY,
       baseURL: 'https://api.groq.com/openai/v1',
@@ -203,6 +205,7 @@ export function getLlmStatus() {
       configured: !!fallbackClient,
       provider: FALLBACK_PROVIDER,
       model: FALLBACK_MODEL_ID,
+      disabled_reason: useGroqChatFallback ? null : 'ENABLE_GROQ_CHAT_FALLBACK not true',
     },
   };
 }
