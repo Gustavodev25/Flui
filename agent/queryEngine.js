@@ -917,14 +917,14 @@ export async function queryEngineLoop(
   const shouldAck = (fromAudio || hasMultipleTasks(userMessage)) && typeof onAck === 'function';
   const llmOptions = fromAudio
     ? {
-        turnBudgetMs: Number(process.env.AUDIO_LLM_TURN_BUDGET_MS || 12000),
-        primaryTimeoutMs: Number(process.env.AUDIO_PRIMARY_LLM_TIMEOUT_MS || 6500),
-        fallbackTimeoutMs: Number(process.env.AUDIO_FALLBACK_LLM_TIMEOUT_MS || 7500),
+        turnBudgetMs: Number(process.env.AUDIO_LLM_TURN_BUDGET_MS || 90000),
+        primaryTimeoutMs: Number(process.env.AUDIO_PRIMARY_LLM_TIMEOUT_MS || 45000),
+        fallbackTimeoutMs: Number(process.env.AUDIO_FALLBACK_LLM_TIMEOUT_MS || 25000),
       }
     : {
-        turnBudgetMs: Number(process.env.TEXT_LLM_TURN_BUDGET_MS || 9000),
-        primaryTimeoutMs: Number(process.env.TEXT_PRIMARY_LLM_TIMEOUT_MS || 4500),
-        fallbackTimeoutMs: Number(process.env.TEXT_FALLBACK_LLM_TIMEOUT_MS || 5500),
+        turnBudgetMs: Number(process.env.TEXT_LLM_TURN_BUDGET_MS || 90000),
+        primaryTimeoutMs: Number(process.env.TEXT_PRIMARY_LLM_TIMEOUT_MS || 45000),
+        fallbackTimeoutMs: Number(process.env.TEXT_FALLBACK_LLM_TIMEOUT_MS || 25000),
       };
   const trace = {
     provider: null,
