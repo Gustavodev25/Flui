@@ -1235,6 +1235,49 @@ app.post('/api/admin/users/grant', async (req, res) => {
   }
 });
 
+app.get('/api/admin/stats', async (req, res) => {
+  const password = req.query.password;
+  if (password !== 'AdminFlui123@') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    // Total messages
+    const { count: totalMessages } = await supabaseAdmin
+      .from('conversation_messages')
+      .select('*', { count: 'exact', head: true });
+
+    // Total tasks
+    const { count: totalTasks } = await supabaseAdmin
+      .from('tasks')
+      .select('*', { count: 'exact', head: true });
+
+    // Users with active bindings (those who sent/received messages)
+    const { count: firstMessageUsers } = await supabaseAdmin
+      .from('channel_bindings')
+      .select('*', { count: 'exact', head: true });
+
+    // WPP usage this month
+    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    const { count: wppConversationsUsed } = await supabaseAdmin
+      .from('conversation_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('channel', 'whatsapp')
+      .gte('created_at', startOfMonth);
+
+    res.json({
+      totalMessages: totalMessages || 0,
+      totalTasks: totalTasks || 0,
+      firstMessageUsers: firstMessageUsers || 0,
+      wppConversationsUsed: wppConversationsUsed || 0,
+      wppFreeLimit: 1000
+    });
+  } catch (error) {
+    console.error('Erro ao buscar estatísticas do painel:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/health', async (req, res) => {
   const startedAt = Date.now();
 
