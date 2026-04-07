@@ -5,12 +5,12 @@ import OpenAI from 'openai';
 
 export const PRIMARY_PROVIDER = 'nvidia';
 export const PRIMARY_MODEL_ID = process.env.MODEL_ID || 'deepseek-ai/deepseek-v3-0324';
-export const PRIMARY_TIMEOUT_MS = Number(process.env.PRIMARY_LLM_TIMEOUT_MS || 9000);
+export const PRIMARY_TIMEOUT_MS = Number(process.env.PRIMARY_LLM_TIMEOUT_MS || 25000);
 
 export const FALLBACK_PROVIDER = 'groq';
 export const FALLBACK_MODEL_ID = process.env.GROQ_MODEL_ID || 'llama-3.3-70b-versatile';
-export const FALLBACK_TIMEOUT_MS = Number(process.env.FALLBACK_LLM_TIMEOUT_MS || 8000);
-export const TURN_BUDGET_MS = Number(process.env.LLM_TURN_BUDGET_MS || 20000);
+export const FALLBACK_TIMEOUT_MS = Number(process.env.FALLBACK_LLM_TIMEOUT_MS || 15000);
+export const TURN_BUDGET_MS = Number(process.env.LLM_TURN_BUDGET_MS || 60000);
 
 const primaryClient = process.env.NVIDIA_API_KEY
   ? new OpenAI({
