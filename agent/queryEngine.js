@@ -342,10 +342,10 @@ const CREATION_TRIGGERS = [
   /\bpreciso\s+(fazer|de|comprar|ligar|ir)/i,
   /\btenho\s+que/i,
   /\btenho\s+uma\s+tarefa/i,
-  /\bcria(r)?\s+(uma\s+)?tarefa/i,
-  /\badiciona(r)?/i,
+  /\bcri(a|ar|ei)\s+(uma\s+)?tarefa/i,
+  /\badiciona(r|i)?/i,
   /\blembr(ar|e)\s+(de|que)/i,
-  /\bsalva\s+(isso|aí)/i,
+  /\bsalva(\s+isso|\s+a[ií])?/i,
   /\bnão\s+(me\s+)?esquecer/i,
 ];
 
@@ -379,10 +379,15 @@ function normalizeTextForIntent(message) {
 
 function getSimpleTaskListRequest(message) {
   const lower = normalizeTextForIntent(message);
-  const hasQuestion = /\b(quais?|qual|listar?|lista|mostra|mostrar|ver|tenho|pendentes?|tarefas?)\b/.test(lower);
-  const asksTasks = /\b(tarefas?|pendencias?|afazeres?|coisas?\s+pra\s+fazer|tenho\s+pra\s+fazer|tenho\s+para\s+fazer)\b/.test(lower);
+  // Removemos "tarefas?" e "pendentes?" do hasQuestion porque causava falsos positivos muito fáceis.
+  // Focamos em verbos e pronomes interrogativos claros ou "o que tenho".
+  const hasQuestion = /\b(quais?|qual|listar?|lista|mostra|mostrar|ver|cad[eê]|cade|o\s+que\s+tenho)\b/.test(lower);
+  const asksTasks = /\b(tarefas?|pendencias?|pendentes|afazeres?|coisas?\s+pra\s+fazer|tenho\s+pra\s+fazer|tenho\s+para\s+fazer)\b/.test(lower);
 
-  if (!hasQuestion || !asksTasks) return null;
+  // Se tem "?" no final ou perto do final, já reforça que é uma pergunta se falar de tarefas
+  const hasQuestionMark = /\?/.test(lower);
+
+  if (!((hasQuestion && asksTasks) || (hasQuestionMark && asksTasks))) return null;
   if (isCreationIntent(message)) return null;
 
   return {
