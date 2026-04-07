@@ -79,7 +79,7 @@ async function getSystemContext(userId, userName = 'Usuário') {
   const dates = precomputeDates(todayISO);
 
   // Busca tarefas com mais detalhes para dar contexto à IA (incluindo subtarefas)
-  const [taskResult, doneResult] = await Promise.all([
+  const [taskResult, doneResult, followupsResult] = await Promise.all([
     supabase
       .from('tasks')
       .select('id, title, status, priority, due_date, tags, subtasks')
@@ -92,11 +92,29 @@ async function getSystemContext(userId, userName = 'Usuário') {
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
       .eq('status', 'done'),
+    supabase
+      .from('pending_followups')
+      .select('id, task_title, reminder_type, missed_at')
+      .eq('user_id', userId)
+      .is('resolved_at', null)
+      .order('missed_at', { ascending: true })
+      .limit(3),
   ]);
 
   const pendingTasks = taskResult.data || [];
   const doneCount = doneResult.count || 0;
   const totalCount = pendingTasks.length + doneCount;
+  const pendingFollowups = followupsResult.data || [];
+
+  // Marcar follow-ups como resolvidos de forma otimista (IA vai mencioná-los nessa resposta)
+  if (pendingFollowups.length > 0) {
+    supabase
+      .from('pending_followups')
+      .update({ resolved_at: new Date().toISOString() })
+      .in('id', pendingFollowups.map(f => f.id))
+      .then(() => {})
+      .catch(err => console.error('[FollowUp] Erro ao marcar resolvido:', err.message));
+  }
 
   // Classifica tarefas por urgência para contexto
   const overdue = [];
@@ -160,6 +178,16 @@ Total: ${totalCount} tarefas | Pendentes: ${pendingTasks.length} | Concluídas: 
 ${taskSnapshot || '\nNenhuma tarefa pendente no momento.'}
 
 IMPORTANTE: Os IDs acima são apenas para uso interno nos parâmetros das ferramentas. JAMAIS mencione um ID ou UUID na resposta para o usuário.
+${pendingFollowups.length > 0 ? `
+═══ FOLLOW-UPS PENDENTES ═══
+Esses lembretes não foram entregues porque a janela de conversa estava fechada:
+${pendingFollowups.map(f => {
+  const dt = new Date(f.missed_at);
+  const dtStr = dt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return `- "${f.task_title}" (lembrete perdido em ${dtStr})`;
+}).join('\n')}
+
+→ Mencione naturalmente 1 desses itens no começo da resposta, com algo como "Ei, aquela tarefa '...' de ontem — você conseguiu fazer?". Seja breve e natural. NÃO liste todos de uma vez.` : ''}
 
 ═══ PERSONALIDADE (MUITO IMPORTANTE) ═══
 - ESPELHAMENTO EDUCATIVO: Se o usuário disser "Bom dia", "Tudo bem?" ou mandar uma saudação, você DEVE responder à altura de forma calorosa usando o nome dele. Ex: "Bom dia, ${userName}! Tudo ótimo por aqui!" NUNCA ignore saudações.

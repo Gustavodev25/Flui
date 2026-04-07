@@ -128,7 +128,7 @@ async function getTasksForUser(userId) {
 
   const { data: tasks, error } = await supabase
     .from('tasks')
-    .select('title, status, priority, due_date')
+    .select('title, status, priority, due_date, timer_fired, timer_fired_at')
     .eq('user_id', userId)
     .in('status', ['todo', 'doing'])
     .not('due_date', 'is', null)
@@ -138,7 +138,14 @@ async function getTasksForUser(userId) {
 
   if (error) {
     console.error('[Reminders] Erro ao buscar tarefas:', error.message);
-    return { overdue: [], today: [], tomorrow: [], upcoming: [] };
+    return { overdue: [], today: [], tomorrow: [], upcoming: [], recentlyFiredCount: 0 };
+  }
+
+  // Filtra tarefas cujo timer disparou nas últimas 12h — já foram notificadas, não repetir
+  const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+  function isRecentlyFired(task) {
+    if (!task.timer_fired || !task.timer_fired_at) return false;
+    return new Date(task.timer_fired_at) >= twelveHoursAgo;
   }
 
   const overdue = [];
@@ -153,7 +160,11 @@ async function getTasksForUser(userId) {
     else upcoming.push(task);
   }
 
-  return { overdue, today, tomorrow, upcoming };
+  const todayFiltered = today.filter(t => !isRecentlyFired(t));
+  const overdueFiltered = overdue.filter(t => !isRecentlyFired(t));
+  const recentlyFiredCount = (today.length - todayFiltered.length) + (overdue.length - overdueFiltered.length);
+
+  return { overdue: overdueFiltered, today: todayFiltered, tomorrow, upcoming, recentlyFiredCount };
 }
 
 async function getProductivityStats(userId) {
@@ -208,24 +219,30 @@ async function getProductivityStats(userId) {
 // ── Mensagens ─────────────────────────────────────────────────────────────────
 
 async function buildReminderMessage(userId, userName, period) {
-  const { overdue, today, tomorrow, upcoming } = await getTasksForUser(userId);
+  const { overdue, today, tomorrow, upcoming, recentlyFiredCount } = await getTasksForUser(userId);
   const stats = await getProductivityStats(userId);
 
   // Busca também tarefas sem prazo para dar contexto extra à IA
   // Exclui tarefas com timer ativo (timer_at definido e ainda não disparado)
   // — essas já terão sua própria notificação quando o timer expirar
-  const { data: noDueTasks } = await supabase
+  const { data: noDueRaw } = await supabase
     .from('tasks')
-    .select('title, status, priority, description')
+    .select('title, status, priority, description, timer_fired, timer_fired_at')
     .eq('user_id', userId)
     .in('status', ['todo', 'doing'])
     .is('due_date', null)
     .or('timer_at.is.null,timer_fired.eq.true')
     .limit(5);
 
-  const totalRelevant = overdue.length + today.length + tomorrow.length + upcoming.length + (noDueTasks || []).length;
+  const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+  const noDueTasks = (noDueRaw || []).filter(t => {
+    if (!t.timer_fired || !t.timer_fired_at) return true;
+    return new Date(t.timer_fired_at) < twelveHoursAgo;
+  });
 
-  // Se não tem absolutamente nada, não incomoda
+  const totalRelevant = overdue.length + today.length + tomorrow.length + upcoming.length + noDueTasks.length;
+
+  // Se não tem absolutamente nada relevante (ou tudo foi notificado nas últimas 12h), não incomoda
   if (totalRelevant === 0) return null;
 
   // Monta contexto para a IA
@@ -272,7 +289,7 @@ REGRAS:
 7. Termine com uma frase motivadora ou uma oferta de ajuda (ex: "Quer ajuda pra organizar o resto do dia?").
 8. NUNCA mostre IDs, links ou JSON.
 9. Linguagem natural e brasileira (pt-BR).
-10. NUNCA se apresente, liste funcionalidades ou descreva o que você é. Vá direto às tarefas do usuário.`;
+10. NUNCA se apresente, liste funcionalidades ou descreva o que você é. Vá direto às tarefas do usuário.${recentlyFiredCount > 0 ? `\n11. Há ${recentlyFiredCount} tarefa(s) que já foram notificadas por timer recentemente (últimas 12h) — NÃO as mencione de novo.` : ''}`;
 
   try {
     const response = await nimClient.chat.completions.create({
@@ -424,6 +441,23 @@ export async function runReminderCycle(sessions, sendMessage) {
     if (alreadySent(phone, period)) continue;
 
     try {
+      // Verificar janela de 24h antes de chamar a IA ou enviar mensagem
+      const { data: binding } = await supabase
+        .from('channel_bindings')
+        .select('last_inbound_at')
+        .eq('user_id', session.userId)
+        .eq('channel', 'whatsapp')
+        .maybeSingle();
+
+      const lastInbound = binding?.last_inbound_at ? new Date(binding.last_inbound_at) : null;
+      const windowOpen = lastInbound && (Date.now() - lastInbound.getTime()) < 24 * 60 * 60 * 1000;
+
+      if (!windowOpen) {
+        console.log(`[Reminders] Janela 24h fechada — skip ${period} para ${phone}`);
+        markSent(phone, period); // marcar como enviado pra não tentar de novo nesse período
+        continue;
+      }
+
       let message;
 
       if (period === 'weekly') {

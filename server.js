@@ -627,6 +627,15 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     // ===== AGENT LOOP =====
     sendTypingIndicator(userPhone, messageId);
 
+    // Atualiza janela de 24h: registra último inbound do usuário na binding
+    supabaseAdmin
+      .from('channel_bindings')
+      .update({ last_inbound_at: new Date().toISOString() })
+      .eq('channel', 'whatsapp')
+      .eq('external_user_id', userPhone)
+      .then(() => {})
+      .catch(err => console.error('[24hWindow] Erro ao atualizar last_inbound_at:', err.message));
+
     const result = await processConversationTurn({
       userId: session.userId,
       userName: session.userName,
@@ -1385,6 +1394,31 @@ setTimeout(() => {
 // ================== TIMERS DE TAREFAS ==================
 // Verifica a cada minuto avisos prévios e timers expirados
 
+// ── Pool de templates de timer (variação natural) ────────────────────────────
+const TIMER_WARN_TEMPLATES = [
+  '{name}, daqui a pouco é hora de: "{title}" (faltam {time})',
+  'Ei {name}, lembrete: "{title}" em {time}',
+  '{name}, não esquece — "{title}" daqui {time}',
+  'Atenção, {name}: "{title}" em {time}',
+  '{name}, tô passando pra lembrar: "{title}" em {time}',
+];
+
+const TIMER_COMBINED_TEMPLATES = [
+  '{name}, é agora: "{title}"',
+  'Ei {name}, hora de: "{title}"',
+  '{name}, bora — "{title}"',
+  'Chegou a hora, {name}: "{title}"',
+  '{name}, lembrete final: "{title}"',
+];
+
+function pickTimerTemplate(templates, name, title, timeLabel) {
+  const tpl = templates[Math.floor(Math.random() * templates.length)];
+  return tpl
+    .replace('{name}', name)
+    .replace('{title}', title)
+    .replace('{time}', timeLabel || '');
+}
+
 // Aviso prévio: envia X minutos antes do timer expirar
 // Regra: timers <= 5 min → avisa 1 min antes | <= 30 min → 2 min antes | > 30 min → 5 min antes
 function warnBeforeMs(timerAt) {
@@ -1411,6 +1445,37 @@ async function sendTimerMessage(userId, title, msg) {
   return enqueueSystemWhatsAppMessage(userId, msg, 'assistant_text');
 }
 
+// ── Janela de 24h do WhatsApp ─────────────────────────────────────────────────
+async function isWithin24hWindow(userId) {
+  try {
+    const { data: binding } = await supabaseAdmin
+      .from('channel_bindings')
+      .select('last_inbound_at')
+      .eq('user_id', userId)
+      .eq('channel', 'whatsapp')
+      .maybeSingle();
+    if (!binding?.last_inbound_at) return false;
+    const windowMs = 24 * 60 * 60 * 1000;
+    return (Date.now() - new Date(binding.last_inbound_at).getTime()) < windowMs;
+  } catch {
+    return true; // Em caso de erro, não bloquear o envio
+  }
+}
+
+async function saveMissedFollowup(userId, taskId, taskTitle, reminderType) {
+  try {
+    await supabaseAdmin.from('pending_followups').insert({
+      user_id: userId,
+      task_id: taskId || null,
+      task_title: taskTitle,
+      reminder_type: reminderType,
+      missed_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[24hWindow] Erro ao salvar follow-up:', err.message);
+  }
+}
+
 async function checkTaskTimers() {
   try {
     const now = new Date();
@@ -1432,10 +1497,23 @@ async function checkTaskTimers() {
 
         if (timerMs <= now.getTime()) {
           const { error: upErr } = await supabaseAdmin
-            .from('tasks').update({ timer_fired: true }).eq('id', task.id);
+            .from('tasks')
+            .update({ timer_fired: true, timer_fired_at: new Date().toISOString() })
+            .eq('id', task.id);
           if (upErr) { console.error(`[Timer] Erro ao marcar fired:`, upErr.message); continue; }
-          await sendTimerMessage(task.user_id, task.title, `${userName}, ta na hora: "${task.title}"`);
-          console.log(`[Timer] Expirado → "${task.title}"`);
+          const inWindow = await isWithin24hWindow(task.user_id);
+          if (!inWindow) {
+            await saveMissedFollowup(task.user_id, task.id, task.title, 'timer');
+            console.log(`[Timer] Janela 24h fechada — follow-up salvo → "${task.title}"`);
+          } else if (!task.timer_warned) {
+            // Nenhum aviso prévio foi enviado — enviar mensagem combinada agora
+            const msg = pickTimerTemplate(TIMER_COMBINED_TEMPLATES, userName, task.title, null);
+            await sendTimerMessage(task.user_id, task.title, msg);
+            console.log(`[Timer] Expirado (sem warn prévio, enviando combined) → "${task.title}"`);
+          } else {
+            // Aviso já foi enviado — suprimir fire message (economiza 1 mensagem Meta)
+            console.log(`[Timer] Expirado (warn já enviado, suprimindo fire) → "${task.title}"`);
+          }
           continue;
         }
 
@@ -1443,12 +1521,19 @@ async function checkTaskTimers() {
           const warnMs = warnBeforeMs(task.timer_at);
           const timeUntilTimer = timerMs - now.getTime();
           if (timeUntilTimer <= warnMs) {
-            const { error: upErr } = await supabaseAdmin
-              .from('tasks').update({ timer_warned: true }).eq('id', task.id);
-            if (upErr) { console.error(`[Timer] Erro ao marcar warned:`, upErr.message); continue; }
-            const timeLabel = formatWarnLabel(task.timer_at);
-            await sendTimerMessage(task.user_id, task.title, `${userName}, falta ${timeLabel}: "${task.title}"`);
-            console.log(`[Timer] Aviso previo → "${task.title}" (faltam ${timeLabel})`);
+            const inWindow = await isWithin24hWindow(task.user_id);
+            if (!inWindow) {
+              // Janela fechada — skip silencioso (o fire vai registrar o follow-up quando expirar)
+              console.log(`[Timer] Janela 24h fechada — skip warn → "${task.title}"`);
+            } else {
+              const { error: upErr } = await supabaseAdmin
+                .from('tasks').update({ timer_warned: true }).eq('id', task.id);
+              if (upErr) { console.error(`[Timer] Erro ao marcar warned:`, upErr.message); continue; }
+              const timeLabel = formatWarnLabel(task.timer_at);
+              const msg = pickTimerTemplate(TIMER_WARN_TEMPLATES, userName, task.title, timeLabel);
+              await sendTimerMessage(task.user_id, task.title, msg);
+              console.log(`[Timer] Aviso previo → "${task.title}" (faltam ${timeLabel})`);
+            }
           }
         }
       }
@@ -1479,8 +1564,13 @@ async function checkTaskTimers() {
 
         // Timer da subtarefa expirou
         if (subMs <= now.getTime()) {
-          sendTimerMessage(task.user_id, s.title, `${userName}, ta na hora: "${s.title}"`);
-          console.log(`[Timer] Subtarefa expirada → "${s.title}" (em "${task.title}")`);
+          if (!s.timer_warned) {
+            const msg = pickTimerTemplate(TIMER_COMBINED_TEMPLATES, userName, s.title, null);
+            sendTimerMessage(task.user_id, s.title, msg);
+            console.log(`[Timer] Subtarefa expirada (sem warn prévio) → "${s.title}" (em "${task.title}")`);
+          } else {
+            console.log(`[Timer] Subtarefa expirada (warn já enviado, suprimindo) → "${s.title}" (em "${task.title}")`);
+          }
           changed = true;
           return { ...s, timer_fired: true };
         }
@@ -1491,7 +1581,8 @@ async function checkTaskTimers() {
           const timeUntil = subMs - now.getTime();
           if (timeUntil <= warnMs) {
             const timeLabel = formatWarnLabel(s.timer_at);
-            sendTimerMessage(task.user_id, s.title, `${userName}, falta ${timeLabel}: "${s.title}"`);
+            const msg = pickTimerTemplate(TIMER_WARN_TEMPLATES, userName, s.title, timeLabel);
+            sendTimerMessage(task.user_id, s.title, msg);
             console.log(`[Timer] Aviso subtarefa → "${s.title}" (faltam ${timeLabel})`);
             changed = true;
             return { ...s, timer_warned: true };
