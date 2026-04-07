@@ -178,7 +178,7 @@ export const Topbar: React.FC = () => {
             <DropdownItem 
               icon={<LifeBuoy size={14} />}
               label="Suporte" 
-              onClick={() => { setIsDropdownOpen(false); window.open('https://wa.me/5518996239335?text=Olá,%20tenho%20uma%20dúvida.', '_blank') }} 
+              onClick={() => { setIsDropdownOpen(false); window.open('https://wa.me/5511925870754?text=Olá,%20tenho%20uma%20dúvida.', '_blank') }} 
             />
             
             <DropdownDivider />

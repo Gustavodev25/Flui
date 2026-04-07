@@ -10,7 +10,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useState, useEffect, useRef } from 'react'
 
-const WHATSAPP_NUMBER = '15551844002'
+const WHATSAPP_NUMBER = '5511925870754'
 const WHATSAPP_LINK = `https://wa.me/${WHATSAPP_NUMBER}`
 const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(WHATSAPP_LINK)}&bgcolor=f7f7f5&color=37352f&margin=4`
 

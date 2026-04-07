@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
-import { ArrowRight, Loader2 } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ArrowRight, Loader2, Tag, CheckCircle, XCircle } from 'lucide-react'
 import flowLogo from '../assets/logo/flow.png'
 import gratisLogo from '../assets/logo/gratis.png'
 import { useAuth } from '../contexts/AuthContext'
@@ -13,6 +13,13 @@ const CheckoutPreview: React.FC = () => {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(true)
+
+  // Cupom
+  const [promoCode, setPromoCode] = useState('')
+  const [promoLoading, setPromoLoading] = useState(false)
+  const [promoStatus, setPromoStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
+  const [promoLabel, setPromoLabel] = useState('')
+
   useEffect(() => {
     const checkStatus = async () => {
       if (!user) {
@@ -50,13 +57,47 @@ const CheckoutPreview: React.FC = () => {
     )
   }
 
+  const handleApplyPromo = async () => {
+    if (!promoCode.trim()) return
+    setPromoLoading(true)
+    setPromoStatus('idle')
+    setPromoLabel('')
+    try {
+      const { valid, discountLabel, error } = await apiFetch<{
+        valid?: boolean
+        discountLabel?: string
+        error?: string
+      }>('/api/stripe/validate-promo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promoCode: promoCode.trim().toUpperCase() }),
+      })
+      if (valid) {
+        setPromoStatus('valid')
+        setPromoLabel(discountLabel || 'Desconto aplicado!')
+      } else {
+        setPromoStatus('invalid')
+        setPromoLabel(error || 'Cupom inválido ou expirado.')
+      }
+    } catch {
+      setPromoStatus('invalid')
+      setPromoLabel('Não foi possível validar o cupom.')
+    } finally {
+      setPromoLoading(false)
+    }
+  }
+
   const handleStartPayment = async () => {
     setLoading(true)
     try {
+      const body: Record<string, string> = { userId: user.id, userEmail: user.email ?? '' }
+      if (promoStatus === 'valid' && promoCode.trim()) {
+        body.promoCode = promoCode.trim().toUpperCase()
+      }
       const { url, error } = await apiFetch<{ url?: string; error?: string }>('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, userEmail: user.email }),
+        body: JSON.stringify(body),
       })
       if (error) throw new Error(error)
       if (url) window.location.href = url
@@ -118,10 +159,56 @@ const CheckoutPreview: React.FC = () => {
               ))}
             </div>
 
+            {/* Campo de Cupom */}
+            <div className="mt-5 space-y-2">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Tag size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#37352f]/30" />
+                  <input
+                    type="text"
+                    value={promoCode}
+                    onChange={e => {
+                      setPromoCode(e.target.value.toUpperCase())
+                      setPromoStatus('idle')
+                      setPromoLabel('')
+                    }}
+                    onKeyDown={e => e.key === 'Enter' && handleApplyPromo()}
+                    placeholder="Código de cupom"
+                    className="w-full pl-8 pr-3 py-2.5 text-[11px] font-medium bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl text-[#37352f] placeholder:text-[#37352f]/25 focus:outline-none focus:border-[#37352f]/20 transition-colors"
+                  />
+                </div>
+                <button
+                  onClick={handleApplyPromo}
+                  disabled={promoLoading || !promoCode.trim()}
+                  className="px-4 py-2.5 bg-[#f7f7f5] border border-[#e9e9e7] text-[11px] font-bold text-[#37352f]/60 rounded-xl hover:bg-[#f1f1f0] hover:text-[#37352f] transition-all active:scale-[0.97] disabled:opacity-40 whitespace-nowrap"
+                >
+                  {promoLoading ? <Loader2 size={12} className="animate-spin" /> : 'Aplicar'}
+                </button>
+              </div>
+
+              <AnimatePresence>
+                {promoStatus !== 'idle' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    className={`flex items-center gap-1.5 text-[11px] font-medium px-1 ${
+                      promoStatus === 'valid' ? 'text-green-600' : 'text-red-500'
+                    }`}
+                  >
+                    {promoStatus === 'valid'
+                      ? <CheckCircle size={12} />
+                      : <XCircle size={12} />}
+                    {promoLabel}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
             <button
               onClick={handleStartPayment}
               disabled={loading}
-              className="w-full mt-5 py-3.5 bg-[#202020] text-white text-[11px] font-bold rounded-xl hover:bg-[#303030] transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm disabled:opacity-70"
+              className="w-full mt-4 py-3.5 bg-[#202020] text-white text-[11px] font-bold rounded-xl hover:bg-[#303030] transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm disabled:opacity-70"
             >
               {loading ? (
                 <Loader2 size={16} className="animate-spin text-white/50" />

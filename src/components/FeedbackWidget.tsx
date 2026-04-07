@@ -39,7 +39,7 @@ export const FeedbackWidget = ({ variant = 'floating' }: FeedbackWidgetProps) =>
   const handleSend = () => {
     if (!motivo.trim()) return
     const msg = `*Feedback do App*\n\n👤 Nome: ${name || 'Não informado'}\n📧 Email: ${email || 'Não informado'}\n\n💬 Mensagem:\n${motivo}`
-    const url = `https://wa.me/5518996239335?text=${encodeURIComponent(msg)}`
+    const url = `https://wa.me/5511925870754?text=${encodeURIComponent(msg)}`
     window.open(url, '_blank')
     setOpen(false)
   }

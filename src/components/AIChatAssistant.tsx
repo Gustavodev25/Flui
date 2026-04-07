@@ -10,6 +10,52 @@ interface Message {
   isReminder?: boolean
 }
 
+const formatMessage = (text: string) => {
+  const lines = text.split('\n')
+  const result: React.ReactNode[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+    // Bullet: lines starting with "* " or "- "
+    const bulletMatch = line.match(/^[\*\-]\s+(.*)/)
+    if (bulletMatch) {
+      const bulletItems: string[] = []
+      while (i < lines.length) {
+        const bl = lines[i].match(/^[\*\-]\s+(.*)/)
+        if (bl) { bulletItems.push(bl[1]); i++ }
+        else break
+      }
+      result.push(
+        <ul key={`ul-${i}`} className="list-disc list-inside space-y-1 my-1">
+          {bulletItems.map((item, j) => (
+            <li key={j}>{formatInline(item)}</li>
+          ))}
+        </ul>
+      )
+      continue
+    }
+    // Empty line = spacer
+    if (line.trim() === '') {
+      result.push(<br key={`br-${i}`} />)
+    } else {
+      result.push(<p key={`p-${i}`} className="mb-0.5">{formatInline(line)}</p>)
+    }
+    i++
+  }
+  return <>{result}</>
+}
+
+const formatInline = (text: string): React.ReactNode => {
+  const parts = text.split(/(\*\*.*?\*\*)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>
+    }
+    return part
+  })
+}
+
 // Controla se já buscou lembrete nesta sessão (evita repetição ao minimizar/maximizar)
 const reminderSessionKey = () => {
   const today = new Date().toISOString().split('T')[0]
@@ -223,7 +269,7 @@ const AIChatAssistant: React.FC = () => {
                               <span className="text-[10px] font-bold text-amber-600/80 tracking-wider">Lembrete Proativo</span>
                             </div>
                           )}
-                          <span className="whitespace-pre-wrap">{m.content}</span>
+                          {m.role === 'assistant' ? formatMessage(m.content) : <span className="whitespace-pre-wrap">{m.content}</span>}
                         </div>
                       </div>
                     </motion.div>

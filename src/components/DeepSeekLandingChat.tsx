@@ -9,7 +9,7 @@ interface Message {
   content: string
 }
 
-const WHATSAPP_NUMBER = '5518996239335'
+const WHATSAPP_NUMBER = '5511925870754'
 const WHATSAPP_LINK = `https://wa.me/${WHATSAPP_NUMBER}`
 
 const SYSTEM_PROMPT = `Você é o Lui, assistente virtual oficial do **Flui** — um sistema de produtividade e gestão de tarefas premium, feito para quem busca clareza e foco total.
