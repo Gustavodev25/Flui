@@ -647,18 +647,36 @@ const MUTATING_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskDelete', 'TaskB
 // Gera ACK personalizado com chamada LLM mínima (roda em paralelo com history/context)
 async function generateAck(userMessage, userName) {
   try {
+    const shortName = String(userName || 'você').split(' ')[0];
     const { response } = await createChatCompletion({
       messages: [
         {
           role: 'system',
-          content: `Você é o Lui, assistente de produtividade no WhatsApp. Gere UMA frase curta e natural em português brasileiro reconhecendo que recebeu o pedido de ${userName} e está processando. Sem emojis. Exemplos: "Certo, Rafael! Deixa eu organizar isso..." / "Entendido, um segundo..." / "Recebido, já estou criando tudo..."`,
+          content: `Você é o Lui, assistente de produtividade no WhatsApp. ${shortName} acabou de te mandar uma mensagem (texto ou áudio). Gere UMA frase curtíssima de reconhecimento que mostre que você ENTENDEU o ASSUNTO, antes de começar a processar.
+
+REGRAS RÍGIDAS:
+- UMA frase só, MÁXIMO 10 palavras
+- Português brasileiro coloquial, natural e levemente espontâneo
+- Mencione brevemente o ASSUNTO específico da mensagem (não fale genérico)
+- NÃO confirme conclusão ("feito", "anotei", "criei") — você ainda está PROCESSANDO
+- NÃO use emojis
+- NÃO use o nome em toda mensagem (alterne)
+- Tom de parceiro de organização, não robô
+
+EXEMPLOS DE BOM ACK (notar que cada um menciona o assunto real):
+- Mensagem: "preciso lembrar de pagar a conta de luz amanhã" → "Show, deixa eu anotar essa da conta de luz..."
+- Mensagem: "atazanar minha cachorrinha daqui 3 minutinhos" → "Aaah, vou marcar essa da cachorrinha já já..."
+- Mensagem: "amanhã às 14h tenho consulta no dentista" → "Beleza, deixa eu colocar essa do dentista pra amanhã..."
+- Mensagem: "preciso comprar pão, leite e ovos" → "Tô separando essas da compra aqui..."
+
+Responda APENAS com a frase de ack, nada mais.`,
         },
         { role: 'user', content: userMessage.substring(0, 300) },
       ],
-      max_tokens: 50,
-      temperature: 0.7,
+      max_tokens: 40,
+      temperature: 0.8,
     });
-    return response.choices[0]?.message?.content?.trim() || null;
+    return response.choices[0]?.message?.content?.trim().replace(/^["']|["']$/g, '') || null;
   } catch {
     return null;
   }
@@ -727,10 +745,28 @@ export async function queryEngineLoop(
   ]);
 
   if (shouldAck) {
-    const ackText = generateQuickAck(userMessage, userName);
-    if (ackText) {
-      Promise.resolve(onAck(ackText)).catch(() => {});
-    }
+    // Tenta gerar ack contextual via LLM, com fallback para template se demorar mais que 2.5s
+    // (assim a ack nunca chega depois da resposta principal)
+    const fallbackAck = generateQuickAck(userMessage, userName);
+    let ackSent = false;
+    const sendAckOnce = (text) => {
+      if (ackSent || !text) return;
+      ackSent = true;
+      Promise.resolve(onAck(text)).catch(() => {});
+    };
+
+    const ackTimeoutMs = 2500;
+    const timeoutHandle = setTimeout(() => sendAckOnce(fallbackAck), ackTimeoutMs);
+
+    generateAck(userMessage, userName)
+      .then((llmAck) => {
+        clearTimeout(timeoutHandle);
+        sendAckOnce(llmAck || fallbackAck);
+      })
+      .catch(() => {
+        clearTimeout(timeoutHandle);
+        sendAckOnce(fallbackAck);
+      });
   }
 
   // Data detectada na mensagem — usada para injetar nos args se o modelo esquecer
