@@ -292,6 +292,8 @@ ${pendingFollowups.map(f => {
 - Se o usuário mencionar expressão de tempo curto junto com uma tarefa, use o campo timer_minutes no TaskCreate ou TaskBatchCreate.
 - Converta QUALQUER variação de:
   "em 10 minutos" / "daqui 10 minutos" / "daqui 10 min"    → timer_minutes: 10
+  "daqui uns 3 minutinho" / "uns 3 minutinhos"              → timer_minutes: 3  ← use o número EXATO, não arredonde
+  "daqui uns 5 minutinhos" / "em uns 5 minutos"             → timer_minutes: 5
   "em meia hora" / "daqui meia hora"                        → timer_minutes: 30
   "em 45 minutos" / "daqui 45 minutos"                      → timer_minutes: 45
   "em 1 hora" / "daqui 1 hora" / "daqui uma hora"           → timer_minutes: 60
@@ -507,7 +509,8 @@ function extractTimerMinutesFromMessage(message) {
   const lower = message.toLowerCase();
 
   const N = '(\\d+(?:[,.]\\d+)?|um|uma|dois|duas|tr[eê]s|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta)';
-  const PREF = '(?:daqui(?:\\s+a)?|de\\s+aqui(?:\\s+a)?|em)\\s+';
+  // "uns/umas" é opcional após o prefixo (ex: "daqui uns 3 minutinhos")
+  const PREF = '(?:daqui(?:\\s+a)?|de\\s+aqui(?:\\s+a)?|em)\\s+(?:uns?|umas?)?\\s*';
 
   // 1. Formato compacto: "1h30", "2h", "1h30min"
   const compactFull = lower.match(/(?:daqui(?:\s+a)?|de\s+aqui(?:\s+a)?|em)\s+(\d+)h(\d+)(?:min(?:uto[s]?)?)?\b/i);
@@ -524,7 +527,7 @@ function extractTimerMinutesFromMessage(message) {
   }
 
   // 3. "X hora(s) e Y minuto(s)"
-  const horasEMin = lower.match(new RegExp(PREF + N + '\\s+hora[s]?\\s+e\\s+' + N + '\\s+min(?:uto[s]?)?\\b', 'i'));
+  const horasEMin = lower.match(new RegExp(PREF + N + '\\s+hora[s]?\\s+e\\s+' + N + '\\s+min(?:utinho[s]?|uto[s]?)?\\b', 'i'));
   if (horasEMin) {
     const h = parsePTNum(horasEMin[1]);
     const m = parsePTNum(horasEMin[2]);
@@ -543,7 +546,7 @@ function extractTimerMinutesFromMessage(message) {
   }
 
   // 6. "X minuto(s)/min"
-  const minutos = lower.match(new RegExp(PREF + N + '\\s+min(?:uto[s]?)?\\b', 'i'));
+  const minutos = lower.match(new RegExp(PREF + N + '\\s+min(?:utinho[s]?|uto[s]?)?\\b', 'i'));
   if (minutos) {
     const m = parsePTNum(minutos[1]);
     if (m !== null) return Math.round(m);
