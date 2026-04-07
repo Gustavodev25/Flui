@@ -271,14 +271,15 @@ REGRAS:
 6. Use "hoje", "amanhã", "ontem" em vez de datas ISO.
 7. Termine com uma frase motivadora ou uma oferta de ajuda (ex: "Quer ajuda pra organizar o resto do dia?").
 8. NUNCA mostre IDs, links ou JSON.
-9. Linguagem natural e brasileira (pt-BR).`;
+9. Linguagem natural e brasileira (pt-BR).
+10. NUNCA se apresente, liste funcionalidades ou descreva o que você é. Vá direto às tarefas do usuário.`;
 
   try {
     const response = await nimClient.chat.completions.create({
       model: REMINDER_MODEL_ID,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: 'Gere a mensagem de lembrete para o WhatsApp agora.' }
+        { role: 'user', content: `Gere o lembrete para ${userName} com base exatamente nas tarefas listadas acima. Seja direto, fale só das tarefas, não se apresente.` }
       ],
       temperature: 0.7,
       max_tokens: 400,
