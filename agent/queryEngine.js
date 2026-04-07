@@ -370,6 +370,49 @@ export function hasMultipleTasks(message) {
   return false;
 }
 
+function normalizeTextForIntent(message) {
+  return String(message || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function getSimpleTaskListRequest(message) {
+  const lower = normalizeTextForIntent(message);
+  const hasQuestion = /\b(quais?|qual|listar?|lista|mostra|mostrar|ver|tenho|pendentes?|tarefas?)\b/.test(lower);
+  const asksTasks = /\b(tarefas?|pendencias?|afazeres?|coisas?\s+pra\s+fazer|tenho\s+pra\s+fazer|tenho\s+para\s+fazer)\b/.test(lower);
+
+  if (!hasQuestion || !asksTasks) return null;
+  if (isCreationIntent(message)) return null;
+
+  return {
+    due_date: /\b(hoje|pra\s+hoje|para\s+hoje)\b/.test(lower) ? getTodayISO() : undefined,
+  };
+}
+
+function buildSimpleTaskListResponse(userMessage, userName, result, filter = {}) {
+  const greeting = /\bbom\s+dia\b/i.test(userMessage)
+    ? 'Bom dia'
+    : /\bboa\s+tarde\b/i.test(userMessage)
+      ? 'Boa tarde'
+      : /\bboa\s+noite\b/i.test(userMessage)
+        ? 'Boa noite'
+        : null;
+  const prefix = greeting ? `${greeting}, ${userName}! ` : `${userName}, `;
+  const scope = filter.due_date ? 'pra hoje' : 'pendentes';
+
+  if (!result?.success) {
+    return `${prefix}não consegui buscar suas tarefas agora. Tenta de novo em alguns instantes.`;
+  }
+
+  if (!result.count) {
+    return filter.due_date
+      ? `${prefix}hoje está tranquilo: não encontrei tarefas pendentes pra hoje.`
+      : `${prefix}não encontrei tarefas pendentes no momento.`;
+  }
+
+  return `${prefix}você tem ${result.count} tarefa${result.count > 1 ? 's' : ''} ${scope}:\n${result.formatted_list}`;
+}
 
 // Extrai subtópicos da mensagem quando o modelo não gerou subtarefas
 // Cobre padrões como "sobre X, sobre Y", "primeiro X, segundo Y", "X, Y e Z"
@@ -768,6 +811,34 @@ export async function queryEngineLoop(
     trace.error_class = telemetry.error_class || trace.error_class;
   };
 
+  const simpleTaskListRequest = getSimpleTaskListRequest(userMessage);
+  if (simpleTaskListRequest) {
+    try {
+      const startedAt = Date.now();
+      const result = await executeTool('TaskList', {
+        limit: 10,
+        ...(simpleTaskListRequest.due_date ? { due_date: simpleTaskListRequest.due_date } : {}),
+      }, { userId });
+      const content = buildSimpleTaskListResponse(userMessage, userName, result, simpleTaskListRequest);
+      const history = await getHistory(sessionId);
+
+      trace.provider = 'direct';
+      trace.model = 'task-list';
+      trace.latency_ms += Date.now() - startedAt;
+      trace.tool_count += 1;
+
+      await saveHistory(sessionId, [
+        ...history,
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content },
+      ]);
+
+      return returnTelemetry ? { content, telemetry: trace } : content;
+    } catch (err) {
+      console.error('[QueryEngine] Erro na rota direta de TaskList:', err.message);
+      trace.error_class = err.code || err.name || 'task_list_direct_error';
+    }
+  }
   // Busca histórico, contexto e ACK em paralelo — custo zero extra
   const [history, systemPrompt] = await Promise.all([
     getHistory(sessionId),
