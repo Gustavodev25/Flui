@@ -777,10 +777,10 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
 // 1. Criar Sessão de Checkout
 app.post('/api/stripe/create-checkout-session', async (req, res) => {
-  const { userId, userEmail } = req.body;
+  const { userId, userEmail, promoCode } = req.body;
 
   try {
-    const session = await stripe.checkout.sessions.create({
+    const sessionParams = {
       payment_method_types: ['card'],
       customer_email: userEmail,
       line_items: [
@@ -795,11 +795,55 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
       metadata: {
         userId: userId,
       },
-    });
+    };
 
+    if (promoCode) {
+      // Resolve o código promocional para o ID interno do Stripe
+      const promoCodes = await stripe.promotionCodes.list({ code: promoCode, active: true, limit: 1 });
+      if (promoCodes.data.length > 0) {
+        sessionParams.discounts = [{ promotion_code: promoCodes.data[0].id }];
+      } else {
+        return res.status(400).json({ error: 'Cupom inválido ou expirado.' });
+      }
+    } else {
+      // Sem código: habilita o campo nativo de cupom na página do Stripe
+      sessionParams.allow_promotion_codes = true;
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
     res.json({ url: session.url });
   } catch (error) {
     console.error('Stripe Session Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 2. Validar Código Promocional
+app.post('/api/stripe/validate-promo', async (req, res) => {
+  const { promoCode } = req.body;
+  if (!promoCode) return res.status(400).json({ error: 'Código não informado.' });
+
+  try {
+    const promoCodes = await stripe.promotionCodes.list({ code: promoCode, active: true, limit: 1 });
+
+    if (promoCodes.data.length === 0) {
+      return res.status(404).json({ error: 'Cupom inválido ou expirado.' });
+    }
+
+    const promo = promoCodes.data[0];
+    const coupon = promo.coupon;
+
+    let discountLabel = '';
+    if (coupon.percent_off) {
+      discountLabel = `${coupon.percent_off}% de desconto`;
+    } else if (coupon.amount_off) {
+      const amount = (coupon.amount_off / 100).toFixed(2).replace('.', ',');
+      discountLabel = `R$ ${amount} de desconto`;
+    }
+
+    res.json({ valid: true, discountLabel, promoId: promo.id });
+  } catch (error) {
+    console.error('Validate Promo Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
