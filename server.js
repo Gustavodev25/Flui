@@ -75,6 +75,7 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
   switch (event.type) {
     case 'checkout.session.completed': {
       const userId = session.metadata.userId;
+      const planId = session.metadata.plan || 'flow';
       const customerId = session.customer;
       const subscriptionId = session.subscription;
 
@@ -101,7 +102,7 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
             stripe_customer_id: customerId,
             stripe_subscription_id: subscriptionId,
             status: 'active',
-            plan_id: 'flow',
+            plan_id: planId,
             current_period_end: periodEnd,
             updated_at: new Date().toISOString(),
           })
@@ -116,7 +117,7 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
             stripe_customer_id: customerId,
             stripe_subscription_id: subscriptionId,
             status: 'active',
-            plan_id: 'flow',
+            plan_id: planId,
             current_period_end: periodEnd,
             updated_at: new Date().toISOString(),
           });
@@ -142,6 +143,47 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
         .eq('stripe_subscription_id', subId);
 
       if (updateError) console.error('[Stripe] Erro ao atualizar assinatura:', updateError);
+
+      // Se o plano foi cancelado ou ficou inativo, revogar membros do workspace
+      const isInactive = ['canceled', 'unpaid', 'past_due', 'incomplete_expired'].includes(status);
+      if (isInactive || event.type === 'customer.subscription.deleted') {
+        // Encontra o dono pela stripe_subscription_id
+        const { data: ownerSub } = await supabaseAdmin
+          .from('subscriptions')
+          .select('user_id')
+          .eq('stripe_subscription_id', subId)
+          .maybeSingle();
+
+        if (ownerSub?.user_id) {
+          // Busca todos os membros do workspace do dono
+          const { data: wsMembers } = await supabaseAdmin
+            .from('workspace_members')
+            .select('member_user_id')
+            .eq('workspace_owner_id', ownerSub.user_id);
+
+          if (wsMembers?.length) {
+            const memberIds = wsMembers.map(m => m.member_user_id).filter(Boolean);
+
+            // Revoga apenas planos derivados (sem stripe_subscription_id próprio)
+            const { data: memberSubs } = await supabaseAdmin
+              .from('subscriptions')
+              .select('user_id, stripe_subscription_id')
+              .in('user_id', memberIds);
+
+            const derivedIds = (memberSubs || [])
+              .filter(s => !s.stripe_subscription_id)
+              .map(s => s.user_id);
+
+            if (derivedIds.length) {
+              await supabaseAdmin
+                .from('subscriptions')
+                .update({ status: 'inactive', updated_at: new Date().toISOString() })
+                .in('user_id', derivedIds);
+              console.log(`[Workspace] Plano revogado de ${derivedIds.length} membro(s) do workspace do owner=${ownerSub.user_id}`);
+            }
+          }
+        }
+      }
       break;
     }
   }
@@ -255,12 +297,12 @@ async function getWhatsAppSession(phone) {
     .limit(1)
     .maybeSingle();
 
-  const hasActiveFlow = subData?.status === 'active' && subData?.plan_id === 'flow';
+  const hasActiveFlow = subData?.status === 'active' && ['flow', 'pulse'].includes(subData?.plan_id);
 
   if (!hasActiveFlow) {
-    console.log(`[WhatsApp] ❌ Binding existe para ${normalizedPhone} mas plano Flow expirou/inativo`);
+    console.log(`[WhatsApp] ❌ Binding existe para ${normalizedPhone} mas plano Flow/Pulse expirou/inativo`);
     await sendWhatsAppMessage(normalizedPhone,
-      "Oi! Seu plano *Flow* não está mais ativo 😕\n\nO assistente via WhatsApp é exclusivo para assinantes do Flow.\n\nRenove em: *flui.app → Assinatura*\n\nAssim que ativar, volte aqui! 🚀"
+      "Oi! Sua assinatura não está mais ativa 😕\n\nO assistente via WhatsApp é exclusivo para assinantes do Flow ou Pulse.\n\nRenove em: *flui.app → Assinatura*\n\nAssim que ativar, volte aqui! 🚀"
     );
     return { blocked: true };
   }
@@ -565,15 +607,15 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
           .limit(1)
           .maybeSingle();
 
-        const hasActiveFlow = subData?.status === 'active' && subData?.plan_id === 'flow';
+        const hasActiveFlow = subData?.status === 'active' && ['flow', 'pulse'].includes(subData?.plan_id);
 
         if (!hasActiveFlow) {
-          console.log(`[WhatsApp Auth] ❌ Usuário ${data.user.email} bloqueado — sem plano Flow ativo`);
+          console.log(`[WhatsApp Auth] ❌ Usuário ${data.user.email} bloqueado — sem plano Flow/Pulse ativo`);
           session.step = 'ask_email';
           pendingAuthSessions.set(userPhone, session);
 
           await sendWhatsAppMessage(userPhone,
-            "Login OK, mas o assistente via WhatsApp é exclusivo do *plano Flow* \n\nVocê está no plano gratuito. Para liberar, acesse:\n *flui.app → Assinatura → Assinar Flow*\n\nDepois é só voltar aqui e conectar!"
+            "Login OK, mas o assistente via WhatsApp é exclusivo dos planos *Flow* ou *Pulse* \n\nVocê está no plano gratuito. Para liberar, acesse:\n *flui.app → Assinatura*\n\nDepois é só voltar aqui e conectar!"
           );
           return;
         }
@@ -786,17 +828,30 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
 // ================== STRIPE ==================
 
+// Price IDs por plano
+const PLAN_PRICE_IDS = {
+  flow:  'price_1TJFEGJBeIyj93UbSOp5yZuY',
+  pulse: 'price_1TJxgVJBeIyj93UbvhaindFh',
+};
+
 // 1. Criar Sessão de Checkout
 app.post('/api/stripe/create-checkout-session', async (req, res) => {
-  const { userId, userEmail, promoCode } = req.body;
+  const { userId, userEmail, promoCode, plan } = req.body;
+
+  console.log(`[Stripe] create-checkout-session → userId=${userId} plan=${plan} email=${userEmail}`);
 
   try {
+    const resolvedPlan = plan === 'pulse' ? 'pulse' : 'flow';
+    const priceId = PLAN_PRICE_IDS[resolvedPlan];
+
+    console.log(`[Stripe] Plano resolvido: ${resolvedPlan} → priceId: ${priceId}`);
+
     const sessionParams = {
       payment_method_types: ['card'],
       customer_email: userEmail,
       line_items: [
         {
-          price: 'price_1TJFEGJBeIyj93UbSOp5yZuY',
+          price: priceId,
           quantity: 1,
         },
       ],
@@ -805,6 +860,7 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
       cancel_url: `${FRONTEND_URL}/subscription?canceled=true`,
       metadata: {
         userId: userId,
+        plan: resolvedPlan,
       },
     };
 
@@ -1186,7 +1242,8 @@ app.get('/api/admin/users', async (req, res) => {
         name: u.user_metadata?.name || '',
         createdAt: u.created_at,
         lastSignIn: u.last_sign_in_at,
-        hasFlow: sub?.status === 'active' && sub?.plan_id === 'flow',
+        hasFlow: sub?.status === 'active' && ['flow', 'pulse'].includes(sub?.plan_id),
+        planId: sub?.status === 'active' ? (sub?.plan_id || null) : null,
         subscriptionStatus: sub?.status || 'none',
       };
     });
@@ -1199,13 +1256,15 @@ app.get('/api/admin/users', async (req, res) => {
 });
 
 app.post('/api/admin/users/grant', async (req, res) => {
-  const { password, userId } = req.body;
+  const { password, userId, plan } = req.body;
   if (password !== 'AdminFlui123@') {
     return res.status(401).json({ error: 'Senha incorreta!' });
   }
   if (!userId) {
     return res.status(400).json({ error: 'userId obrigatório' });
   }
+
+  const resolvedPlan = plan === 'pulse' ? 'pulse' : 'flow';
 
   try {
     const { data: existing } = await supabaseAdmin
@@ -1218,19 +1277,20 @@ app.post('/api/admin/users/grant', async (req, res) => {
     if (existing) {
       await supabaseAdmin.from('subscriptions').update({
         status: 'active',
-        plan_id: 'flow',
+        plan_id: resolvedPlan,
         updated_at: new Date().toISOString()
       }).eq('user_id', userId);
     } else {
       await supabaseAdmin.from('subscriptions').insert({
         user_id: userId,
         status: 'active',
-        plan_id: 'flow',
+        plan_id: resolvedPlan,
         updated_at: new Date().toISOString()
       });
     }
 
-    res.json({ success: true });
+    console.log(`[Admin] Plano ${resolvedPlan} concedido para userId=${userId}`);
+    res.json({ success: true, plan: resolvedPlan });
   } catch (error) {
     console.error('Erro ao conceder acesso:', error.message);
     res.status(500).json({ error: error.message });
@@ -1280,7 +1340,228 @@ app.get('/api/admin/stats', async (req, res) => {
   }
 });
 
+// ── Admin Messages Log ────────────────────────────────────────────
+app.get('/api/admin/messages', async (req, res) => {
+  const { password, page = 1, limit = 50, channel, search } = req.query;
+  if (password !== 'AdminFlui123@') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const pageNum = parseInt(page, 10) || 1;
+    const limitNum = Math.min(parseInt(limit, 10) || 50, 200);
+    const offset = (pageNum - 1) * limitNum;
+
+    // Build query for messages
+    let query = supabaseAdmin
+      .from('conversation_messages')
+      .select('id, thread_id, user_id, channel, direction, role, message_type, content, status, provider, model, latency_ms, fallback_used, tool_count, created_at', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limitNum - 1);
+
+    if (channel && channel !== 'all') {
+      query = query.eq('channel', channel);
+    }
+
+    const { data: messages, count, error: msgError } = await query;
+    if (msgError) throw msgError;
+
+    // Get unique user IDs to fetch user info
+    const userIds = [...new Set((messages || []).map(m => m.user_id).filter(Boolean))];
+    let usersMap = {};
+
+    if (userIds.length > 0) {
+      const { data: { users }, error: usersErr } = await supabaseAdmin.auth.admin.listUsers();
+      if (!usersErr && users) {
+        for (const u of users) {
+          if (userIds.includes(u.id)) {
+            usersMap[u.id] = {
+              name: u.user_metadata?.full_name || u.user_metadata?.name || u.email?.split('@')[0] || 'Desconhecido',
+              email: u.email,
+              avatar: u.user_metadata?.avatar_url || null,
+            };
+          }
+        }
+      }
+    }
+
+    // Merge user info into messages
+    let enrichedMessages = (messages || []).map(m => ({
+      ...m,
+      user: usersMap[m.user_id] || { name: 'Desconhecido', email: '—', avatar: null },
+    }));
+
+    // Apply search filter (client-side since we need user info)
+    if (search) {
+      const searchLower = search.toLowerCase();
+      enrichedMessages = enrichedMessages.filter(m =>
+        m.user.name.toLowerCase().includes(searchLower) ||
+        m.user.email.toLowerCase().includes(searchLower) ||
+        (m.content && m.content.toLowerCase().includes(searchLower))
+      );
+    }
+
+    res.json({
+      messages: enrichedMessages,
+      total: count || 0,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil((count || 0) / limitNum),
+    });
+  } catch (error) {
+    console.error('Erro ao buscar mensagens admin:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ── Workspace Members ─────────────────────────────────────────────
+
+// Retorna o workspace ao qual o usuário pertence como membro convidado
+app.get('/api/workspace/my-membership', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
+
+  try {
+    const { data: membership } = await supabaseAdmin
+      .from('workspace_members')
+      .select('workspace_owner_id')
+      .eq('member_user_id', userId)
+      .maybeSingle();
+
+    if (!membership) return res.json({ membership: null });
+
+    // Busca informações do dono do workspace
+    const { data: { user: owner }, error: ownerErr } = await supabaseAdmin.auth.admin.getUserById(membership.workspace_owner_id);
+    if (ownerErr || !owner) return res.json({ membership: null });
+
+    // Busca o plano do dono
+    const { data: ownerSub } = await supabaseAdmin
+      .from('subscriptions')
+      .select('status, plan_id')
+      .eq('user_id', membership.workspace_owner_id)
+      .maybeSingle();
+
+    res.json({
+      membership: {
+        ownerName: owner.user_metadata?.full_name || owner.user_metadata?.name || owner.email?.split('@')[0] || 'Workspace',
+        ownerEmail: owner.email,
+        planId: ownerSub?.plan_id || null,
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Retorna tarefas compartilhadas do workspace (visíveis a todos os membros)
+// - Se userId é membro: retorna tarefas workspace do owner dele
+// - Se userId é owner: retorna todas as tarefas workspace do seu workspace (próprias + de membros)
+app.get('/api/workspace/shared-tasks', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
+
+  try {
+    // Verifica se é membro de algum workspace
+    const { data: membership } = await supabaseAdmin
+      .from('workspace_members')
+      .select('workspace_owner_id')
+      .eq('member_user_id', userId)
+      .maybeSingle();
+
+    let ownerId = membership ? membership.workspace_owner_id : userId;
+
+    // Verifica se userId é owner (tem membros)
+    const { count: memberCount } = await supabaseAdmin
+      .from('workspace_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('workspace_owner_id', userId);
+
+    const isOwner = !membership && (memberCount || 0) > 0;
+    const isMember = !!membership;
+
+    if (!isOwner && !isMember) {
+      return res.json({ tasks: [], workspaceOwnerId: null });
+    }
+
+    // Busca tarefas workspace do owner (próprias do owner)
+    const { data: ownerTasks, error: ownerErr } = await supabaseAdmin
+      .from('tasks')
+      .select('*')
+      .eq('workspace_owner_id', ownerId)
+      .eq('visibility', 'workspace')
+      .order('created_at', { ascending: false });
+
+    if (ownerErr) throw ownerErr;
+
+    // Busca info dos autores para exibição no card
+    const authorIds = [...new Set((ownerTasks || []).map(t => t.user_id).filter(Boolean))];
+    let authorsMap = {};
+
+    if (authorIds.length > 0) {
+      const { data: { users }, error: usersErr } = await supabaseAdmin.auth.admin.listUsers();
+      if (!usersErr && users) {
+        for (const u of users) {
+          if (authorIds.includes(u.id)) {
+            authorsMap[u.id] = {
+              name: u.user_metadata?.full_name || u.user_metadata?.name || u.email?.split('@')[0] || 'Membro',
+              avatar: u.user_metadata?.avatar_url || null,
+              email: u.email,
+            };
+          }
+        }
+      }
+    }
+
+    const tasks = (ownerTasks || []).map(t => ({
+      ...t,
+      author: authorsMap[t.user_id] || null,
+    }));
+
+    res.json({ tasks, workspaceOwnerId: ownerId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cria uma tarefa compartilhada no workspace (membro cria tarefa visível para todos)
+app.post('/api/workspace/shared-tasks', async (req, res) => {
+  const { userId, task } = req.body;
+  if (!userId || !task) return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
+
+  try {
+    // Descobre o ownerId do workspace
+    const { data: membership } = await supabaseAdmin
+      .from('workspace_members')
+      .select('workspace_owner_id')
+      .eq('member_user_id', userId)
+      .maybeSingle();
+
+    const ownerId = membership ? membership.workspace_owner_id : userId;
+
+    const { data, error } = await supabaseAdmin
+      .from('tasks')
+      .insert([{
+        user_id: userId,
+        workspace_owner_id: ownerId,
+        visibility: 'workspace',
+        title: task.title,
+        status: task.status || 'todo',
+        priority: task.priority || 'medium',
+        due_date: (task.dueDate && task.dueDate !== 'Sem prazo') ? task.dueDate : null,
+        source: task.source || 'user',
+        progress: task.progress || 0,
+        description: task.description || '',
+        subtasks: task.subtasks || [],
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ task: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/workspace/members', async (req, res) => {
   const { userId } = req.query;
@@ -1326,11 +1607,159 @@ app.get('/api/workspace/members', async (req, res) => {
   }
 });
 
+const WORKSPACE_MEMBER_LIMIT = 5;
+
+// ── Recuperação de senha via código de 6 dígitos ──────────────────────────────
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email obrigatório' });
+
+  try {
+    // Verifica se o usuário existe
+    const { data: { users }, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+    if (listErr) throw listErr;
+
+    const user = users.find(u => u.email?.toLowerCase() === email.toLowerCase());
+    if (!user) {
+      // Retorna sucesso mesmo assim para não expor quais emails existem
+      return res.json({ ok: true });
+    }
+
+    // Gera código de 6 dígitos
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
+
+    // Remove códigos anteriores do mesmo email
+    await supabaseAdmin.from('password_reset_codes').delete().eq('email', email.toLowerCase());
+
+    // Salva novo código
+    const { error: insertErr } = await supabaseAdmin.from('password_reset_codes').insert({
+      email: email.toLowerCase(),
+      code,
+      expires_at: expiresAt.toISOString(),
+    });
+    if (insertErr) throw insertErr;
+
+    // Envia email via Resend
+    await resend.emails.send({
+      from: 'Flui <noreply@flui.ia.br>',
+      to: email,
+      subject: 'Seu código de redefinição de senha — Flui',
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 24px; color: #37352f;">
+          <img src="https://uzyngunwxqjsukbhieei.supabase.co/storage/v1/object/public/Fotos/ZombieingDoodle.png" alt="Flui" style="width: 140px; height: auto; margin-bottom: 24px; display: block;">
+          <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Redefinição de senha</h2>
+          <p style="font-size: 14px; color: #6b6b6b; margin-bottom: 24px;">
+            Use o código abaixo para redefinir sua senha. Ele expira em <strong>15 minutos</strong>.
+          </p>
+          <div style="background: #f7f7f5; border: 1px solid #e9e9e7; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 24px;">
+            <span style="font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #37352f; font-family: monospace;">${code}</span>
+          </div>
+          <p style="font-size: 12px; color: #aaa; margin-top: 8px;">
+            Se você não solicitou a redefinição de senha, pode ignorar este email com segurança.
+          </p>
+        </div>
+      `,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[forgot-password]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/verify-reset-code', async (req, res) => {
+  const { email, code } = req.body;
+  if (!email || !code) return res.status(400).json({ error: 'Email e código obrigatórios' });
+
+  try {
+    const { data: record, error } = await supabaseAdmin
+      .from('password_reset_codes')
+      .select('*')
+      .eq('email', email.toLowerCase())
+      .eq('code', code)
+      .eq('used', false)
+      .gt('expires_at', new Date().toISOString())
+      .single();
+
+    if (error || !record) {
+      return res.status(400).json({ error: 'Código inválido ou expirado' });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body;
+  if (!email || !code || !newPassword) return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
+  if (newPassword.length < 6) return res.status(400).json({ error: 'A senha deve ter pelo menos 6 caracteres' });
+
+  try {
+    // Verifica código
+    const { data: record, error: codeErr } = await supabaseAdmin
+      .from('password_reset_codes')
+      .select('*')
+      .eq('email', email.toLowerCase())
+      .eq('code', code)
+      .eq('used', false)
+      .gt('expires_at', new Date().toISOString())
+      .single();
+
+    if (codeErr || !record) {
+      return res.status(400).json({ error: 'Código inválido ou expirado' });
+    }
+
+    // Busca o usuário
+    const { data: { users }, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+    if (listErr) throw listErr;
+
+    const user = users.find(u => u.email?.toLowerCase() === email.toLowerCase());
+    if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+    // Atualiza a senha
+    const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
+      password: newPassword,
+    });
+    if (updateErr) throw updateErr;
+
+    // Marca código como usado
+    await supabaseAdmin.from('password_reset_codes').update({ used: true }).eq('id', record.id);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[reset-password]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 app.post('/api/workspace/invite', async (req, res) => {
   const { ownerUserId, inviteEmail } = req.body;
   if (!ownerUserId || !inviteEmail) return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
 
   try {
+    // Verifica limite de membros (aceitos + pendentes)
+    const { count: memberCount } = await supabaseAdmin
+      .from('workspace_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('workspace_owner_id', ownerUserId);
+
+    const { count: inviteCount } = await supabaseAdmin
+      .from('workspace_invites')
+      .select('*', { count: 'exact', head: true })
+      .eq('workspace_owner_id', ownerUserId);
+
+    const total = (memberCount || 0) + (inviteCount || 0);
+    if (total >= WORKSPACE_MEMBER_LIMIT) {
+      return res.status(403).json({ error: `Limite de ${WORKSPACE_MEMBER_LIMIT} membros atingido.` });
+    }
+
     const { data: { users }, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
     if (listErr) throw listErr;
 
@@ -1360,10 +1789,8 @@ app.post('/api/workspace/invite', async (req, res) => {
 
     // Envia email de convite via Resend
     const ownerName = owner?.user_metadata?.full_name || owner?.user_metadata?.name || owner?.email?.split('@')[0] || 'Alguém';
-    // Durante os testes locais, usamos localhost. 
-    // Como solicitado, o workspace está desabilitado em produção, então o link de convite deve apontar para o ambiente de teste.
-    const appBaseUrl = 'http://localhost:5173';
-    const inviteUrl = `${appBaseUrl}/invite?invite_token=${invite.token}`;
+    // Workspace em fase de testes — links de convite apontam para localhost
+    const inviteUrl = `http://localhost:5173/invite?invite_token=${invite.token}`;
 
     resend.emails.send({
       from: 'Flui <noreply@flui.ia.br>',
@@ -1371,7 +1798,7 @@ app.post('/api/workspace/invite', async (req, res) => {
       subject: `${ownerName} te convidou para um workspace no Flui`,
       html: `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 24px; color: #37352f;">
-          <img src="https://uzyngunwxqjsukbhieei.supabase.co/storage/v1/object/public/Fotos/MessyDoodle.png" alt="Workspace" style="width: 140px; height: auto; margin-bottom: 24px; display: block;">
+          <img src="https://uzyngunwxqjsukbhieei.supabase.co/storage/v1/object/public/Fotos/ZombieingDoodle.png" alt="Workspace" style="width: 140px; height: auto; margin-bottom: 24px; display: block;">
           <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Você foi convidado!</h2>
           <p style="font-size: 14px; color: #6b6b6b; margin-bottom: 24px;">
             <strong>${ownerName}</strong> te convidou para colaborar no workspace dele no Flui.
@@ -1435,6 +1862,7 @@ app.delete('/api/workspace/members/:memberId', async (req, res) => {
 
   try {
     if (is_invite) {
+      // Convite pendente: só remove o convite
       const { error } = await supabaseAdmin
         .from('workspace_invites')
         .delete()
@@ -1442,14 +1870,39 @@ app.delete('/api/workspace/members/:memberId', async (req, res) => {
         .eq('workspace_owner_id', ownerUserId);
       if (error) throw error;
     } else {
+      // Membro aceito: busca o member_user_id antes de deletar
+      const { data: member } = await supabaseAdmin
+        .from('workspace_members')
+        .select('member_user_id')
+        .eq('id', memberId)
+        .eq('workspace_owner_id', ownerUserId)
+        .maybeSingle();
+
       const { error } = await supabaseAdmin
         .from('workspace_members')
         .delete()
         .eq('id', memberId)
         .eq('workspace_owner_id', ownerUserId);
       if (error) throw error;
+
+      // Revogar plano derivado do workspace (só se não tiver Stripe próprio)
+      if (member?.member_user_id) {
+        const { data: memberSub } = await supabaseAdmin
+          .from('subscriptions')
+          .select('id, stripe_subscription_id')
+          .eq('user_id', member.member_user_id)
+          .maybeSingle();
+
+        if (memberSub && !memberSub.stripe_subscription_id) {
+          await supabaseAdmin
+            .from('subscriptions')
+            .update({ status: 'inactive', updated_at: new Date().toISOString() })
+            .eq('user_id', member.member_user_id);
+          console.log(`[Workspace] Plano revogado do membro userId=${member.member_user_id}`);
+        }
+      }
     }
-    
+
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1493,7 +1946,47 @@ app.post('/api/workspace/accept-invite', async (req, res) => {
       throw insertErr; // ignore if already member
     }
 
-    // 4. Remover convite
+    // 4. Herdar o plano do dono do workspace
+    const { data: ownerSub } = await supabaseAdmin
+      .from('subscriptions')
+      .select('status, plan_id')
+      .eq('user_id', invite.workspace_owner_id)
+      .maybeSingle();
+
+    if (ownerSub?.status === 'active' && ownerSub?.plan_id) {
+      // Verifica se o membro já tem assinatura própria (com Stripe)
+      const { data: memberSub } = await supabaseAdmin
+        .from('subscriptions')
+        .select('id, stripe_subscription_id')
+        .eq('user_id', user.user.id)
+        .maybeSingle();
+
+      // Só aplica o plano do workspace se o membro não tiver assinatura Stripe própria
+      if (!memberSub?.stripe_subscription_id) {
+        if (memberSub) {
+          await supabaseAdmin
+            .from('subscriptions')
+            .update({
+              status: 'active',
+              plan_id: ownerSub.plan_id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', user.user.id);
+        } else {
+          await supabaseAdmin
+            .from('subscriptions')
+            .insert({
+              user_id: user.user.id,
+              status: 'active',
+              plan_id: ownerSub.plan_id,
+              updated_at: new Date().toISOString(),
+            });
+        }
+        console.log(`[Workspace] Plano ${ownerSub.plan_id} herdado pelo membro userId=${user.user.id}`);
+      }
+    }
+
+    // 5. Remover convite
     await supabaseAdmin
       .from('workspace_invites')
       .delete()

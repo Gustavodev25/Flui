@@ -79,7 +79,7 @@ async function getSystemContext(userId, userName = 'Usuário') {
   const dates = precomputeDates(todayISO);
 
   // Busca tarefas com mais detalhes para dar contexto à IA (incluindo subtarefas)
-  const [taskResult, doneResult, followupsResult] = await Promise.all([
+  const [taskResult, doneResult, followupsResult, membershipResult, ownerMembersResult] = await Promise.all([
     supabase
       .from('tasks')
       .select('id, title, status, priority, due_date, tags, subtasks')
@@ -99,12 +99,29 @@ async function getSystemContext(userId, userName = 'Usuário') {
       .is('resolved_at', null)
       .order('missed_at', { ascending: true })
       .limit(3),
+    // Verifica se é membro de algum workspace
+    supabase
+      .from('workspace_members')
+      .select('workspace_owner_id')
+      .eq('member_user_id', userId)
+      .maybeSingle(),
+    // Verifica se é dono (tem membros no seu workspace)
+    supabase
+      .from('workspace_members')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_owner_id', userId),
   ]);
 
   const pendingTasks = taskResult.data || [];
   const doneCount = doneResult.count || 0;
   const totalCount = pendingTasks.length + doneCount;
   const pendingFollowups = followupsResult.data || [];
+
+  // Contexto de workspace
+  const isMember = !!membershipResult.data;
+  const isOwner = !isMember && (ownerMembersResult.count || 0) > 0;
+  const hasWorkspace = isMember || isOwner;
+  const workspaceRole = isMember ? 'membro' : (isOwner ? 'dono' : null);
 
   // Marcar follow-ups como resolvidos de forma otimista (IA vai mencioná-los nessa resposta)
   if (pendingFollowups.length > 0) {
@@ -196,7 +213,18 @@ ${pendingFollowups.map(f => {
 - CONCISÃO EQUILIBRADA: Não precisa ser um robô de uma frase só. Seja direto, mas mantenha a conversa agradável (máximo 3-4 frases por resposta).
 - PROIBIDO USAR EMOJIS: NUNCA use emojis em suas respostas. Mantenha o texto limpo e profissional, apenas com caracteres alfanuméricos e pontuação padrão.
 
-═══ REGRAS DE AÇÃO ═══
+${hasWorkspace ? `═══ WORKSPACE (EQUIPE) ═══
+Este usuário faz parte de um workspace (é ${workspaceRole} da equipe).
+As tarefas podem ter visibilidade "personal" (só o usuário vê) ou "workspace" (toda a equipe vê).
+
+REGRAS DE VISIBILIDADE:
+- PADRÃO: Sempre crie como "personal" se não houver indicação clara de workspace.
+- Use visibility="workspace" quando o usuário disser: "pra equipe", "pro workspace", "pro time", "compartilha", "compartilhada", "todo mundo vê", "a equipe precisa saber", "anota pra equipe", "coloca no workspace".
+- Use visibility="personal" explicitamente quando disser: "só pra mim", "particular", "pessoal", "não precisa compartilhar".
+- Se a mensagem for AMBÍGUA (não menciona equipe nem pessoal): crie como "personal" e NÃO pergunte — a menos que o contexto seja claramente colaborativo (ex: "pra gente terminar o projeto").
+- NUNCA pergunte "quer criar como pessoal ou workspace?" de forma robótica. Se precisar confirmar, seja natural: "Anotei, ${userName}! Essa é só sua ou quer compartilhar com a equipe?"
+
+` : ''}═══ REGRAS DE AÇÃO ═══
 1. FERRAMENTA OBRIGATÓRIA: Você JAMAIS pode fingir que criou, atualizou ou deletou uma tarefa sem chamar a ferramenta correspondente. Se sua resposta diz "anotei", "criei", "registrei" ou qualquer variação, você DEVE ter chamado TaskCreate ou TaskBatchCreate antes. NUNCA simule uma ação.
 
 2. INTENÇÃO DE CRIAÇÃO — LISTA AMPLA DE GATILHOS:

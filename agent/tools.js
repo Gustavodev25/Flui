@@ -41,6 +41,7 @@ const taskCreateSchema = z.object({
   reminder_days_before: optionalPositiveInt(365),
   whatsapp_message: z.string().optional(),
   source: z.enum(['user', 'whatsapp']).optional(),
+  visibility: z.enum(['personal', 'workspace']).optional(),
 });
 
 const taskUpdateSchema = z.object({
@@ -82,6 +83,7 @@ const taskBatchCreateSchema = z.object({
     tags: z.array(z.string()).optional(),
     subtasks: z.array(subtaskItemSchema).optional(),
     timer_minutes: optionalPositiveInt(1440),
+    visibility: z.enum(['personal', 'workspace']).optional(),
   })).min(1).max(20),
 });
 
@@ -141,6 +143,11 @@ export const TOOLS = [
             minimum: 0,
             maximum: 365,
             description: 'Número de dias ANTES do prazo (due_date) para enviar um lembrete no WhatsApp. Use quando o usuário disser "me lembra X dias antes", "avisa com X dias de antecedência", etc. Requer que due_date esteja preenchido.',
+          },
+          visibility: {
+            type: 'string',
+            enum: ['personal', 'workspace'],
+            description: 'Visibilidade da tarefa. "personal" = só o usuário vê (padrão). "workspace" = visível para toda a equipe/workspace. Use "workspace" quando o usuário disser "pra equipe", "pro workspace", "pro time", "todo mundo vê", "compartilha", "compartilhada". Use "personal" para tarefas individuais ou quando o usuário disser "só pra mim".',
           },
         },
         required: ['title', 'description'],
@@ -337,6 +344,7 @@ export const TOOLS = [
                   description: 'Etapas da tarefa, opcionalmente com timer individual.',
                 },
                 timer_minutes: { type: 'integer', minimum: 1, maximum: 1440, description: 'Timer em minutos para notificação no WhatsApp.' },
+                visibility: { type: 'string', enum: ['personal', 'workspace'], description: 'Visibilidade: "workspace" se a tarefa for da equipe, "personal" para individual.' },
               },
               required: ['title', 'description'],
             },
@@ -464,9 +472,25 @@ const STATUS_LABEL = { todo: 'a fazer', doing: 'em progresso', done: 'concluída
 
 // ── Executores das ferramentas ────────────────────────────────────────────────
 
+async function resolveWorkspaceOwnerId(userId, visibility) {
+  if (visibility !== 'workspace') return null;
+  // Verifica se é membro de algum workspace
+  const { data: membership } = await supabase
+    .from('workspace_members')
+    .select('workspace_owner_id')
+    .eq('member_user_id', userId)
+    .maybeSingle();
+  // Membro → usa o ID do dono; dono → usa o próprio ID
+  return membership ? membership.workspace_owner_id : userId;
+}
+
 async function executeTaskCreate(args, userId) {
   const parsed = taskCreateSchema.parse(args);
   const dueDateFixed = fixDueDate(parsed.due_date);
+  const visibility = parsed.visibility || 'personal';
+
+  // Resolve workspace_owner_id se necessário
+  const workspaceOwnerId = await resolveWorkspaceOwnerId(userId, visibility);
 
   // Monta array de subtarefas no formato do banco (suporta timer por subtarefa)
   const now = Date.now();
@@ -500,6 +524,8 @@ async function executeTaskCreate(args, userId) {
     reminder_days_before: parsed.reminder_days_before || null,
     reminder_fired: false,
     whatsapp_message: parsed.whatsapp_message || null,
+    visibility,
+    workspace_owner_id: workspaceOwnerId,
   };
 
   // Adiciona descrição (auto-gera se não veio)
@@ -537,7 +563,7 @@ async function executeTaskCreate(args, userId) {
     subtask_count: subtaskCount,
     timer_set: !!data.timer_at,
     timer_minutes: parsed.timer_minutes || null,
-    _hint: `Tarefa "${data.title}" criada com prioridade ${priorityLabel} pra ${dateLabel}${subtaskHint}.${timerHint}${parsed.reminder_days_before ? ` Lembrete configurado para ${parsed.reminder_days_before} dia(s) antes do prazo.` : ''} Responda de forma natural e curta. NUNCA use emojis, datas ISO, IDs ou JSON.`
+    _hint: `Tarefa "${data.title}" criada com prioridade ${priorityLabel} pra ${dateLabel}${subtaskHint}.${timerHint}${parsed.reminder_days_before ? ` Lembrete configurado para ${parsed.reminder_days_before} dia(s) antes do prazo.` : ''}${visibility === 'workspace' ? ' Tarefa compartilhada com o workspace (equipe).' : ''} Responda de forma natural e curta. NUNCA use emojis, datas ISO, IDs ou JSON.`
   };
 }
 
@@ -915,6 +941,10 @@ async function executeTaskDashboard(args, userId) {
 async function executeTaskBatchCreate(args, userId) {
   const parsed = taskBatchCreateSchema.parse(args);
 
+  // Resolve workspace_owner_id uma vez se alguma tarefa é workspace
+  const hasWorkspaceTask = parsed.tasks.some(t => t.visibility === 'workspace');
+  const workspaceOwnerId = hasWorkspaceTask ? await resolveWorkspaceOwnerId(userId, 'workspace') : null;
+
   const insertData = parsed.tasks.map(t => {
     const batchNow = Date.now();
     const subtasksFormatted = (t.subtasks || []).map(s => ({
@@ -930,6 +960,8 @@ async function executeTaskBatchCreate(args, userId) {
       ? new Date(Date.now() + t.timer_minutes * 60 * 1000).toISOString()
       : null;
 
+    const taskVisibility = t.visibility || 'personal';
+
     return {
       user_id: userId,
       title: t.title,
@@ -944,6 +976,8 @@ async function executeTaskBatchCreate(args, userId) {
       timer_at: timerAt,
       timer_fired: false,
       whatsapp_message: parsed.whatsapp_message || null,
+      visibility: taskVisibility,
+      workspace_owner_id: taskVisibility === 'workspace' ? workspaceOwnerId : null,
     };
   });
 
