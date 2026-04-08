@@ -369,22 +369,25 @@ export const Sidebar: React.FC = () => {
 
         {/* Workspace Card */}
         {(() => {
-          const wsName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Workspace'
+          const wsName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Usuário'
           const avatarValue = user?.email || wsName
+          const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
 
           return (
             <AnimatePresence mode="wait">
               {(isCollapsed && !isMobile) ? (
-                <motion.div key="ws-collapsed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex justify-center py-1" onClick={() => setIsWorkspaceOpen(true)}>
-                  <div className="cursor-pointer hover:opacity-80 transition-opacity">
+                <motion.div key="ws-collapsed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex justify-center py-1" onClick={() => isLocalhost && setIsWorkspaceOpen(true)}>
+                  <div className={`${isLocalhost ? 'cursor-pointer hover:opacity-80' : ''} transition-opacity`}>
                     <Avvvatars value={avatarValue} style="shape" size={32} radius={8} />
                   </div>
                 </motion.div>
               ) : (
-                <motion.div key="ws-expanded" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsWorkspaceOpen(true)} className="flex items-center gap-2 px-1 py-1.5 rounded-lg hover:bg-[#e9e9e7]/60 transition-colors cursor-pointer">
+                <motion.div key="ws-expanded" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => isLocalhost && setIsWorkspaceOpen(true)} className={`flex items-center gap-2 px-1 py-1.5 rounded-lg ${isLocalhost ? 'hover:bg-[#e9e9e7]/60 cursor-pointer' : ''} transition-colors`}>
                   <Avvvatars value={avatarValue} style="shape" size={28} radius={7} />
                   <div className="min-w-0 flex-1">
-                    <p className="text-[9px] text-[#37352f]/35 font-medium uppercase tracking-wider leading-tight">Workspace</p>
+                    <p className="text-[9px] text-[#37352f]/35 font-medium uppercase tracking-wider leading-tight">
+                      {isLocalhost ? 'Workspace' : 'Conta'}
+                    </p>
                     <p className="text-[11px] font-semibold text-[#37352f] truncate leading-tight">{wsName}</p>
                   </div>
                 </motion.div>
@@ -394,10 +397,13 @@ export const Sidebar: React.FC = () => {
         })()}
       </div>
 
-      <WorkspaceModal
-        isOpen={isWorkspaceOpen}
-        onClose={() => setIsWorkspaceOpen(false)}
-      />
+      {/* Só renderiza o Modal de Workspace se estiver no localhost (atualização futura) */}
+      {(window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (
+        <WorkspaceModal
+          isOpen={isWorkspaceOpen}
+          onClose={() => setIsWorkspaceOpen(false)}
+        />
+      )}
     </motion.aside>
   )
 }
