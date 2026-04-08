@@ -7,12 +7,14 @@ import logo from '../assets/logo/logo.png'
 import luiLogo from '../assets/logo/finloz.png'
 import flowLogo from '../assets/logo/flow.png'
 import { useAuth } from '../contexts/AuthContext'
+import Avvvatars from 'avvvatars-react'
+import { WorkspaceModal } from './WorkspaceModal'
 import { supabase } from '../lib/supabase'
 import { useState, useEffect, useRef } from 'react'
 
 const WHATSAPP_NUMBER = '5511925870754'
 const WHATSAPP_LINK = `https://wa.me/${WHATSAPP_NUMBER}`
-const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(WHATSAPP_LINK)}&bgcolor=f7f7f5&color=37352f&margin=4`
+const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(WHATSAPP_LINK)}&bgcolor=f7f7f5&color=37352f&margin=2`
 
 import { useMediaQuery } from '../hooks/useMediaQuery'
 
@@ -107,6 +109,7 @@ export const Sidebar: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const [subscription, setSubscription] = useState<any>(null)
+  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const isMobile = !isDesktop
 
@@ -250,7 +253,7 @@ export const Sidebar: React.FC = () => {
       </nav>
 
       {/* Card inferior */}
-      <div className="mt-auto mb-1">
+      <div className="mt-auto mb-1 flex flex-col gap-2">
         <AnimatePresence mode="wait">
           {location.pathname !== '/dashboard' && (
             hasFlow ? (
@@ -280,39 +283,28 @@ export const Sidebar: React.FC = () => {
                   transition={{ duration: 0.25 }}
                   className="rounded-xl border border-[#e9e9e7] bg-white overflow-hidden shadow-sm"
                 >
-                  <div className="px-3 pt-3 pb-2 flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-[#f7f7f5] flex items-center justify-center flex-shrink-0">
-                      <img src={luiLogo} alt="Lui" className="w-5 h-5 object-contain" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[12px] font-bold text-[#37352f] leading-tight">Lui</p>
-                      <p className="text-[10px] text-[#37352f]/45 leading-tight">Assistente Inteligente</p>
-                    </div>
-                  </div>
-
-                  <div className="px-3 pb-2">
-                    <p className="text-[10.5px] text-[#37352f]/60 leading-[1.4]">
-                      Crie e organize tarefas direto pelo WhatsApp com IA. Mande texto ou audio!
-                    </p>
-                  </div>
-
-                  <div className="px-3 pb-2 flex justify-center">
-                    <div className="bg-[#f7f7f5] rounded-lg p-2 border border-[#e9e9e7]/50">
+                  <button
+                    onClick={() => window.open(WHATSAPP_LINK, '_blank')}
+                    className="w-full p-3 flex items-center gap-3 hover:bg-[#f7f7f5] transition-colors cursor-pointer text-left"
+                  >
+                    <div className="bg-[#f7f7f5] rounded-lg p-1.5 border border-[#e9e9e7] flex-shrink-0">
                       <img
                         src={QR_CODE_URL}
                         alt="QR Code WhatsApp"
-                        className="w-[100px] h-[100px] rounded"
+                        className="w-[52px] h-[52px] rounded"
                         loading="lazy"
                       />
                     </div>
-                  </div>
-
-                  <button
-                    onClick={() => window.open(WHATSAPP_LINK, '_blank')}
-                    className="w-full px-3 py-2 bg-white rounded-b-xl flex items-center justify-center gap-1.5 text-[10.5px] font-semibold text-[#25d366] hover:bg-[#25d366]/5 cursor-pointer transition-colors"
-                  >
-                    Abrir no WhatsApp
-                    <ExternalLink size={11} />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <img src={luiLogo} alt="Lui" className="w-3.5 h-3.5 object-contain" />
+                        <p className="text-[11px] font-semibold text-[#37352f]">Lui</p>
+                      </div>
+                      <p className="text-[9.5px] text-[#37352f]/50 leading-snug">Escaneie para abrir no WhatsApp</p>
+                      <p className="text-[9.5px] font-medium text-[#25d366] mt-1 flex items-center gap-0.5">
+                        Abrir <ExternalLink size={9} />
+                      </p>
+                    </div>
                   </button>
                 </motion.div>
               )
@@ -371,8 +363,41 @@ export const Sidebar: React.FC = () => {
             )
           )}
         </AnimatePresence>
+
+        {/* Divisor full-width */}
+        <div className="-mx-3 h-px bg-[#e9e9e7]" />
+
+        {/* Workspace Card */}
+        {(() => {
+          const wsName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Workspace'
+          const avatarValue = user?.email || wsName
+
+          return (
+            <AnimatePresence mode="wait">
+              {(isCollapsed && !isMobile) ? (
+                <motion.div key="ws-collapsed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex justify-center py-1" onClick={() => setIsWorkspaceOpen(true)}>
+                  <div className="cursor-pointer hover:opacity-80 transition-opacity">
+                    <Avvvatars value={avatarValue} style="shape" size={32} radius={8} />
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div key="ws-expanded" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsWorkspaceOpen(true)} className="flex items-center gap-2 px-1 py-1.5 rounded-lg hover:bg-[#e9e9e7]/60 transition-colors cursor-pointer">
+                  <Avvvatars value={avatarValue} style="shape" size={28} radius={7} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[9px] text-[#37352f]/35 font-medium uppercase tracking-wider leading-tight">Workspace</p>
+                    <p className="text-[11px] font-semibold text-[#37352f] truncate leading-tight">{wsName}</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )
+        })()}
       </div>
 
+      <WorkspaceModal
+        isOpen={isWorkspaceOpen}
+        onClose={() => setIsWorkspaceOpen(false)}
+      />
     </motion.aside>
   )
 }

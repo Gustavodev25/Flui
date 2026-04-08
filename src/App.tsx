@@ -1,5 +1,6 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, useSearchParams, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
+import { apiFetch } from './lib/api'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
 import Tasks from './pages/Tasks'
@@ -9,13 +10,41 @@ import CheckoutPreview from './pages/CheckoutPreview'
 import LandingPage from './pages/LandingPage'
 import TermsPage from './pages/TermsPage'
 import CalendarPage from './pages/Calendar'
+import InvitePage from './pages/InvitePage'
 import { AppLayout } from './components/layout/AppLayout'
 import { AppToaster } from './components/ui/Toast'
-import { AuthProvider } from './contexts/AuthContext'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { SidebarProvider } from './contexts/SidebarContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import ThankYouModal from './components/ThankYouModal'
 import { AdminPanel } from './pages/AdminPanel'
+
+function InviteProcessor() {
+  const { user } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
+  const inviteToken = searchParams.get('invite_token')
+
+  useEffect(() => {
+    // Não processa automaticamente se já estiver na página de convite interativa
+    if (location.pathname === '/invite') return
+
+    if (user && inviteToken) {
+      apiFetch('/api/workspace/accept-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: inviteToken, userId: user.id })
+      }).then(() => {
+        searchParams.delete('invite_token')
+        setSearchParams(searchParams)
+      }).catch(err => {
+        console.error('Invite Processor err', err)
+      })
+    }
+  }, [user, inviteToken, searchParams, setSearchParams, location.pathname])
+
+  return null
+}
 
 function App() {
   const [showThankYou, setShowThankYou] = useState(false)
@@ -34,8 +63,10 @@ function App() {
     <AuthProvider>
       <SidebarProvider>
         <Router>
+            <InviteProcessor />
             <Routes>
               <Route path="/admin" element={<AdminPanel />} />
+              <Route path="/invite" element={<InvitePage />} />
               <Route path="/login" element={<LoginPage />} />
               
               {/* Rotas Protegidas com Layout Persistente */}

@@ -4,7 +4,8 @@ import finlozLogo from '../assets/logo/finloz.png'
 import { toaster } from '../components/ui/Toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Navigate, Link } from 'react-router-dom'
+import { Navigate, Link, useSearchParams } from 'react-router-dom'
+import { apiFetch } from '../lib/api'
 import { Eye, EyeOff, Check, ArrowLeft } from 'lucide-react'
 import TermsModal from '../components/TermsModal'
 
@@ -19,6 +20,8 @@ const LoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false)
   const [isAgreed, setIsAgreed] = useState(false)
   const [isTermsOpen, setIsTermsOpen] = useState(false)
+  const [searchParams] = useSearchParams()
+  const inviteToken = searchParams.get('invite_token')
 
   // Se o contexto está verificando a sessão ainda, mostre carregamento
   if (authLoading) {
@@ -29,9 +32,9 @@ const LoginPage: React.FC = () => {
     )
   }
 
-  // Se já tiver uma sessão persistida (logado), joga pro dashboard imediamente
+  // Se já tiver uma sessão persistida (logado), joga pro dashboard ou checkout
   if (user) {
-    return <Navigate to="/checkout-preview" replace />
+    return <Navigate to={inviteToken ? `/dashboard?invite_token=${inviteToken}` : `/checkout-preview`} replace />
   }
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -41,12 +44,24 @@ const LoginPage: React.FC = () => {
     try {
       if (isLogin) {
         // Fazer Login
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         })
 
         if (error) throw error
+
+        if (inviteToken && data?.user) {
+          try {
+            await apiFetch('/api/workspace/accept-invite', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: inviteToken, userId: data.user.id })
+            })
+          } catch(err) {
+            console.error('Falha ao aceitar convite', err)
+          }
+        }
 
         toaster.create({
           title: "Login realizado com sucesso!",
@@ -94,7 +109,7 @@ const LoginPage: React.FC = () => {
         await new Promise((resolve) => setTimeout(resolve, 3000));
 
         // Cria Conta de fato no Supabase
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -105,6 +120,18 @@ const LoginPage: React.FC = () => {
         })
 
         if (error) throw error
+
+        if (inviteToken && data?.user) {
+          try {
+            await apiFetch('/api/workspace/accept-invite', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: inviteToken, userId: data.user.id })
+            })
+          } catch(err) {
+            console.error('Falha ao aceitar convite', err)
+          }
+        }
 
         toaster.create({
           title: "Conta criada com sucesso!",
@@ -160,8 +187,8 @@ const LoginPage: React.FC = () => {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          // Redireciona para o checkout-preview para verificar assinatura antes do dashboard
-          redirectTo: `${window.location.origin}/checkout-preview`,
+          // Redireciona para o dashboard ou checkout-preview dependendo do convite
+          redirectTo: `${window.location.origin}${inviteToken ? `/dashboard?invite_token=${inviteToken}` : '/checkout-preview'}`,
         }
       })
       if (error) throw error
@@ -200,6 +227,14 @@ const LoginPage: React.FC = () => {
           }}
           className="w-full max-w-[380px]"
         >
+          {inviteToken && (
+            <div className="mb-6 p-4 bg-amber-50 border border-amber-200/60 rounded-xl">
+              <p className="text-[13px] font-medium text-amber-800 text-center leading-tight">
+                Você foi convidado para um workspace. Faça login ou crie sua conta para aceitar e participar!
+              </p>
+            </div>
+          )}
+
           <div className="mb-10 flex flex-col items-center md:items-start text-center md:text-left">
             <h1 className="text-2xl font-bold tracking-tight mb-2">
               {isLogin ? "Bem-vindo" : "Crie sua conta"}

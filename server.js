@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -168,6 +169,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_K
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // Cliente admin para operações do servidor (bypassa RLS)
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+const resend = new Resend('re_AaQ8QNKS_Ljvo7xxJoGEKMLvnWmaXcYUd');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const VITE_API_URL = process.env.VITE_API_URL || '';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://flui.ia.br';
@@ -1275,6 +1277,229 @@ app.get('/api/admin/stats', async (req, res) => {
   } catch (error) {
     console.error('Erro ao buscar estatísticas do painel:', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ── Workspace Members ─────────────────────────────────────────────
+
+app.get('/api/workspace/members', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
+
+  try {
+    const { data: members, error } = await supabaseAdmin
+      .from('workspace_members')
+      .select('*')
+      .eq('workspace_owner_id', userId)
+      .order('invited_at', { ascending: true });
+
+    if (error) throw error;
+    
+    // Buscar também convites pendentes
+    const { data: invites, error: invitesError } = await supabaseAdmin
+      .from('workspace_invites')
+      .select('*')
+      .eq('workspace_owner_id', userId)
+      .order('created_at', { ascending: true });
+      
+    if (invitesError) throw invitesError;
+    
+    // Mesclar membros e convites pendentes
+    const allMembers = [
+      ...(members || []),
+      ...(invites || []).map(inv => ({
+        id: inv.id,
+        is_invite: true,
+        workspace_owner_id: inv.workspace_owner_id,
+        member_user_id: null,
+        member_email: inv.email,
+        member_name: null,
+        member_avatar: null,
+        role: 'pending',
+        invited_at: inv.created_at
+      }))
+    ];
+
+    res.json({ members: allMembers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/workspace/invite', async (req, res) => {
+  const { ownerUserId, inviteEmail } = req.body;
+  if (!ownerUserId || !inviteEmail) return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
+
+  try {
+    const { data: { users }, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+    if (listErr) throw listErr;
+
+    const owner = users.find(u => u.id === ownerUserId);
+    const target = users.find(u => u.email?.toLowerCase() === inviteEmail.toLowerCase());
+
+    if (target && target.id === ownerUserId) {
+      return res.status(400).json({ error: 'Você não pode convidar a si mesmo.' });
+    }
+
+    // Criar convite
+    const { data: invite, error: insertErr } = await supabaseAdmin
+      .from('workspace_invites')
+      .insert({
+        workspace_owner_id: ownerUserId,
+        email: inviteEmail.toLowerCase()
+      })
+      .select()
+      .single();
+
+    if (insertErr) {
+      if (insertErr.code === '23505') {
+        return res.status(409).json({ error: 'Este usuário já possui um convite ou já é membro.' });
+      }
+      throw insertErr;
+    }
+
+    // Envia email de convite via Resend
+    const ownerName = owner?.user_metadata?.full_name || owner?.user_metadata?.name || owner?.email?.split('@')[0] || 'Alguém';
+    const appBaseUrl = process.env.FRONTEND_URL || 'https://flui.ia.br';
+    const inviteUrl = `${appBaseUrl}/invite?invite_token=${invite.token}`;
+
+    resend.emails.send({
+      from: 'Flui <noreply@flui.ia.br>',
+      to: inviteEmail,
+      subject: `${ownerName} te convidou para um workspace no Flui`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 24px; color: #37352f;">
+          <img src="https://uzyngunwxqjsukbhieei.supabase.co/storage/v1/object/public/Fotos/MessyDoodle.png" alt="Workspace" style="width: 140px; height: auto; margin-bottom: 24px; display: block;">
+          <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Você foi convidado!</h2>
+          <p style="font-size: 14px; color: #6b6b6b; margin-bottom: 24px;">
+            <strong>${ownerName}</strong> te convidou para colaborar no workspace dele no Flui.
+          </p>
+          <a href="${inviteUrl}" style="display: inline-block; background: #37352f; color: #fff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 600;">
+            Acessar o Flui
+          </a>
+          <p style="font-size: 12px; color: #aaa; margin-top: 32px;">
+            Se você não esperava este convite, pode ignorar este email.
+          </p>
+        </div>
+      `,
+    }).catch(err => console.error('[Resend] Erro ao enviar email de convite:', err.message));
+
+    res.json({
+      member: {
+        id: invite.id,
+        is_invite: true,
+        member_email: inviteEmail,
+        member_name: target ? (target.user_metadata?.full_name || target.user_metadata?.name || null) : null,
+        member_avatar: target ? (target.user_metadata?.avatar_url || null) : null,
+        role: 'pending',
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/workspace/invite-info', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).json({ error: 'Token missing' });
+
+  try {
+    const { data: invite, error } = await supabaseAdmin
+      .from('workspace_invites')
+      .select('workspace_owner_id, email, created_at')
+      .eq('token', token)
+      .single();
+
+    if (error || !invite) {
+      return res.status(404).json({ error: 'Convite inválido ou expirado' });
+    }
+
+    const { data: { users }, error: authErr } = await supabaseAdmin.auth.admin.listUsers();
+    if (authErr && !users) throw authErr;
+
+    const owner = users?.find(u => u.id === invite.workspace_owner_id);
+    const ownerName = owner?.user_metadata?.full_name || owner?.user_metadata?.name || owner?.email?.split('@')[0] || 'Alguém';
+
+    res.json({ ownerName, email: invite.email, ownerId: invite.workspace_owner_id });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/workspace/members/:memberId', async (req, res) => {
+  const { memberId } = req.params;
+  const { ownerUserId, is_invite } = req.body;
+  if (!ownerUserId) return res.status(400).json({ error: 'ownerUserId obrigatório' });
+
+  try {
+    if (is_invite) {
+      const { error } = await supabaseAdmin
+        .from('workspace_invites')
+        .delete()
+        .eq('id', memberId)
+        .eq('workspace_owner_id', ownerUserId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabaseAdmin
+        .from('workspace_members')
+        .delete()
+        .eq('id', memberId)
+        .eq('workspace_owner_id', ownerUserId);
+      if (error) throw error;
+    }
+    
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/workspace/accept-invite', async (req, res) => {
+  const { token, userId } = req.body;
+  if (!token || !userId) return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
+
+  try {
+    // 1. Validar convite
+    const { data: invite, error: invErr } = await supabaseAdmin
+      .from('workspace_invites')
+      .select('*')
+      .eq('token', token)
+      .single();
+      
+    if (invErr || !invite) {
+      return res.status(404).json({ error: 'Convite Inválido ou já utilizado' });
+    }
+
+    // 2. Buscar o usuário
+    const { data: user, error: userErr } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (userErr || !user) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    // 3. Adicionar ao workspace
+    const { error: insertErr } = await supabaseAdmin
+      .from('workspace_members')
+      .insert({
+        workspace_owner_id: invite.workspace_owner_id,
+        member_user_id: user.user.id,
+        member_email: user.user.email,
+        member_name: user.user.user_metadata?.full_name || user.user.user_metadata?.name || null,
+        member_avatar: user.user.user_metadata?.avatar_url || null,
+      });
+
+    if (insertErr && insertErr.code !== '23505') {
+      throw insertErr; // ignore if already member
+    }
+
+    // 4. Remover convite
+    await supabaseAdmin
+      .from('workspace_invites')
+      .delete()
+      .eq('id', invite.id);
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
