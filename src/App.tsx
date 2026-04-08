@@ -15,6 +15,7 @@ import { AppLayout } from './components/layout/AppLayout'
 import { AppToaster } from './components/ui/Toast'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { SidebarProvider } from './contexts/SidebarContext'
+import { SubscriptionProvider } from './contexts/SubscriptionContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import ThankYouModal from './components/ThankYouModal'
 import { AdminPanel } from './pages/AdminPanel'
@@ -61,6 +62,7 @@ function App() {
 
   return (
     <AuthProvider>
+      <SubscriptionProvider>
       <SidebarProvider>
         <Router>
             <InviteProcessor />
@@ -90,6 +92,7 @@ function App() {
           </Router>
           <AppToaster />
       </SidebarProvider>
+      </SubscriptionProvider>
     </AuthProvider>
   )
 }

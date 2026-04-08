@@ -3,8 +3,11 @@ import { motion } from 'framer-motion'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Loader2, ArrowRight } from 'lucide-react'
-import fluiLogo from '../assets/logo/flow.png'
 import { apiFetch } from '../lib/api'
+import sittingDoodle from '../assets/doodles/SittingDoodle.png'
+import sleekDoodle from '../assets/doodles/SleekDoodle.png'
+
+
 
 const InvitePage: React.FC = () => {
   const [searchParams] = useSearchParams()
@@ -73,46 +76,57 @@ const InvitePage: React.FC = () => {
       <motion.div
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-[400px] text-center space-y-8"
+        className="w-full max-w-[400px] text-left space-y-8"
+
       >
-        <img src={fluiLogo} alt="Flui" className="w-10 h-10 mx-auto" />
+        {/* Logo removida a pedido do usuário */}
+
 
         {error ? (
-          <div className="space-y-4">
-            <h1 className="text-2xl font-black text-[#37352f] tracking-tight">Convite Inválido</h1>
-            <p className="text-[13px] text-[#37352f]/60 font-medium leading-relaxed">
-              {error}
-            </p>
+          <div className="space-y-6 flex flex-col items-start">
+
+            <img 
+              src={sittingDoodle} 
+              alt="Convite Inválido" 
+              className="w-40 h-40 object-contain mb-2" 
+            />
+            <div className="space-y-3">
+              <h1 className="text-2xl font-black text-[#37352f] tracking-tight">Convite Inválido</h1>
+              <p className="text-[13px] text-[#37352f]/60 font-medium leading-relaxed">
+
+                {error}
+              </p>
+            </div>
             <button
               onClick={() => navigate('/login')}
-              className="px-6 py-3 mt-4 bg-[#f7f7f5] border border-[#e9e9e7] text-[13px] font-bold text-[#37352f] rounded-xl hover:bg-[#f1f1f0] transition-colors"
+              className="w-full px-6 py-3.5 bg-[#f7f7f5] border border-[#e9e9e7] text-[13px] font-bold text-[#37352f] rounded-xl hover:bg-[#f1f1f0] transition-colors mt-2"
             >
               Ir para tela inicial
             </button>
           </div>
         ) : (
-          <div className="space-y-6">
-            <div className="space-y-3">
+          <div className="space-y-6 flex flex-col items-start">
+
+            <img 
+              src={sleekDoodle} 
+              alt="Convidado" 
+              className="w-40 h-40 object-contain mb-2" 
+            />
+            <div className="space-y-3 text-left">
+
               <h1 className="text-2xl font-black text-[#37352f] tracking-tight">Você foi Convidado!</h1>
-              <p className="text-[13px] text-[#37352f]/60 font-medium leading-relaxed px-2">
+              <p className="text-[13px] text-[#37352f]/60 font-medium leading-relaxed">
                 <strong>{inviteInfo?.ownerName}</strong> enviou um convite para você ingressar no Workspace em que a equipe colabora.
               </p>
+
             </div>
 
-            <div className="bg-white border border-[#e9e9e7] rounded-2xl p-6 shadow-sm overflow-hidden flex flex-col items-center gap-4 relative">
-              <div className="w-16 h-16 rounded-full bg-[#f7f7f5] border border-[#e9e9e7] flex items-center justify-center overflow-hidden shrink-0 mt-2">
-                  <img
-                    src={`https://api.dicebear.com/9.x/notionists/svg?seed=${inviteInfo?.ownerName}`}
-                    alt="Avatar"
-                    className="w-16 h-16 object-cover"
-                  />
-              </div>
-              <div className="text-center">
-                 <p className="text-sm font-bold text-[#37352f]">Junte-se ao Workspace de {inviteInfo?.ownerName?.split(' ')[0]}</p>
-                 <p className="text-[11px] text-[#37352f]/60 font-medium mt-1">
-                   Para o e-mail: <span className="text-[#37352f]">{inviteInfo?.email}</span>
-                 </p>
-              </div>
+            <div className="text-left py-2">
+
+               <p className="text-sm font-bold text-[#37352f]">Junte-se ao Workspace de {inviteInfo?.ownerName?.split(' ')[0]}</p>
+               <p className="text-[11px] text-[#37352f]/60 font-medium mt-1">
+                 Para o e-mail: <span className="text-[#37352f]">{inviteInfo?.email}</span>
+               </p>
             </div>
 
             <button
@@ -128,9 +142,10 @@ const InvitePage: React.FC = () => {
             </button>
 
             {!user && (
-              <p className="text-[10px] text-[#37352f]/40 font-medium leading-relaxed px-4 pt-2">
+              <p className="text-[10px] text-[#37352f]/40 font-medium leading-relaxed pt-2">
                 Se você não possui uma conta, poderá criar uma na próxima etapa rapidamente.
               </p>
+
             )}
           </div>
         )}

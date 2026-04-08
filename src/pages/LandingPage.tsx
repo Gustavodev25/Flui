@@ -3,16 +3,18 @@ import { motion, useInView } from 'framer-motion'
 import NumberFlow from '@number-flow/react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import logo from '../assets/logo/logo.png'
-import finloz from '../assets/logo/finloz.png'
-import flowIcon from '../assets/logo/flow.png'
-import gratisIcon from '../assets/logo/gratis.png'
+import logo from '../assets/logo/logo.svg'
+import finloz from '../assets/logo/lui.svg'
+import flowIcon from '../assets/logo/flow.svg'
+import gratisIcon from '../assets/logo/gratis.svg'
+import pulseIcon from '../assets/logo/pulse.svg'
 import DeepSeekLandingChat from '../components/DeepSeekLandingChat'
 
 const LandingPage: React.FC = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [price, setPrice] = useState(0)
+  const [teamPrice, setTeamPrice] = useState(0)
   const priceRef = useRef(null)
   const isPriceInView = useInView(priceRef, { once: true, amount: 0.5 })
 
@@ -20,6 +22,7 @@ const LandingPage: React.FC = () => {
     if (isPriceInView) {
       const timer = setTimeout(() => {
         setPrice(9.90)
+        setTeamPrice(29.90)
       }, 300)
       return () => clearTimeout(timer)
     }
@@ -575,7 +578,7 @@ const LandingPage: React.FC = () => {
             />
             <motion.img 
               src={finloz} 
-              alt="Finloz" 
+              alt="Lui" 
               className="absolute bottom-6 right-6 w-14 h-14 object-contain opacity-80"
               initial={{ opacity: 0, y: 20, rotate: 12 }}
               whileInView={{ opacity: 0.8, y: 0, rotate: 12 }}
@@ -604,16 +607,18 @@ const LandingPage: React.FC = () => {
           </div>
 
 
-          <div className="w-full max-w-2xl grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
+          <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
 
             {/* Card Gratuito */}
             <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
+              initial={{ opacity: 0, scale: 0.95, y: 30 }}
+              whileInView={{ opacity: 1, scale: 1, y: 0 }}
               viewport={{ once: true, margin: "-50px" }}
-              transition={{ duration: 0.6, type: "spring", bounce: 0.3 }}
-              className="w-full bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-8 relative overflow-hidden flex flex-col"
+              transition={{ duration: 0.7, type: "spring", bounce: 0.4 }}
+              className="w-full h-full bg-[#fcfcfc] border border-[#e9e9e7] rounded-3xl p-8 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.05)] relative overflow-hidden flex flex-col"
             >
+              <div className="absolute -top-16 -right-16 w-32 h-32 bg-black/5 blur-3xl rounded-full" />
+
               <div className="flex justify-between items-center pb-6 relative z-10">
                 <div className="flex items-center gap-3">
                   <div className="inline-flex items-center justify-center bg-[#f7f7f5] border border-[#e9e9e7] w-12 h-12 rounded-2xl shadow-sm shrink-0">
@@ -675,74 +680,153 @@ const LandingPage: React.FC = () => {
                 <span className="text-[10px] font-bold text-[#37352f]/60 tracking-tight">Garantia de reembolso em até 7 dias</span>
               </motion.div>
 
+              {/* Card Flow - Destacado */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 30 }}
                 whileInView={{ opacity: 1, scale: 1, y: 0 }}
                 viewport={{ once: true, margin: "-50px" }}
                 transition={{ duration: 0.7, type: "spring", bounce: 0.4, delay: 0.1 }}
-                className="w-full h-full bg-[#fcfcfc] border border-[#e9e9e7] rounded-3xl p-8 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.05)] relative overflow-hidden flex flex-col"
+                className="w-full h-full bg-[#fcfcfc] border border-[#e9e9e7] rounded-3xl p-8 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.1)] relative overflow-hidden flex flex-col md:-mt-6 md:mb-6 z-20 border-black/5"
               >
-              <div className="absolute -top-16 -right-16 w-32 h-32 bg-black/5 blur-3xl rounded-full" />
+                <div className="absolute -top-16 -right-16 w-32 h-32 bg-black/5 blur-3xl rounded-full" />
 
-              <div className="flex justify-between items-center pb-6 relative z-10">
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex items-center justify-center bg-[#f7f7f5] border border-[#e9e9e7] w-12 h-12 rounded-2xl shadow-sm shrink-0">
-                    <img src={flowIcon} alt="Flow" className="w-8 h-8 object-contain" />
-                  </div>
-                  <h3 className="text-2xl font-extrabold text-[#37352f]">Flow</h3>
-                </div>
-                <div ref={priceRef} className="text-right flex flex-col items-end">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-3xl font-black tracking-tight text-[#37352f]">R$</span>
-                    <NumberFlow
-                      value={price}
-                      format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}
-                      className="text-3xl font-black tracking-tight text-[#37352f]"
-                    />
-                  </div>
-                  <span className="text-[10px] font-bold text-[#37352f]/40 tracking-widest uppercase -mt-1">/ mês</span>
-                </div>
-              </div>
-              <hr className="-mx-8 border-t border-[#e9e9e7]" />
-
-              <div className="space-y-4 py-8 relative z-10 flex-1">
-                {[
-                  'Tarefas e Projetos Ilimitados',
-                  'Lui (Áudios & Mensagens)',
-                  'Sincronização em Nuvem',
-                  'Sem limites ou amarras',
-                  'Suporte Prioritário'
-                ].map((benefit, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, x: -10 }}
-                    whileInView={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.5, delay: i * 0.1 }}
-                    viewport={{ once: true }}
-                    className="flex items-center gap-3 text-sm font-medium text-[#37352f]/70"
-                  >
-                    <div className="w-4 h-4 rounded-full bg-[#f1f1f0] border border-[#e9e9e7] flex items-center justify-center shrink-0">
-                      <svg className="w-2.5 h-2.5 text-[#37352f]/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                <div className="flex justify-between items-center pb-6 relative z-10">
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex items-center justify-center bg-[#f7f7f5] border border-[#e9e9e7] w-12 h-12 rounded-2xl shadow-sm shrink-0">
+                      <img src={flowIcon} alt="Flow" className="w-8 h-8 object-contain" />
                     </div>
-                    {benefit}
-                  </motion.div>
-                ))}
-              </div>
+                    <h3 className="text-2xl font-extrabold text-[#37352f]">Flow</h3>
+                  </div>
+                  <div ref={priceRef} className="text-right flex flex-col items-end">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-3xl font-black tracking-tight text-[#37352f]">R$</span>
+                      <NumberFlow
+                        value={price}
+                        format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}
+                        className="text-3xl font-black tracking-tight text-[#37352f]"
+                      />
+                    </div>
+                    <span className="text-[10px] font-bold text-[#37352f]/40 tracking-widest uppercase -mt-1">/ mês</span>
+                  </div>
+                </div>
+                <hr className="-mx-8 border-t border-[#e9e9e7]" />
 
-              <p className="text-center text-[10px] font-medium text-[#37352f]/40 mb-4 relative z-10">
-                Pagamento processado pelo Stripe.<br />
-                Cancele com um clique, quando quiser.
-              </p>
+                <div className="space-y-4 py-8 relative z-10 flex-1">
+                  {[
+                    'Tarefas e Projetos Ilimitados',
+                    'Lui (Áudios & Mensagens)',
+                    'Sincronização em Nuvem',
+                    'Sem limites ou amarras',
+                    'Suporte Prioritário'
+                  ].map((benefit, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0, x: -10 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.5, delay: i * 0.1 }}
+                      viewport={{ once: true }}
+                      className="flex items-center gap-3 text-sm font-medium text-[#37352f]/70"
+                    >
+                      <div className="w-4 h-4 rounded-full bg-[#f1f1f0] border border-[#e9e9e7] flex items-center justify-center shrink-0">
+                        <svg className="w-2.5 h-2.5 text-[#37352f]/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      </div>
+                      {benefit}
+                    </motion.div>
+                  ))}
+                </div>
+
+                <p className="text-center text-[10px] font-medium text-[#37352f]/40 mb-4 relative z-10">
+                  Pagamento processado pelo Stripe.<br />
+                  Cancele com um clique, quando quiser.
+                </p>
 
                 <Link
                   to={user ? "/checkout-preview" : "/login"}
                   className="w-full py-3.5 bg-[#202020] text-white text-sm font-bold rounded-xl hover:bg-[#30302E] transition-all flex items-center justify-center gap-2 shadow-xl shadow-[#202020]/10 hover:shadow-[#202020]/20 transform hover:-translate-y-0.5 relative z-10"
                 >
-                Assinar agora
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
-              </Link>
-            </motion.div>
-          </div>
+                  Assinar agora
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+                </Link>
+              </motion.div>
+            </div>
+
+            {/* Card Pulse */}
+{/* Card Pulse */}
+            <div className="relative flex flex-col">
+              <motion.div 
+                initial={{ opacity: 0, y: 10, x: '-50%' }}
+                whileInView={{ opacity: 1, y: 0, x: '-50%' }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.6, duration: 0.5 }}
+                className="absolute -top-3 left-1/2 z-20 bg-white border border-[#e9e9e7] px-4 py-1.5 rounded-full shadow-sm flex items-center whitespace-nowrap"
+              >
+                <span className="text-[10px] font-bold text-[#37352f]/60 tracking-tight">Ideal para empresas e times</span>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 30 }}
+                whileInView={{ opacity: 1, scale: 1, y: 0 }}
+                viewport={{ once: true, margin: "-50px" }}
+                transition={{ duration: 0.7, type: "spring", bounce: 0.4, delay: 0.2 }}
+                className="w-full h-full bg-[#fcfcfc] border border-[#e9e9e7] rounded-3xl p-8 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.05)] relative overflow-hidden flex flex-col"
+              >
+                <div className="absolute -top-16 -right-16 w-32 h-32 bg-blue-500/5 blur-3xl rounded-full" />
+
+                <div className="flex justify-between items-center pb-6 relative z-10">
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex items-center justify-center bg-[#f7f7f5] border border-[#e9e9e7] w-12 h-12 rounded-2xl shadow-sm shrink-0">
+                      <img src={pulseIcon} alt="Pulse" className="w-8 h-8 object-contain" />
+                    </div>
+                    <h3 className="text-2xl font-extrabold text-[#37352f]">Pulse</h3>
+                  </div>
+                  <div className="text-right flex flex-col items-end">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-3xl font-black tracking-tight text-[#37352f]">R$</span>
+                      <NumberFlow
+                        value={teamPrice}
+                        format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}
+                        className="text-3xl font-black tracking-tight text-[#37352f]"
+                      />
+                    </div>
+                    <span className="text-[10px] font-bold text-[#37352f]/40 tracking-widest uppercase -mt-1">/ membro</span>
+                  </div>
+                </div>
+                <hr className="-mx-8 border-t border-[#e9e9e7]" />
+
+                <div className="space-y-4 py-8 relative z-10 flex-1">
+                  {[
+                    'Tudo do plano Flow',
+                    'Gestão de Equipes',
+                    'Workspaces Compartilhados',
+                    'Convidar Membros',
+                    'Faturamento Centralizado',
+                    'Suporte VIP 24/7'
+                  ].map((benefit, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0, x: -10 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.5, delay: 0.2 + (i * 0.1) }}
+                      viewport={{ once: true }}
+                      className="flex items-center gap-3 text-sm font-medium text-[#37352f]/70"
+                    >
+                      <div className="w-4 h-4 rounded-full bg-[#f1f1f0] border border-[#e9e9e7] flex items-center justify-center shrink-0">
+                        <svg className="w-2.5 h-2.5 text-[#37352f]/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      </div>
+                      {benefit}
+                    </motion.div>
+                  ))}
+                </div>
+
+                <Link
+                  to={user ? "/checkout-preview" : "/login"}
+                  className="w-full py-3.5 bg-[#202020] text-white text-sm font-bold rounded-xl hover:bg-[#303030] transition-all flex items-center justify-center gap-2 transform hover:-translate-y-0.5 relative z-10 shadow-sm"
+                >
+                  Assinar agora
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+                </Link>
+              </motion.div>
+            </div>
 
           </div>
         </div>

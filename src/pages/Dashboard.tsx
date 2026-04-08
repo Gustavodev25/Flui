@@ -14,9 +14,9 @@ import {
 } from 'lucide-react'
 import handAnimationData from '../assets/hand.json'
 import { useAuth } from '../contexts/AuthContext'
-import { supabase } from '../lib/supabase'
+import { useSubscription } from '../contexts/SubscriptionContext'
 import { useNavigate } from 'react-router-dom'
-import luiLogo from '../assets/logo/finloz.png'
+import luiLogo from '../assets/logo/lui.svg'
 import { apiFetch } from '../lib/api'
 
 // Componente que usa lottie-web diretamente via ref
@@ -80,7 +80,7 @@ const getGreeting = () => {
 const Dashboard: React.FC = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [hasFlow, setHasFlow] = useState<boolean>(false)
+  const { hasFlow } = useSubscription()
   const [stats, setStats] = useState<DashboardStats>({ todo: 0, doing: 0, done: 0 })
   const [loadingRecent, setLoadingRecent] = useState(true)
   const [recentTasks, setRecentTasks] = useState<any[]>([])
@@ -100,18 +100,6 @@ const Dashboard: React.FC = () => {
   const fullName = user?.user_metadata?.name || 'Companheiro(a) de Equipe'
   const firstName = fullName.split(' ')[0]
 
-  useEffect(() => {
-    const fetchSub = async () => {
-      if (!user) return
-      const { data } = await supabase
-        .from('subscriptions')
-        .select('status')
-        .eq('user_id', user.id)
-        .maybeSingle()
-      setHasFlow(data?.status === 'active')
-    }
-    fetchSub()
-  }, [user])
 
   useEffect(() => {
     const fetchDashboardData = async () => {

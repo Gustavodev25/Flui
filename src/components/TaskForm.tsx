@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Loader2, Plus, Trash2, CheckCircle2, Circle } from 'lucide-react'
+import { Loader2, Plus, Trash2, CheckCircle2, Circle, Lock, Users } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Select from './ui/Select'
 import DatePicker from './ui/DatePicker'
@@ -12,9 +12,12 @@ interface TaskFormProps {
   onSubmit: (task: any) => void
   onCancel: () => void
   isEditing?: boolean
+  hasWorkspaceAccess?: boolean
+  defaultVisibility?: 'personal' | 'workspace'
+  workspaceName?: string
 }
 
-const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, isEditing }) => {
+const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, isEditing, hasWorkspaceAccess, defaultVisibility, workspaceName }) => {
   const { user } = useAuth()
   const [avatarError, setAvatarError] = useState(false)
   const [typingDone, setTypingDone] = useState(false)
@@ -26,6 +29,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, is
     initialData?.dueDate && initialData.dueDate !== 'Sem prazo'
       ? new Date(initialData.dueDate)
       : null
+  )
+  const [visibility, setVisibility] = useState<'personal' | 'workspace'>(
+    initialData?.visibility || defaultVisibility || 'personal'
   )
   const [subtasks, setSubtasks] = useState<{ id: string, title: string, completed: boolean }[]>(initialData?.subtasks || [])
   const [newSubtask, setNewSubtask] = useState('')
@@ -153,7 +159,8 @@ REGRAS:
       source: initialData?.source || 'user',
       dueDate: dueDate ? formatDateForTask(dueDate) : 'Sem prazo',
       progress,
-      subtasks
+      subtasks,
+      visibility,
     })
   }
 
@@ -445,6 +452,47 @@ REGRAS:
           </div>
         </div>
       </div>
+
+      {/* Visibility Toggle (workspace members/owners only) */}
+      {hasWorkspaceAccess && (
+        <div className="space-y-1.5">
+          <label className="text-[11px] font-medium text-[#37352f]/70 flex items-center h-5">Visibilidade</label>
+          <div className="flex items-center gap-2 bg-[#f7f7f5] border border-[#e9e9e7] rounded-lg p-1">
+            <button
+              type="button"
+              onClick={() => setVisibility('personal')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-[11px] font-semibold transition-all ${
+                visibility === 'personal'
+                  ? 'bg-white text-[#37352f] shadow-sm border border-[#e9e9e7]'
+                  : 'text-[#37352f]/40 hover:text-[#37352f]/70'
+              }`}
+            >
+              <Lock size={12} strokeWidth={2.5} />
+              Pessoal
+              {visibility === 'personal' && (
+                <span className="text-[9px] text-[#37352f]/40 font-normal ml-0.5">só você vê</span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setVisibility('workspace')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-[11px] font-semibold transition-all ${
+                visibility === 'workspace'
+                  ? 'bg-white text-[#37352f] shadow-sm border border-[#e9e9e7]'
+                  : 'text-[#37352f]/40 hover:text-[#37352f]/70'
+              }`}
+            >
+              <Users size={12} strokeWidth={2.5} />
+              Workspace
+              {visibility === 'workspace' && (
+                <span className="text-[9px] text-[#37352f]/40 font-normal ml-0.5">
+                  {workspaceName ? `${workspaceName}` : 'equipe vê'}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Form Buttons */}
       <div className="flex items-center justify-end gap-3 pt-2">

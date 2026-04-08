@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import luiLogo from '../assets/logo/finloz.png'
+import luiLogo from '../assets/logo/lui.svg'
 import { useAuth } from '../contexts/AuthContext'
 import { motion, AnimatePresence, useAnimation } from 'framer-motion'
 
@@ -106,7 +106,7 @@ export const FinlozBottomLogo: React.FC = () => {
               <motion.img
                 animate={controls}
                 src={luiLogo}
-                alt="Finloz"
+                alt="Lui"
                 className="w-5 h-5 object-contain"
               />
             </motion.div>

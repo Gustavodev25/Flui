@@ -3,13 +3,14 @@ import { Link, useLocation } from 'react-router-dom'
 import { useSidebar } from '../contexts/SidebarContext'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import logo from '../assets/logo/logo.png'
-import luiLogo from '../assets/logo/finloz.png'
-import flowLogo from '../assets/logo/flow.png'
+import logo from '../assets/logo/logo.svg'
+import luiLogo from '../assets/logo/lui.svg'
+import flowLogo from '../assets/logo/flow.svg'
 import { useAuth } from '../contexts/AuthContext'
 import Avvvatars from 'avvvatars-react'
 import { WorkspaceModal } from './WorkspaceModal'
 import { supabase } from '../lib/supabase'
+import { apiFetch } from '../lib/api'
 import { useState, useEffect, useRef } from 'react'
 
 const WHATSAPP_NUMBER = '5511925870754'
@@ -109,29 +110,49 @@ export const Sidebar: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const [subscription, setSubscription] = useState<any>(null)
+  const [workspaceMembership, setWorkspaceMembership] = useState<{ ownerName: string; ownerEmail: string; planId: string } | null>(null)
+  const [dataLoaded, setDataLoaded] = useState(false)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const isMobile = !isDesktop
 
   useEffect(() => {
-    const fetchSub = async () => {
+    const fetchData = async () => {
       if (!user) return
-      const { data } = await supabase
-        .from('subscriptions')
-        .select('status')
-        .eq('user_id', user.id)
-        .maybeSingle()
-      setSubscription(data)
+
+      // Carrega assinatura e membership em paralelo
+      const [subResult, membershipResult] = await Promise.allSettled([
+        supabase
+          .from('subscriptions')
+          .select('status, plan_id')
+          .eq('user_id', user.id)
+          .maybeSingle(),
+        apiFetch<{ membership: { ownerName: string; ownerEmail: string; planId: string } | null }>(
+          '/api/workspace/my-membership',
+          undefined,
+          { userId: user.id }
+        )
+      ])
+
+      if (subResult.status === 'fulfilled') setSubscription(subResult.value.data)
+      if (membershipResult.status === 'fulfilled') setWorkspaceMembership(membershipResult.value.membership)
+      setDataLoaded(true)
     }
-    fetchSub()
+    fetchData()
   }, [user])
+
+  // Se for membro convidado, o plano vem do workspace — não da tabela subscriptions
+  const isWorkspaceMember = !!workspaceMembership
+  const effectivePlanId = isWorkspaceMember ? workspaceMembership!.planId : subscription?.plan_id
+  const effectiveStatus = isWorkspaceMember ? 'active' : subscription?.status
+
+  const hasFlow = effectiveStatus === 'active'
+  const hasPulse = effectiveStatus === 'active' && effectivePlanId === 'pulse'
 
   // Fecha o menu mobile quando muda de rota
   useEffect(() => {
     closeMobileMenu()
-  }, [location.pathname])
-
-  const hasFlow = subscription?.status === 'active'
+  }, [location.pathname, closeMobileMenu])
 
   const navItems = [
     { icon: LayoutDashboard, label: 'Painel', path: '/dashboard' },
@@ -255,7 +276,7 @@ export const Sidebar: React.FC = () => {
       {/* Card inferior */}
       <div className="mt-auto mb-1 flex flex-col gap-2">
         <AnimatePresence mode="wait">
-          {location.pathname !== '/dashboard' && (
+          {location.pathname !== '/dashboard' && dataLoaded && (
             hasFlow ? (
               /* ── Usuário Flow: card do Lui ── */
               (isCollapsed && !isMobile) ? (
@@ -367,8 +388,37 @@ export const Sidebar: React.FC = () => {
         {/* Divisor full-width */}
         <div className="-mx-3 h-px bg-[#e9e9e7]" />
 
-        {/* Workspace Card */}
-        {(() => {
+        {/* Card de Membro Convidado do Workspace */}
+        {isWorkspaceMember && (() => {
+          const planLabel = workspaceMembership!.planId === 'pulse' ? 'Pulse' : 'Flow'
+          const ownerName = workspaceMembership!.ownerName
+          const avatarValue = workspaceMembership!.ownerEmail || ownerName
+
+          return (
+            <AnimatePresence mode="wait">
+              {(isCollapsed && !isMobile) ? (
+                <motion.div key="wsm-collapsed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex justify-center py-1">
+                  <div title={`Workspace de ${ownerName} · ${planLabel}`}>
+                    <Avvvatars value={avatarValue} style="shape" size={32} radius={8} />
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div key="wsm-expanded" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-2 px-1 py-1.5 rounded-lg">
+                  <Avvvatars value={avatarValue} style="shape" size={28} radius={7} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[9px] text-[#37352f]/35 font-medium uppercase tracking-wider leading-tight">
+                      Workspace · {planLabel}
+                    </p>
+                    <p className="text-[11px] font-semibold text-[#37352f] truncate leading-tight">{ownerName}</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )
+        })()}
+
+        {/* Workspace Card - Only for Pulse owners (localhost only) */}
+        {hasPulse && !isWorkspaceMember && (() => {
           const wsName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Usuário'
           const avatarValue = user?.email || wsName
           const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
@@ -397,7 +447,7 @@ export const Sidebar: React.FC = () => {
         })()}
       </div>
 
-      {/* Só renderiza o Modal de Workspace se estiver no localhost (atualização futura) */}
+      {/* Modal de Workspace apenas em localhost */}
       {(window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (
         <WorkspaceModal
           isOpen={isWorkspaceOpen}

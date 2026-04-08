@@ -4,7 +4,7 @@ import Avvvatars from 'avvvatars-react'
 import { Menu, User, CreditCard, LifeBuoy, LogOut, Star, ChevronRight } from 'lucide-react'
 import { Dropdown, DropdownItem, DropdownDivider } from './ui/Dropdown'
 import { SettingsModal } from './SettingsModal'
-import { supabase } from '../lib/supabase'
+import { useSubscription } from '../contexts/SubscriptionContext'
 import { useLocation, Link } from 'react-router-dom'
 import { useSidebar } from '../contexts/SidebarContext'
 import { motion } from 'framer-motion'
@@ -19,25 +19,12 @@ export const Topbar: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'profile' | 'subscription'>('profile')
   const profileRef = useRef<HTMLDivElement>(null)
-  const [subscription, setSubscription] = useState<any>(null)
+  const { hasFlow, planId, isWorkspaceMember, workspaceMembership } = useSubscription()
   const [avatarError, setAvatarError] = useState(false)
 
   useEffect(() => {
     setAvatarError(false)
   }, [user?.user_metadata?.avatar_url])
-
-  useEffect(() => {
-    const fetchSub = async () => {
-      if (!user) return
-      const { data } = await supabase
-        .from('subscriptions')
-        .select('status')
-        .eq('user_id', user.id)
-        .maybeSingle()
-      setSubscription(data)
-    }
-    fetchSub()
-  }, [user])
   
   const routeLabels: { [key: string]: string } = {
     '/dashboard': 'Painel',
@@ -127,7 +114,11 @@ export const Topbar: React.FC = () => {
                 </span>
                 <div className="flex items-center gap-1">
                 <span className="text-[10px] text-[#37352f]/40 font-bold tracking-wider group-hover:text-[#37352f] transition-colors leading-none">
-                     {subscription?.status === 'active' ? 'Flow' : 'Gratuito'}
+                  {isWorkspaceMember
+                    ? `Workspace · ${planId === 'pulse' ? 'Pulse' : 'Flow'}`
+                    : hasFlow
+                      ? (planId === 'pulse' ? 'Pulse' : 'Flow')
+                      : 'Gratuito'}
                   </span>
                 </div>
             </div>
@@ -155,7 +146,11 @@ export const Topbar: React.FC = () => {
           >
             <div className="px-3 py-2.5 mb-1 flex flex-col gap-0.5">
               <span className="text-[10px] font-bold text-[#37352f]/30 tracking-widest px-0.5">
-                {subscription?.status === 'active' ? 'Assinatura Ativa' : 'Conta Gratuita'}
+                {isWorkspaceMember
+                  ? `Workspace de ${workspaceMembership?.ownerName}`
+                  : hasFlow
+                    ? 'Assinatura Ativa'
+                    : 'Conta Gratuita'}
               </span>
               <div className="flex flex-col mt-0.5 px-0.5">
                 <span className="text-sm font-bold text-[#37352f] leading-none">{fullName}</span>

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, User, CreditCard, Check, Loader2, ArrowRight, ExternalLink, Camera, Lock, Tag, CheckCircle, XCircle } from 'lucide-react'
-import flowLogo from '../assets/logo/flow.png'
-import gratisLogo from '../assets/logo/gratis.png'
+import { X, User, CreditCard, Check, Loader2, ArrowRight, ExternalLink, Camera, Lock, Zap } from 'lucide-react'
+import flowLogo from '../assets/logo/flow.svg'
+import pulseLogo from '../assets/logo/pulse.svg'
+import gratisLogo from '../assets/logo/gratis.svg'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import Avvvatars from 'avvvatars-react'
@@ -22,6 +23,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
   const { user } = useAuth()
   const fullName = user?.user_metadata?.full_name || user?.user_metadata?.name || 'Usuário'
   const [subscription, setSubscription] = useState<any>(null)
+  const [membership, setMembership] = useState<any>(null)
   const [loadingSub, setLoadingSub] = useState(true)
   const [subscribing, setSubscribing] = useState(false)
   const [openingPortal, setOpeningPortal] = useState(false)
@@ -37,11 +39,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
   const [showChangePassword, setShowChangePassword] = useState(false)
   const hasWhatsappPassword = user?.user_metadata?.has_whatsapp_password === true
 
-  // Cupom
-  const [promoCode, setPromoCode] = useState('')
-  const [promoLoading, setPromoLoading] = useState(false)
-  const [promoStatus, setPromoStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
-  const [promoLabel, setPromoLabel] = useState('')
 
   const navigate = useNavigate()
   const isGoogleUser = user?.identities?.some(i => i.provider === 'google') &&
@@ -51,26 +48,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
     const fetchSubscription = async () => {
       if (!user) return
       try {
-        const { data } = await supabase
-          .from('subscriptions')
-          .select('*')
-          .eq('user_id', user.id)
-          .maybeSingle()
+        const [subResult, memResult] = await Promise.allSettled([
+          supabase
+            .from('subscriptions')
+            .select('*')
+            .eq('user_id', user.id)
+            .maybeSingle(),
+          apiFetch<{ membership: any }>('/api/workspace/my-membership', undefined, { userId: user.id })
+        ])
 
-        setSubscription(data)
+        if (subResult.status === 'fulfilled') {
+          const data = subResult.value.data
+          setSubscription(data)
 
-        if (data?.stripe_subscription_id) {
-          try {
-            const { subscription: synced } = await apiFetch<{ subscription?: any }>('/api/subscription/sync', undefined, {
-              userId: user.id,
-            })
-            if (synced) setSubscription(synced)
-          } catch (syncErr) {
-            console.warn('Sync com Stripe falhou:', syncErr)
+          if (data?.stripe_subscription_id) {
+            try {
+              const { subscription: synced } = await apiFetch<{ subscription?: any }>('/api/subscription/sync', undefined, {
+                userId: user.id,
+              })
+              if (synced) setSubscription(synced)
+            } catch (syncErr) {
+              console.warn('Sync com Stripe falhou:', syncErr)
+            }
           }
         }
+
+        if (memResult.status === 'fulfilled' && memResult.value.membership) {
+          setMembership(memResult.value.membership)
+        }
       } catch (err) {
-        console.error('Erro ao buscar assinatura:', err)
+        console.error('Erro ao buscar dados de assinatura:', err)
       } finally {
         setLoadingSub(false)
       }
@@ -82,48 +89,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
     }
   }, [isOpen, activeTab, user])
 
-  const handleApplyPromo = async () => {
-    if (!promoCode.trim()) return
-    setPromoLoading(true)
-    setPromoStatus('idle')
-    setPromoLabel('')
-    try {
-      const { valid, discountLabel, error } = await apiFetch<{
-        valid?: boolean
-        discountLabel?: string
-        error?: string
-      }>('/api/stripe/validate-promo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ promoCode: promoCode.trim().toUpperCase() }),
-      })
-      if (valid) {
-        setPromoStatus('valid')
-        setPromoLabel(discountLabel || 'Desconto aplicado!')
-      } else {
-        setPromoStatus('invalid')
-        setPromoLabel(error || 'Cupom inválido ou expirado.')
-      }
-    } catch {
-      setPromoStatus('invalid')
-      setPromoLabel('Não foi possível validar o cupom.')
-    } finally {
-      setPromoLoading(false)
-    }
-  }
 
   const handleSubscribe = async () => {
     if (!user) return
     setSubscribing(true)
     try {
-      const body: Record<string, string> = { userId: user.id, userEmail: user.email ?? '' }
-      if (promoStatus === 'valid' && promoCode.trim()) {
-        body.promoCode = promoCode.trim().toUpperCase()
-      }
       const { url, error } = await apiFetch<{ url?: string; error?: string }>('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ userId: user.id, userEmail: user.email ?? '' }),
       })
       if (error) throw new Error(error)
       if (url) window.location.href = url
@@ -300,6 +274,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                   <CreditCard size={18} /> Assinatura
                 </button>
               </nav>
+
+              {/* Version Footer Clean */}
+              <div className="px-6 py-4 mt-auto">
+                <div className="flex items-center gap-2 text-[#37352f]/25">
+                  <span className="text-[11px] font-bold tracking-tight">v1.0.0</span>
+                  <span className="w-1 h-1 rounded-full bg-[#37352f]/10" />
+                  <span className="text-[9px] font-black uppercase tracking-[0.1em]">Beta</span>
+                </div>
+              </div>
             </div>
 
             {/* Tabs Mobile */}
@@ -551,15 +534,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                         <div className="border border-[#e9e9e7] p-5 rounded-2xl bg-[#f7f7f5] flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm">
-                              <img src={flowLogo} alt="Flow" className="w-6 h-6 object-contain" />
+                              <img src={subscription?.plan_id === 'pulse' ? pulseLogo : flowLogo} alt="Plan" className="w-6 h-6 object-contain" />
                             </div>
                             <div>
                               <p className="text-[11px] font-bold text-[#37352f]/50 mb-0.5">Plano ativo</p>
-                              <h4 className="text-base font-bold text-[#37352f]">Flow</h4>
+                              <h4 className="text-base font-bold text-[#37352f]">
+                                {subscription?.plan_id === 'pulse' ? 'Pulse' : 'Flow'}
+                              </h4>
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="text-sm font-bold text-[#37352f]">R$ 9,90/mês</p>
+                            <p className="text-sm font-bold text-[#37352f]">
+                              {subscription?.plan_id === 'pulse' ? 'R$ 29,90/mês' : 'R$ 9,90/mês'}
+                            </p>
                           </div>
                         </div>
 
@@ -601,25 +588,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {/* Card plano atual: Gratuito */}
-                        <div className="border border-[#e9e9e7] p-4 rounded-2xl bg-[#f7f7f5] flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm shrink-0">
-                              <img src={gratisLogo} alt="Gratuito" className="w-6 h-6 object-contain" />
+                        {membership ? (
+                          <div className="border border-[#e9e9e7] p-4 rounded-2xl bg-[#f7f7f5] flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm shrink-0">
+                                <Zap size={20} className="text-[#37352f] fill-[#37352f]" />
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-bold text-[#37352f]/40 mb-0.5">Plano atual</p>
+                                <h4 className="text-sm font-bold text-[#37352f]">Workspace · {membership.planId === 'pulse' ? 'Pulse' : 'Flow'}</h4>
+                                <p className="text-[10px] text-[#37352f]/40 font-medium truncate max-w-[180px]">Convidado por {membership.ownerName}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-[11px] font-bold text-[#37352f]/40 mb-0.5">Plano atual</p>
-                              <h4 className="text-sm font-bold text-[#37352f]">Gratuito</h4>
+                            <div className="px-2 py-1 bg-[#25D366]/10 text-[#25D366] text-[9px] font-bold rounded-lg border border-[#25D366]/20">
+                              ATIVO
                             </div>
                           </div>
-                          <button
-                            onClick={() => { onClose(); navigate('/checkout-preview') }}
-                            className="text-[11px] font-bold text-[#37352f]/40 hover:text-[#37352f] transition-colors flex items-center gap-1"
-                          >
-                            Fazer upgrade
-                            <ArrowRight size={11} />
-                          </button>
-                        </div>
+                        ) : (
+                          /* Card plano atual: Gratuito */
+                          <div className="border border-[#e9e9e7] p-4 rounded-2xl bg-[#f7f7f5] flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm shrink-0">
+                                <img src={gratisLogo} alt="Gratuito" className="w-6 h-6 object-contain" />
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-bold text-[#37352f]/40 mb-0.5">Plano atual</p>
+                                <h4 className="text-sm font-bold text-[#37352f]">Gratuito</h4>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => { onClose(); navigate('/checkout-preview') }}
+                              className="text-[11px] font-bold text-[#37352f]/40 hover:text-[#37352f] transition-colors flex items-center gap-1"
+                            >
+                              Fazer upgrade
+                              <ArrowRight size={11} />
+                            </button>
+                          </div>
+                        )}
 
                         {/* Card Ativar Flow */}
                       <div className="w-full border border-[#e9e9e7] rounded-3xl bg-[#fcfcfa] flex flex-col group transition-all duration-300 overflow-hidden">
@@ -630,7 +635,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                               <img src={flowLogo} alt="Flow" className="w-6 h-6 object-contain" />
                             </div>
                             <div className="flex items-center gap-2">
-                              <h4 className="text-[14px] font-black text-[#37352f] tracking-tight leading-none">Ativar Flow</h4>
+                              <h4 className="text-[14px] font-black text-[#37352f] tracking-tight leading-none">
+                                {membership ? 'Flow Individual' : 'Ativar Flow'}
+                              </h4>
                             </div>
                           </div>
 
@@ -659,50 +666,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                           </div>
                         </div>
 
-                        {/* Campo de Cupom */}
-                        <div className="px-4 sm:px-5 pb-4 pt-0 space-y-2 border-t border-[#37352f]/5">
-                          <div className="flex gap-2 pt-4">
-                            <div className="relative flex-1">
-                              <Tag size={11} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#37352f]/30" />
-                              <input
-                                type="text"
-                                value={promoCode}
-                                onChange={e => {
-                                  setPromoCode(e.target.value.toUpperCase())
-                                  setPromoStatus('idle')
-                                  setPromoLabel('')
-                                }}
-                                onKeyDown={e => e.key === 'Enter' && handleApplyPromo()}
-                                placeholder="Código de cupom"
-                                className="w-full pl-8 pr-3 py-2 text-[11px] font-medium bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl text-[#37352f] placeholder:text-[#37352f]/25 focus:outline-none focus:border-[#37352f]/20 transition-colors"
-                              />
-                            </div>
-                            <button
-                              onClick={handleApplyPromo}
-                              disabled={promoLoading || !promoCode.trim()}
-                              className="px-3 py-2 bg-[#f7f7f5] border border-[#e9e9e7] text-[11px] font-bold text-[#37352f]/60 rounded-xl hover:bg-[#f1f1f0] hover:text-[#37352f] transition-all active:scale-[0.97] disabled:opacity-40 whitespace-nowrap"
-                            >
-                              {promoLoading ? <Loader2 size={12} className="animate-spin" /> : 'Aplicar'}
-                            </button>
-                          </div>
-                          <AnimatePresence>
-                            {promoStatus !== 'idle' && (
-                              <motion.div
-                                initial={{ opacity: 0, y: -4 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -4 }}
-                                className={`flex items-center gap-1.5 text-[11px] font-medium px-1 ${
-                                  promoStatus === 'valid' ? 'text-green-600' : 'text-red-500'
-                                }`}
-                              >
-                                {promoStatus === 'valid'
-                                  ? <CheckCircle size={12} />
-                                  : <XCircle size={12} />}
-                                {promoLabel}
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
+
 
                         {/* Seção Inferior: Recursos (Com o mesmo fundo e divisor sutil) */}
                         <div className="px-5 sm:px-14 pb-5 pt-4 border-t border-[#37352f]/5 bg-[#37352f]/[0.02]">

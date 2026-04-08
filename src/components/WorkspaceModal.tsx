@@ -102,7 +102,9 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ isOpen, onClose 
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const MEMBER_LIMIT = 5
   const totalMembers = 1 + members.length
+  const atLimit = members.length >= MEMBER_LIMIT
 
   return createPortal(
     <AnimatePresence>
@@ -142,9 +144,14 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ isOpen, onClose 
 
             {/* Membros */}
             <div className="px-5 pt-5 pb-3">
-              <p className="text-[10px] font-semibold text-[#37352f]/40 uppercase tracking-wider mb-3">
-                Membros · {totalMembers}
-              </p>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[10px] font-semibold text-[#37352f]/40 uppercase tracking-wider">
+                  Membros · {totalMembers}
+                </p>
+                <p className="text-[10px] font-semibold text-[#37352f]/30 uppercase tracking-wider">
+                  {members.length}/{MEMBER_LIMIT}
+                </p>
+              </div>
 
               {/* Owner */}
               <div className="flex items-center gap-3 py-2 group">
@@ -207,33 +214,41 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ isOpen, onClose 
                 </button>
               </div>
 
-              <div className="rounded-xl border border-[#e9e9e7] bg-[#f7f7f5] overflow-hidden">
-                <div className="flex items-center px-3 gap-2">
-                  <UserPlus size={13} className="text-[#37352f]/30 flex-shrink-0" />
-                  <input
-                    type="email"
-                    value={inviteEmail}
-                    onChange={e => { setInviteEmail(e.target.value); setInviteError(''); setInviteSuccess(false) }}
-                    onKeyDown={e => e.key === 'Enter' && handleInvite()}
-                    placeholder="Adicionar por e-mail..."
-                    className="flex-1 py-3 text-[12px] bg-transparent placeholder-[#37352f]/30 text-[#37352f] outline-none"
-                  />
+              {atLimit ? (
+                <div className="rounded-xl border border-[#e9e9e7] bg-[#f7f7f5] px-4 py-3 text-center">
+                  <p className="text-[11px] font-semibold text-[#37352f]/40 leading-snug">
+                    Limite de {MEMBER_LIMIT} membros atingido.
+                  </p>
                 </div>
-
-                {inviteEmail.trim() && (
-                  <div className="border-t border-[#e9e9e7] px-3 py-2 flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-[#37352f]/50 truncate">{inviteEmail}</span>
-                    <button
-                      onClick={handleInvite}
-                      disabled={inviteLoading}
-                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1 rounded-md bg-[#37352f] hover:bg-[#1a1a1a] text-white text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {inviteLoading && <Loader2 size={11} className="animate-spin" />}
-                      Convidar
-                    </button>
+              ) : (
+                <div className="rounded-xl border border-[#e9e9e7] bg-[#f7f7f5] overflow-hidden">
+                  <div className="flex items-center px-3 gap-2">
+                    <UserPlus size={13} className="text-[#37352f]/30 flex-shrink-0" />
+                    <input
+                      type="email"
+                      value={inviteEmail}
+                      onChange={e => { setInviteEmail(e.target.value); setInviteError(''); setInviteSuccess(false) }}
+                      onKeyDown={e => e.key === 'Enter' && handleInvite()}
+                      placeholder="Adicionar por e-mail..."
+                      className="flex-1 py-3 text-[12px] bg-transparent placeholder-[#37352f]/30 text-[#37352f] outline-none"
+                    />
                   </div>
-                )}
-              </div>
+
+                  {inviteEmail.trim() && (
+                    <div className="border-t border-[#e9e9e7] px-3 py-2 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-[#37352f]/50 truncate">{inviteEmail}</span>
+                      <button
+                        onClick={handleInvite}
+                        disabled={inviteLoading}
+                        className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1 rounded-md bg-[#37352f] hover:bg-[#1a1a1a] text-white text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {inviteLoading && <Loader2 size={11} className="animate-spin" />}
+                        Convidar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Feedback */}
               <AnimatePresence>

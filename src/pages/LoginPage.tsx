@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import finlozLogo from '../assets/logo/finloz.png'
+import logoSvg from '../assets/logo/logo.svg'
+import finlozLogo from '../assets/logo/lui.svg'
 import { toaster } from '../components/ui/Toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -8,6 +9,427 @@ import { Navigate, Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import { Eye, EyeOff, Check, ArrowLeft } from 'lucide-react'
 import TermsModal from '../components/TermsModal'
+
+// ── Forgot Password Flow ──────────────────────────────────────────────────────
+
+type ForgotStep = 'email' | 'code' | 'newPassword'
+
+const ForgotPasswordFlow: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  const [step, setStep] = useState<ForgotStep>('email')
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState(['', '', '', '', '', ''])
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null)
+  const digitRefs = useRef<(HTMLInputElement | null)[]>([])
+
+  const handleSendCode = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+    try {
+      await apiFetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      setStep('code')
+      toaster.create({ title: 'Código enviado!', description: 'Verifique seu email.', type: 'success' })
+    } catch (err: any) {
+      toaster.create({ title: 'Erro', description: err.message, type: 'error' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleDigitChange = (index: number, value: string) => {
+    const char = value.replace(/\D/g, '').slice(-1)
+    const next = [...code]
+    next[index] = char
+    setCode(next)
+    if (char && index < 5) {
+      digitRefs.current[index + 1]?.focus()
+    }
+  }
+
+  const handleDigitKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && !code[index] && index > 0) {
+      digitRefs.current[index - 1]?.focus()
+    }
+  }
+
+  const handleDigitPaste = (e: React.ClipboardEvent) => {
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
+    if (pasted.length > 0) {
+      const next = [...code]
+      pasted.split('').forEach((char, i) => { next[i] = char })
+      setCode(next)
+      const focusIdx = Math.min(pasted.length, 5)
+      digitRefs.current[focusIdx]?.focus()
+    }
+    e.preventDefault()
+  }
+
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const fullCode = code.join('')
+    if (fullCode.length < 6) {
+      toaster.create({ title: 'Código incompleto', description: 'Digite todos os 6 dígitos.', type: 'error' })
+      return
+    }
+    setIsLoading(true)
+    try {
+      await apiFetch('/api/auth/verify-reset-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code: fullCode }),
+      })
+      setStep('newPassword')
+    } catch (err: any) {
+      toaster.create({ title: 'Código inválido', description: err.message, type: 'error' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newPassword !== confirmPassword) {
+      toaster.create({ title: 'Senhas não coincidem', description: 'As senhas devem ser iguais.', type: 'error' })
+      return
+    }
+    if (newPassword.length < 6) {
+      toaster.create({ title: 'Senha fraca', description: 'A senha deve ter pelo menos 6 caracteres.', type: 'error' })
+      return
+    }
+    setIsLoading(true)
+    try {
+      await apiFetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code: code.join(''), newPassword }),
+      })
+      toaster.create({ 
+        title: 'Senha redefinida!', 
+        description: 'Faça login com sua nova senha.', 
+        type: 'success' 
+      })
+      setTimeout(() => {
+        onBack()
+      }, 500)
+    } catch (err: any) {
+      toaster.create({ title: 'Erro', description: err.message, type: 'error' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const stepTitle: Record<ForgotStep, string> = {
+    email: 'Recuperar senha',
+    code: 'Digite o código',
+    newPassword: 'Nova senha',
+  }
+  const stepDesc: Record<ForgotStep, string> = {
+    email: 'Informe seu email e enviaremos um código de 6 dígitos.',
+    code: `Enviamos um código para ${email}. Insira abaixo.`,
+    newPassword: 'Escolha uma nova senha segura.',
+  }
+
+  return (
+    <motion.div
+      key={`forgot-${step}`}
+      initial={{ opacity: 0, scale: 0.9, filter: 'blur(8px)' }}
+      animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+      transition={{ duration: 0.8, type: 'spring', stiffness: 70, damping: 20, delay: 0.05 }}
+      className="w-full max-w-[380px]"
+    >
+      <div className="mb-10 flex flex-col items-center md:items-start text-center md:text-left">
+        <h1 className="text-2xl font-bold tracking-tight mb-2">{stepTitle[step]}</h1>
+        <p className="text-sm text-[#37352f]/40 font-medium">{stepDesc[step]}</p>
+      </div>
+
+      {step === 'email' && (
+        <form onSubmit={handleSendCode} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">E-mail</label>
+            <input
+              type="email"
+              placeholder="Seu e-mail cadastrado"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 px-3.5 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
+              required
+              autoFocus
+            />
+          </div>
+          <SubmitButton isLoading={isLoading} label="Enviar código" />
+        </form>
+      )}
+
+      {step === 'code' && (
+        <form onSubmit={handleVerifyCode} className="space-y-6">
+          <div className="grid grid-cols-6 gap-2 w-full items-center">
+            {code.map((digit, i) => (
+              <div key={i} className="relative w-full h-14">
+                <input
+                  ref={(el) => { digitRefs.current[i] = el }}
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={1}
+                  value={digit}
+                  onChange={(e) => handleDigitChange(i, e.target.value)}
+                  onKeyDown={(e) => handleDigitKeyDown(i, e)}
+                  onPaste={handleDigitPaste}
+                  onFocus={() => setFocusedIndex(i)}
+                  onBlur={() => setFocusedIndex(null)}
+                  className="w-full h-full text-center text-2xl font-bold border border-black rounded-[8px] bg-white text-transparent caret-transparent outline-none focus:ring-2 focus:ring-black/5 transition-all"
+                />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <AnimatePresence mode="wait">
+                    {digit ? (
+                      <motion.span
+                        key={digit}
+                        initial={{ y: 10, opacity: 0, scale: 0.5 }}
+                        animate={{ y: 0, opacity: 1, scale: 1 }}
+                        exit={{ y: -10, opacity: 0, scale: 0.5 }}
+                        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                        className="text-2xl font-bold text-[#37352f]"
+                      >
+                        {digit}
+                      </motion.span>
+                    ) : (
+                      <motion.div
+                        key="placeholder"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="w-1.5 h-1.5 rounded-full bg-[#37352f]/10"
+                      />
+                    )}
+                  </AnimatePresence>
+                </div>
+                {/* Indicador de foco customizado */}
+                {focusedIndex === i && (
+                  <motion.div
+                    layoutId="otp-focus"
+                    className="absolute inset-0 border-2 border-black rounded-[8px] pointer-events-none"
+                    transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+          <SubmitButton isLoading={isLoading} label="Verificar código" />
+          <button
+            type="button"
+            onClick={() => handleSendCode({ preventDefault: () => {} } as any)}
+            className="w-full text-center text-[11px] text-[#37352f]/40 hover:text-[#2383e2] font-medium transition-colors"
+          >
+            Reenviar código
+          </button>
+        </form>
+      )}
+
+      {step === 'newPassword' && (
+        <form onSubmit={handleResetPassword} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">Nova senha</label>
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Nova senha"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 pl-3.5 pr-10 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
+                required
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#37352f]/30 hover:text-[#37352f]/60 transition-colors focus:outline-none"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">Confirmar senha</label>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              placeholder="Repita a senha"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 px-3.5 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
+              required
+            />
+          </div>
+          <SubmitButton isLoading={isLoading} label="Redefinir senha" />
+        </form>
+      )}
+
+      <p className="pt-8 text-center text-[11px] text-[#37352f]/30 font-medium font-sans">
+        <button onClick={onBack} className="text-[#2383e2] hover:underline font-semibold">
+          Voltar para o login
+        </button>
+      </p>
+    </motion.div>
+  )
+}
+
+// Botão de submit reutilizável
+const SubmitButton: React.FC<{ isLoading: boolean; label: string }> = ({ isLoading, label }) => (
+  <motion.button
+    type="submit"
+    disabled={isLoading}
+    className="w-full bg-[#202020] hover:bg-[#202020]/90 disabled:opacity-70 text-white font-medium py-2.5 rounded-[6px] transition-all mt-2 shadow-md shadow-black/5 flex items-center justify-center h-[42px] relative overflow-hidden"
+  >
+    <AnimatePresence mode="wait">
+      {isLoading ? (
+        <motion.div
+          key="loader"
+          initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+          animate={{ opacity: 1, scale: 1, rotate: 360 }}
+          exit={{ opacity: 0, scale: 0.5 }}
+          transition={{ rotate: { repeat: Infinity, duration: 1, ease: 'linear' }, default: { type: 'spring', stiffness: 400, damping: 30 } }}
+          className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full"
+        />
+      ) : (
+        <motion.span
+          key="text"
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.9 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+          className="text-sm font-medium pointer-events-none"
+        >
+          {label}
+        </motion.span>
+      )}
+    </AnimatePresence>
+  </motion.button>
+)
+
+// ── Forgot Password Decorative Mockup ────────────────────────────────────────
+
+const CODE_DIGITS = ['3', '8', '1', '4', '0', '2']
+
+const ForgotMockup: React.FC = () => (
+  <motion.div
+    key="forgot-content"
+    initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+    animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+    exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+    transition={{ duration: 0.8, type: 'spring', stiffness: 70, damping: 20 }}
+    className="relative z-10 flex flex-col items-center w-full max-w-[340px] px-4"
+  >
+    {/* Header text */}
+    <div className="text-center mb-10 space-y-3">
+      <h2 className="text-2xl font-bold tracking-tight text-[#37352f] overflow-hidden flex justify-center">
+        {'Código no seu email.'.split('').map((char, i) => (
+          <motion.span
+            key={i}
+            initial={{ y: '100%', opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.3, delay: i * 0.025, ease: [0.2, 0.65, 0.3, 0.9] }}
+            className="inline-block"
+            style={{ whiteSpace: char === ' ' ? 'pre' : 'normal' }}
+          >
+            {char}
+          </motion.span>
+        ))}
+      </h2>
+      <motion.p
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.6 }}
+        className="text-sm font-medium text-[#37352f]/50 leading-relaxed"
+      >
+        Enviamos um código de 6 dígitos para você confirmar sua identidade com segurança.
+      </motion.p>
+    </div>
+
+    {/* Email card mockup */}
+    <div className="relative w-full flex flex-col items-center gap-3">
+
+      {/* Email card */}
+      <motion.div
+        initial={{ opacity: 0, y: 16, rotate: -1 }}
+        animate={{ opacity: 1, y: [0, -5, 0], rotate: -1 }}
+        transition={{
+          opacity: { duration: 0.5, delay: 0.3 },
+          y: { duration: 6, repeat: Infinity, ease: 'easeInOut', delay: 0.3 },
+          rotate: { duration: 0 },
+        }}
+        className="w-full bg-white border border-[#e9e9e7] rounded-2xl shadow-md shadow-[#37352f]/8 overflow-hidden -rotate-1"
+      >
+        {/* Email header bar */}
+        <div className="bg-[#f7f7f5] border-b border-[#e9e9e7] px-4 py-3 flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-[#37352f]/10" />
+          <div className="h-2 w-24 bg-[#37352f]/10 rounded-full" />
+          <div className="ml-auto h-2 w-12 bg-[#37352f]/8 rounded-full" />
+        </div>
+
+        {/* Email body */}
+        <div className="px-5 py-5">
+          {/* Sender row */}
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="w-7 h-7 rounded-full bg-[#37352f] flex items-center justify-center shrink-0">
+              <img src={logoSvg} alt="Logo" className="w-4 h-4 brightness-0 invert" />
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold text-[#37352f]">Flui</div>
+              <div className="text-[9px] text-[#37352f]/40">noreply@flui.ia.br</div>
+            </div>
+          </div>
+
+          {/* Subject line */}
+          <div className="text-[12px] font-semibold text-[#37352f] mb-1">Redefinição de senha</div>
+          <div className="text-[10px] text-[#37352f]/40 mb-4">Use o código abaixo para redefinir sua senha.</div>
+
+          {/* Code block */}
+          <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl py-4 flex justify-center gap-1.5 mb-3">
+            {CODE_DIGITS.map((digit, i) => (
+              <motion.span
+                key={i}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.7 + i * 0.12, type: 'spring', stiffness: 300, damping: 24 }}
+                className="w-8 h-9 flex items-center justify-center bg-white border border-[#e9e9e7] rounded-lg text-[18px] font-bold text-[#37352f] shadow-sm"
+                style={{ fontFamily: 'monospace' }}
+              >
+                {digit}
+              </motion.span>
+            ))}
+          </div>
+
+          <div className="h-1.5 w-3/4 bg-[#f1f1f0] rounded-full" />
+        </div>
+      </motion.div>
+
+      {/* Success badge */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.7, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: [0, 4, 0] }}
+        transition={{
+          opacity: { delay: 1.6, duration: 0.4 },
+          scale: { delay: 1.6, type: 'spring', stiffness: 400, damping: 20 },
+          y: { duration: 5, repeat: Infinity, ease: 'easeInOut', delay: 1.6 },
+        }}
+        className="self-end mr-4 flex items-center gap-2 bg-white border border-[#e9e9e7] rounded-full px-3 py-1.5 shadow-sm rotate-1"
+      >
+        <div className="w-4 h-4 rounded-full bg-emerald-500/15 flex items-center justify-center">
+          <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+            <path d="M1.5 4L3 5.5L6.5 2" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </div>
+        <span className="text-[10px] font-semibold text-[#37352f]">Código verificado</span>
+      </motion.div>
+    </div>
+  </motion.div>
+)
+
+// ── Login Page ────────────────────────────────────────────────────────────────
 
 const LoginPage: React.FC = () => {
   const { user, isLoading: authLoading } = useAuth()
@@ -20,10 +442,10 @@ const LoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false)
   const [isAgreed, setIsAgreed] = useState(false)
   const [isTermsOpen, setIsTermsOpen] = useState(false)
+  const [isForgotPassword, setIsForgotPassword] = useState(false)
   const [searchParams] = useSearchParams()
   const inviteToken = searchParams.get('invite_token')
 
-  // Se o contexto está verificando a sessão ainda, mostre carregamento
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f7f7f5]">
@@ -32,7 +454,6 @@ const LoginPage: React.FC = () => {
     )
   }
 
-  // Se já tiver uma sessão persistida (logado), joga pro dashboard ou checkout
   if (user) {
     return <Navigate to={inviteToken ? `/dashboard?invite_token=${inviteToken}` : `/checkout-preview`} replace />
   }
@@ -43,12 +464,7 @@ const LoginPage: React.FC = () => {
 
     try {
       if (isLogin) {
-        // Fazer Login
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        })
-
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
 
         if (inviteToken && data?.user) {
@@ -64,18 +480,16 @@ const LoginPage: React.FC = () => {
         }
 
         toaster.create({
-          title: "Login realizado com sucesso!",
-          description: "Bem-vindo de volta ao seu painel.",
-          type: "success",
+          title: 'Login realizado com sucesso!',
+          description: 'Bem-vindo de volta ao seu painel.',
+          type: 'success',
         })
       } else {
-        // Gera um nome aleatório de funcionário
-        const staffNames = ['Ana', 'Carlos', 'Beatriz', 'Diego', 'Camila'];
-        const agentName = staffNames[Math.floor(Math.random() * staffNames.length)];
+        const staffNames = ['Ana', 'Carlos', 'Beatriz', 'Diego', 'Camila']
+        const agentName = staffNames[Math.floor(Math.random() * staffNames.length)]
 
-        // Inicia a animação de "Verificando" no Toast com Doodle
         toaster.create({
-          title: "",
+          title: '',
           description: (
             <div className="flex items-center gap-3 w-full">
               <img
@@ -92,8 +506,8 @@ const LoginPage: React.FC = () => {
                 </p>
                 <div className="w-full h-[2px] bg-[#f1f1f0] rounded-full overflow-hidden relative">
                   <motion.div
-                    initial={{ width: "5%", filter: "blur(1px)", borderRadius: "10px" }}
-                    animate={{ width: "100%", filter: "blur(0px)", borderRadius: "0px" }}
+                    initial={{ width: '5%', filter: 'blur(1px)', borderRadius: '10px' }}
+                    animate={{ width: '100%', filter: 'blur(0px)', borderRadius: '0px' }}
                     transition={{ duration: 3, ease: [0.65, 0, 0.35, 1] }}
                     className="absolute top-0 left-0 h-full bg-[#202020]"
                   />
@@ -101,22 +515,16 @@ const LoginPage: React.FC = () => {
               </div>
             </div>
           ),
-          type: "info",
+          type: 'info',
           duration: 3500
         })
 
-        // Espera artificial para parecer que estamos "verificando" e validando
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await new Promise((resolve) => setTimeout(resolve, 3000))
 
-        // Cria Conta de fato no Supabase
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: {
-            data: {
-              name: name,
-            }
-          }
+          options: { data: { name } }
         })
 
         if (error) throw error
@@ -134,12 +542,11 @@ const LoginPage: React.FC = () => {
         }
 
         toaster.create({
-          title: "Conta criada com sucesso!",
-          description: "Bem-vindo ao Flui. Acesse para continuar.",
-          type: "success",
+          title: 'Conta criada com sucesso!',
+          description: 'Bem-vindo ao Flui. Acesse para continuar.',
+          type: 'success',
         })
 
-        // Se criar com sucesso, pode logar automaticamente na tela
         setIsLogin(true)
       }
     } catch (error: any) {
@@ -148,11 +555,11 @@ const LoginPage: React.FC = () => {
         error.message?.toLowerCase().includes('invalid_credentials')
 
       toaster.create({
-        title: "Erro na autenticação",
+        title: 'Erro na autenticação',
         description: isInvalidCredentials
-          ? "Credenciais inválidas. Se você criou sua conta com o Google, use o botão \"Continuar com Google\" acima."
-          : error.message || "Tente novamente mais tarde.",
-        type: "error",
+          ? 'Credenciais inválidas. Se você criou sua conta com o Google, use o botão "Continuar com Google" acima.'
+          : error.message || 'Tente novamente mais tarde.',
+        type: 'error',
       })
     } finally {
       setIsLoading(false)
@@ -163,22 +570,20 @@ const LoginPage: React.FC = () => {
     e.preventDefault()
     if (!isAgreed) {
       toaster.create({
-        title: "Termos e Privacidade",
-        description: "Você precisa aceitar os termos para criar sua conta.",
-        type: "error",
+        title: 'Termos e Privacidade',
+        description: 'Você precisa aceitar os termos para criar sua conta.',
+        type: 'error',
       })
       return
     }
-
     if (password !== confirmPassword) {
       toaster.create({
-        title: "Senhas não coincidem",
-        description: "A senha e a confirmação devem ser iguais.",
-        type: "error",
+        title: 'Senhas não coincidem',
+        description: 'A senha e a confirmação devem ser iguais.',
+        type: 'error',
       })
       return
     }
-
     handleLogin(e)
   }
 
@@ -187,17 +592,12 @@ const LoginPage: React.FC = () => {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          // Redireciona para o dashboard ou checkout-preview dependendo do convite
           redirectTo: `${window.location.origin}${inviteToken ? `/dashboard?invite_token=${inviteToken}` : '/checkout-preview'}`,
         }
       })
       if (error) throw error
     } catch (error: any) {
-      toaster.create({
-        title: "Erro no Google Login",
-        description: error.message,
-        type: "error",
-      })
+      toaster.create({ title: 'Erro no Google Login', description: error.message, type: 'error' })
     }
   }
 
@@ -214,226 +614,236 @@ const LoginPage: React.FC = () => {
           <span className="text-xs font-medium tracking-tight">voltar</span>
         </Link>
 
-        <motion.div
-          key={isLogin ? "login" : "signup"}
-          initial={{ opacity: 0, scale: 0.9, filter: "blur(8px)" }}
-          animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-          transition={{
-            duration: 1,
-            type: "spring",
-            stiffness: 70,
-            damping: 20,
-            delay: 0.1
-          }}
-          className="w-full max-w-[380px]"
-        >
-          {inviteToken && (
-            <div className="mb-6 p-4 bg-amber-50 border border-amber-200/60 rounded-xl">
-              <p className="text-[13px] font-medium text-amber-800 text-center leading-tight">
-                Você foi convidado para um workspace. Faça login ou crie sua conta para aceitar e participar!
-              </p>
-            </div>
-          )}
-
-          <div className="mb-10 flex flex-col items-center md:items-start text-center md:text-left">
-            <h1 className="text-2xl font-bold tracking-tight mb-2">
-              {isLogin ? "Bem-vindo" : "Crie sua conta"}
-            </h1>
-            <p className="text-sm text-[#37352f]/40 font-medium">
-              {isLogin ? "Insira seus dados para acessar sua conta." : "Junte-se ao Flui e transforme sua produtividade."}
-            </p>
-          </div>
-
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-3">
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                className="flex items-center justify-center gap-3 w-full border border-[#e9e9e7] hover:bg-[#f1f1f0] transition-colors py-2 px-4 rounded-[6px] font-medium text-sm"
-              >
-                <img src="https://www.google.com/favicon.ico" alt="" className="w-4 h-4" />
-                Continuar com Google
-              </button>
-            </div>
-
-            <div className="relative flex items-center justify-center">
-              <div className="border-t border-[#f1f1f0] w-full"></div>
-              <span className="bg-white px-4 text-[10px] font-bold text-[#37352f]/20 absolute uppercase tracking-widest">ou use e-mail</span>
-            </div>
-
-            <form onSubmit={isLogin ? handleLogin : handleCreateAccount} className="space-y-4">
-              {!isLogin && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="space-y-1.5"
-                >
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">Nome completo</label>
-                  <input
-                    type="text"
-                    placeholder="Seu nome"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 px-3.5 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
-                    required
-                  />
-                </motion.div>
+        <AnimatePresence mode="wait">
+          {isForgotPassword ? (
+            <ForgotPasswordFlow key="forgot" onBack={() => setIsForgotPassword(false)} />
+          ) : (
+            <motion.div
+              key={isLogin ? 'login' : 'signup'}
+              initial={{ opacity: 0, scale: 0.9, filter: 'blur(8px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.9, filter: 'blur(8px)' }}
+              transition={{ duration: 1, type: 'spring', stiffness: 70, damping: 20, delay: 0.1 }}
+              className="w-full max-w-[380px]"
+            >
+              {inviteToken && (
+                <div className="mb-6 p-4 bg-amber-50 border border-amber-200/60 rounded-xl">
+                  <p className="text-[13px] font-medium text-amber-800 text-center leading-tight">
+                    Você foi convidado para um workspace. Faça login ou crie sua conta para aceitar e participar!
+                  </p>
+                </div>
               )}
 
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">E-mail</label>
-                <input
-                  type="email"
-                  placeholder="Seu e-mail profissional"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 px-3.5 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
-                  required
-                />
+              <div className="mb-10 flex flex-col items-center md:items-start text-center md:text-left">
+                <h1 className="text-2xl font-bold tracking-tight mb-2">
+                  {isLogin ? 'Bem-vindo' : 'Crie sua conta'}
+                </h1>
+                <p className="text-sm text-[#37352f]/40 font-medium">
+                  {isLogin ? 'Insira seus dados para acessar sua conta.' : 'Junte-se ao Flui e transforme sua produtividade.'}
+                </p>
               </div>
 
-              <div className="space-y-1.5">
-                <div className="flex justify-between items-center px-1">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">Senha</label>
-                </div>
-                <div className="relative group/pass">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Sua senha"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 pl-3.5 pr-10 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
-                    required
-                  />
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 gap-3">
                   <button
                     type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#37352f]/30 hover:text-[#37352f]/60 transition-colors focus:outline-none"
-                    title={showPassword ? "Esconder senha" : "Mostrar senha"}
+                    onClick={handleGoogleLogin}
+                    className="flex items-center justify-center gap-3 w-full border border-[#e9e9e7] hover:bg-[#f1f1f0] transition-colors py-2 px-4 rounded-[6px] font-medium text-sm"
                   >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    <img src="https://www.google.com/favicon.ico" alt="" className="w-4 h-4" />
+                    Continuar com Google
                   </button>
                 </div>
-              </div>
 
-              {!isLogin && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="space-y-1.5"
-                >
-                  <label className="text-xs font-medium text-[#37352f]/60 ml-1">Confirme sua senha</label>
-                  <div className="relative group/pass">
+                <div className="relative flex items-center justify-center">
+                  <div className="border-t border-[#f1f1f0] w-full"></div>
+                  <span className="bg-white px-4 text-[10px] font-bold text-[#37352f]/20 absolute uppercase tracking-widest">ou use e-mail</span>
+                </div>
+
+                <form onSubmit={isLogin ? handleLogin : handleCreateAccount} className="space-y-4">
+                  {!isLogin && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-1.5"
+                    >
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">Nome completo</label>
+                      <input
+                        type="text"
+                        placeholder="Seu nome"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 px-3.5 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
+                        required
+                      />
+                    </motion.div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">E-mail</label>
                     <input
-                      type={showPassword ? "text" : "password"}
-                      placeholder="Repita sua senha"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 pl-3.5 pr-10 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
+                      type="email"
+                      placeholder="Seu e-mail profissional"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 px-3.5 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
                       required
                     />
                   </div>
-                </motion.div>
-              )}
 
-              {!isLogin && (
-                <div className="flex items-center gap-2.5 pt-1">
-                  <label htmlFor="terms" className="relative flex items-center cursor-pointer group">
-                    <input
-                      id="terms"
-                      type="checkbox"
-                      checked={isAgreed}
-                      onChange={(e) => setIsAgreed(e.target.checked)}
-                      className="sr-only"
-                      required
-                    />
-                    <div className={`
-                      w-[18px] h-[18px] rounded-[4px] border transition-all duration-200 flex items-center justify-center
-                      ${isAgreed
-                        ? 'bg-[#202020] border-[#202020] shadow-sm shadow-black/10'
-                        : 'bg-white border-[#e9e9e7] group-hover:border-[#37352f]/20 hover:bg-[#fcfcfc]'}
-                    `}>
-                      <AnimatePresence>
-                        {isAgreed && (
-                          <motion.div
-                            initial={{ opacity: 0, scale: 0.5 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.5 }}
-                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                          >
-                            <Check size={12} className="text-white" strokeWidth={4} />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center px-1">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-[#37352f]/20">Senha</label>
+                      {isLogin && (
+                        <button
+                          type="button"
+                          onClick={() => setIsForgotPassword(true)}
+                          className="text-[10px] font-semibold text-[#37352f]/30 hover:text-[#2383e2] transition-colors uppercase tracking-widest"
+                        >
+                          Esqueceu?
+                        </button>
+                      )}
                     </div>
-                  </label>
-                  <label htmlFor="terms" className="text-[12px] font-medium text-[#37352f]/60 leading-none cursor-pointer selection:hidden flex-1">
-                    Eu aceito os <button type="button" onClick={() => setIsTermsOpen(true)} className="text-[#37352f] hover:underline font-bold">Termos de Uso</button> e a <button type="button" onClick={() => setIsTermsOpen(true)} className="text-[#37352f] hover:underline font-bold">Política de Privacidade</button>.
-                  </label>
-                </div>
-              )}
+                    <div className="relative group/pass">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="Sua senha"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 pl-3.5 pr-10 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#37352f]/30 hover:text-[#37352f]/60 transition-colors focus:outline-none"
+                        title={showPassword ? 'Esconder senha' : 'Mostrar senha'}
+                      >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
 
-              <motion.button
-                type="submit"
-                disabled={isLoading}
-                className="w-full bg-[#202020] hover:bg-[#202020]/90 disabled:opacity-70 text-white font-medium py-2.5 rounded-[6px] transition-all mt-6 shadow-md shadow-black/5 flex items-center justify-center h-[42px] relative overflow-hidden"
-              >
-                <AnimatePresence mode='wait'>
-                  {isLoading ? (
+                  {!isLogin && (
                     <motion.div
-                      key="loader"
-                      initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                      animate={{ opacity: 1, scale: 1, rotate: 360 }}
-                      exit={{ opacity: 0, scale: 0.5 }}
-                      transition={{
-                        rotate: { repeat: Infinity, duration: 1, ease: "linear" },
-                        default: { type: "spring", stiffness: 400, damping: 30 }
-                      }}
-                      className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full"
-                    />
-                  ) : (
-                    <motion.div
-                      key="text"
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                      className="flex items-center justify-center pointer-events-none"
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-1.5"
                     >
-                      <span className="text-sm font-medium">
-                        {isLogin ? "Acessar conta" : "Criar minha conta"}
-                      </span>
+                      <label className="text-xs font-medium text-[#37352f]/60 ml-1">Confirme sua senha</label>
+                      <div className="relative group/pass">
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="Repita sua senha"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2 pl-3.5 pr-10 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
+                          required
+                        />
+                      </div>
                     </motion.div>
                   )}
-                </AnimatePresence>
-              </motion.button>
-            </form>
 
-            <p className="pt-8 text-center text-[11px] text-[#37352f]/30 font-medium font-sans">
-              {isLogin ? (
-                <>
-                  Novo por aqui?{" "}
-                  <button
-                    onClick={() => setIsLogin(false)}
-                    className="text-[#2383e2] hover:underline font-semibold"
+                  {!isLogin && (
+                    <div className="flex items-center gap-2.5 pt-1">
+                      <label htmlFor="terms" className="relative flex items-center cursor-pointer group">
+                        <input
+                          id="terms"
+                          type="checkbox"
+                          checked={isAgreed}
+                          onChange={(e) => setIsAgreed(e.target.checked)}
+                          className="sr-only"
+                          required
+                        />
+                        <div className={`
+                          w-[18px] h-[18px] rounded-[4px] border transition-all duration-200 flex items-center justify-center
+                          ${isAgreed
+                            ? 'bg-[#202020] border-[#202020] shadow-sm shadow-black/10'
+                            : 'bg-white border-[#e9e9e7] group-hover:border-[#37352f]/20 hover:bg-[#fcfcfc]'}
+                        `}>
+                          <AnimatePresence>
+                            {isAgreed && (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.5 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.5 }}
+                                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                              >
+                                <Check size={12} className="text-white" strokeWidth={4} />
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </label>
+                      <label htmlFor="terms" className="text-[12px] font-medium text-[#37352f]/60 leading-none cursor-pointer selection:hidden flex-1">
+                        Eu aceito os <button type="button" onClick={() => setIsTermsOpen(true)} className="text-[#37352f] hover:underline font-bold">Termos de Uso</button> e a <button type="button" onClick={() => setIsTermsOpen(true)} className="text-[#37352f] hover:underline font-bold">Política de Privacidade</button>.
+                      </label>
+                    </div>
+                  )}
+
+                  <motion.button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full bg-[#202020] hover:bg-[#202020]/90 disabled:opacity-70 text-white font-medium py-2.5 rounded-[6px] transition-all mt-6 shadow-md shadow-black/5 flex items-center justify-center h-[42px] relative overflow-hidden"
                   >
-                    Criar conta
-                  </button>
-                </>
-              ) : (
-                <>
-                  Já tem uma conta?{" "}
-                  <button
-                    onClick={() => setIsLogin(true)}
-                    className="text-[#2383e2] hover:underline font-semibold"
-                  >
-                    Fazer login
-                  </button>
-                </>
-              )}
-            </p>
-          </div>
-        </motion.div>
+                    <AnimatePresence mode="wait">
+                      {isLoading ? (
+                        <motion.div
+                          key="loader"
+                          initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                          animate={{ opacity: 1, scale: 1, rotate: 360 }}
+                          exit={{ opacity: 0, scale: 0.5 }}
+                          transition={{
+                            rotate: { repeat: Infinity, duration: 1, ease: 'linear' },
+                            default: { type: 'spring', stiffness: 400, damping: 30 }
+                          }}
+                          className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full"
+                        />
+                      ) : (
+                        <motion.div
+                          key="text"
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.9 }}
+                          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                          className="flex items-center justify-center pointer-events-none"
+                        >
+                          <span className="text-sm font-medium">
+                            {isLogin ? 'Acessar conta' : 'Criar minha conta'}
+                          </span>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.button>
+                </form>
+
+                <p className="pt-8 text-center text-[11px] text-[#37352f]/30 font-medium font-sans">
+                  {isLogin ? (
+                    <>
+                      Novo por aqui?{' '}
+                      <button
+                        onClick={() => setIsLogin(false)}
+                        className="text-[#2383e2] hover:underline font-semibold"
+                      >
+                        Criar conta
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      Já tem uma conta?{' '}
+                      <button
+                        onClick={() => setIsLogin(true)}
+                        className="text-[#2383e2] hover:underline font-semibold"
+                      >
+                        Fazer login
+                      </button>
+                    </>
+                  )}
+                </p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Coluna Decorativa / Informativa */}
@@ -443,30 +853,25 @@ const LoginPage: React.FC = () => {
             style={{ backgroundImage: 'radial-gradient(#37352f 1px, transparent 1px)', backgroundSize: '32px 32px' }} />
 
           <AnimatePresence mode="wait" initial={false}>
-            {isLogin ? (
+            {isLogin && !isForgotPassword ? (
               <motion.div
                 key="login-content"
-                initial={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
-                animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                exit={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
-                transition={{ duration: 0.8, type: "spring", stiffness: 70, damping: 20 }}
+                initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+                animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+                transition={{ duration: 0.8, type: 'spring', stiffness: 70, damping: 20 }}
                 className="relative z-10 flex flex-col items-center w-full max-w-[340px] px-4"
               >
-                {/* Header Text */}
                 <div className="text-center mb-12 space-y-3">
                   <h2 className="text-2xl font-bold tracking-tight text-[#37352f] overflow-hidden flex justify-center">
-                    {"Organize com clareza.".split("").map((char, i) => (
+                    {'Organize com clareza.'.split('').map((char, i) => (
                       <motion.span
                         key={i}
-                        initial={{ y: "100%", opacity: 0 }}
+                        initial={{ y: '100%', opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
-                        transition={{
-                          duration: 0.3,
-                          delay: i * 0.02,
-                          ease: [0.2, 0.65, 0.3, 0.9]
-                        }}
+                        transition={{ duration: 0.3, delay: i * 0.02, ease: [0.2, 0.65, 0.3, 0.9] }}
                         className="inline-block"
-                        style={{ whiteSpace: char === " " ? "pre" : "normal" }}
+                        style={{ whiteSpace: char === ' ' ? 'pre' : 'normal' }}
                       >
                         {char}
                       </motion.span>
@@ -482,32 +887,26 @@ const LoginPage: React.FC = () => {
                   </motion.p>
                 </div>
 
-                {/* Stack of Cards */}
                 <div className="flex flex-col gap-1 items-center w-full max-w-[300px]">
-                  {/* Mockup Card 1 */}
                   <motion.div
                     animate={{ y: [0, -4, 0], rotate: [-2, -3, -2] }}
-                    transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+                    transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
                     className="relative z-10 w-full bg-white border border-[#e9e9e7] rounded-xl p-4 shadow-sm shadow-[#37352f]/5 -rotate-[2deg] translate-x-1"
                   >
                     <div className="h-2 w-1/2 bg-[#f1f1f0] rounded-full mb-2" />
                     <div className="h-2 w-1/3 bg-[#f1f1f0]/60 rounded-full" />
                   </motion.div>
-
-                  {/* Mockup Card 2 */}
                   <motion.div
                     animate={{ y: [0, 6, 0], rotate: [0.5, 1, 0.5] }}
-                    transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+                    transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut', delay: 0.5 }}
                     className="relative z-20 w-full bg-white border border-[#e9e9e7] rounded-xl p-4 shadow-md shadow-[#37352f]/10 rotate-[1deg] -translate-x-1"
                   >
                     <div className="h-2 w-1/2 bg-[#f1f1f0] rounded-full mb-2" />
                     <div className="h-2 w-1/3 bg-[#f1f1f0]/60 rounded-full" />
                   </motion.div>
-
-                  {/* Mockup Card 3 */}
                   <motion.div
                     animate={{ y: [0, -3, 0], rotate: [-1, -2, -1] }}
-                    transition={{ duration: 7, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+                    transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
                     className="relative z-10 w-full bg-white border border-[#e9e9e7] rounded-xl p-4 shadow-sm shadow-[#37352f]/5 -rotate-[1deg] translate-x-1"
                   >
                     <div className="h-2 w-1/2 bg-[#f1f1f0] rounded-full mb-2" />
@@ -515,30 +914,27 @@ const LoginPage: React.FC = () => {
                   </motion.div>
                 </div>
               </motion.div>
+            ) : isForgotPassword ? (
+              <ForgotMockup />
             ) : (
               <motion.div
                 key="signup-content"
-                initial={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
-                animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                exit={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
-                transition={{ duration: 0.8, type: "spring", stiffness: 70, damping: 20 }}
+                initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+                animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+                transition={{ duration: 0.8, type: 'spring', stiffness: 70, damping: 20 }}
                 className="relative z-10 flex flex-col items-center w-full max-w-[340px] px-4"
               >
-                {/* Header Text */}
                 <div className="text-center mb-12 space-y-3">
                   <h2 className="text-2xl font-bold tracking-tight text-[#37352f] overflow-hidden flex justify-center">
-                    {"Tudo em um só lugar.".split("").map((char, i) => (
+                    {'Tudo em um só lugar.'.split('').map((char, i) => (
                       <motion.span
                         key={i}
-                        initial={{ y: "100%", opacity: 0 }}
+                        initial={{ y: '100%', opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
-                        transition={{
-                          duration: 0.3,
-                          delay: i * 0.02,
-                          ease: [0.2, 0.65, 0.3, 0.9]
-                        }}
+                        transition={{ duration: 0.3, delay: i * 0.02, ease: [0.2, 0.65, 0.3, 0.9] }}
                         className="inline-block"
-                        style={{ whiteSpace: char === " " ? "pre" : "normal" }}
+                        style={{ whiteSpace: char === ' ' ? 'pre' : 'normal' }}
                       >
                         {char}
                       </motion.span>
@@ -554,16 +950,11 @@ const LoginPage: React.FC = () => {
                   </motion.p>
                 </div>
 
-                {/* Visual Section for Signup */}
                 <div className="w-full relative flex justify-center items-center h-[300px]">
-
-
-
-                  {/* Browser Representation */}
                   <motion.div
                     initial={{ opacity: 0, scale: 0.9, y: 10, rotate: -3 }}
                     animate={{ opacity: 1, scale: 1, y: 0, rotate: -3 }}
-                    transition={{ duration: 1, type: "spring", damping: 20 }}
+                    transition={{ duration: 1, type: 'spring', damping: 20 }}
                     className="absolute -top-2 -left-8 w-[280px] bg-white border border-[#e9e9e7] rounded-2xl p-4 shadow-2xl z-10 overflow-hidden"
                   >
                     <div className="flex gap-1.5 items-center mb-4 border-b border-[#f1f1f0] pb-3 -mx-4 px-4">
@@ -582,26 +973,13 @@ const LoginPage: React.FC = () => {
                     </div>
                   </motion.div>
 
-                  {/* Minimalist Smartphone Mockup */}
                   <motion.div
                     initial={{ opacity: 0, scale: 0.8, rotate: 6, x: 20 }}
-                    animate={{
-                      opacity: 1,
-                      scale: 1,
-                      rotate: 6,
-                      x: 20,
-                      y: [0, -10, 0]
-                    }}
-                    transition={{
-                      y: { duration: 6, repeat: Infinity, ease: "easeInOut" },
-                      default: { duration: 1.1, type: "spring" }
-                    }}
+                    animate={{ opacity: 1, scale: 1, rotate: 6, x: 20, y: [0, -10, 0] }}
+                    transition={{ y: { duration: 6, repeat: Infinity, ease: 'easeInOut' }, default: { duration: 1.1, type: 'spring' } }}
                     className="absolute -bottom-10 -right-4 w-[160px] h-[280px] bg-white rounded-[2.5rem] p-1.5 shadow-2xl z-20 border border-[#e9e9e7]"
                   >
-                    {/* Minimalist Screen */}
                     <div className="w-full h-full bg-white rounded-[2.2rem] overflow-hidden flex flex-col relative border border-[#f1f1f0]">
-
-                      {/* Minimal Header */}
                       <div className="h-14 pt-4 px-4 flex items-center gap-2 border-b border-[#f1f1f0] shrink-0">
                         <div className="w-7 h-7 rounded-full overflow-hidden bg-[#f1f1f0] flex items-center justify-center p-0.5">
                           <img src={finlozLogo} alt="Lui" className="w-full h-full object-contain rounded-full" />
@@ -616,27 +994,21 @@ const LoginPage: React.FC = () => {
                           <span className="text-[8px] text-[#6366f1] font-medium leading-none mt-0.5">Online</span>
                         </div>
                       </div>
-
-                      {/* Clean Chat Area */}
                       <div className="flex-1 p-3 space-y-3 overflow-hidden bg-[#fcfcfc]">
                         <div className="bg-[#f1f1f0]/70 p-2.5 rounded-xl rounded-tl-none max-w-[90%] shadow-sm shadow-black/[0.02]">
                           <div className="h-1.5 w-full bg-[#37352f]/10 rounded-full mb-1" />
                           <div className="h-1.5 w-2/3 bg-[#37352f]/5 rounded-full" />
                         </div>
-
                         <div className="flex justify-end">
                           <div className="bg-[#6366f1]/10 p-2.5 rounded-xl rounded-tr-none max-w-[85%] border border-[#6366f1]/10">
                             <div className="h-1.5 w-12 bg-[#6366f1]/30 rounded-full" />
                           </div>
                         </div>
-
                         <div className="bg-[#f1f1f0]/70 p-2.5 rounded-xl rounded-tl-none max-w-[90%] shadow-sm shadow-black/[0.02]">
                           <div className="h-1.5 w-[85%] bg-[#37352f]/10 rounded-full mb-1" />
                           <div className="h-1.5 w-[40%] bg-[#37352f]/5 rounded-full" />
                         </div>
                       </div>
-
-                      {/* Minimal Input Representation */}
                       <div className="h-10 border-t border-[#f1f1f0] flex items-center px-4 gap-2 shrink-0">
                         <div className="h-1.5 w-full bg-[#f1f1f0] rounded-full" />
                         <div className="w-4 h-4 rounded-full bg-[#6366f1]/20 flex items-center justify-center shrink-0">

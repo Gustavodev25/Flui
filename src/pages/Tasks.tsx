@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import NumberFlow from '@number-flow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, MoreHorizontal, Layout, Table as TableIcon, Loader2, Edit2, Trash2, CheckCircle2, Circle, ChevronUp } from 'lucide-react'
+import { Plus, MoreHorizontal, Layout, Table as TableIcon, Loader2, Edit2, Trash2, CheckCircle2, Circle, ChevronUp, Users, Lock } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useSubscription } from '../contexts/SubscriptionContext'
 import Avvvatars from 'avvvatars-react'
 import { supabase } from '../lib/supabase'
+import { apiFetch } from '../lib/api'
 import Modal from '../components/ui/Modal'
 import TaskForm from '../components/TaskForm'
 import TaskDetailModal from '../components/TaskDetailModal'
 import { Dropdown, DropdownItem, DropdownDivider } from '../components/ui/Dropdown'
 import DeleteConfirmation from '../components/ui/DeleteConfirmation'
 import swingingDoodle from '../assets/doodles/SwingingDoodle.png'
-import finlozLogo from '../assets/logo/finloz.png'
+import finlozLogo from '../assets/logo/lui.svg'
 import {
   DndContext,
   closestCorners,
@@ -58,6 +60,11 @@ interface Task {
   whatsappMessage?: string
   reminderDaysBefore?: number
   reminderFired?: boolean
+  visibility?: 'personal' | 'workspace'
+  workspaceOwnerId?: string
+  authorName?: string
+  authorAvatar?: string
+  authorEmail?: string
 }
 
 const formatDate = (dateStr: string) => {
@@ -132,7 +139,8 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
   onToggleSubtask?: (taskId: string, subtaskId: string) => void
   onStopTimer?: (taskId: string) => void
   onCardClick?: (task: Task) => void
-}>(({ task, isDragging, isOverlay, dragHandleProps, style, onEdit, onDelete, activeDropdownId, setActiveDropdownId, userEmail, isPending, pendingTarget, onConfirm, onCancel, onToggleSubtask, onStopTimer, onCardClick }, ref) => {
+  isWorkspaceView?: boolean
+}>(({ task, isDragging, isOverlay, dragHandleProps, style, onEdit, onDelete, activeDropdownId, setActiveDropdownId, userEmail, isPending, pendingTarget, onConfirm, onCancel, onToggleSubtask, onStopTimer, onCardClick, isWorkspaceView }, ref) => {
 
   const [isSubtasksExpanded, setIsSubtasksExpanded] = useState(false)
 
@@ -277,7 +285,23 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
           </div>
 
           {/* Tags e Fonte/Avatar */}
-          <div className="flex items-center justify-end gap-2 mb-1">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            {/* Workspace badge (esquerda) */}
+            {isWorkspaceView && task.visibility === 'workspace' && (
+              <div className="flex items-center gap-1 opacity-50">
+                <Users size={10} className="text-[#37352f]" />
+                {task.authorName && task.authorEmail !== userEmail && (
+                  <span className="text-[9px] font-semibold text-[#37352f]/60 truncate max-w-[80px]">{task.authorName}</span>
+                )}
+              </div>
+            )}
+            {!isWorkspaceView && task.visibility === 'workspace' && (
+              <div className="flex items-center gap-1 opacity-40" title="Tarefa compartilhada no workspace">
+                <Users size={10} className="text-[#37352f]" />
+              </div>
+            )}
+            {task.visibility === 'personal' && <div />}
+
             {/* Fonte/Avatar (Direita) */}
             <div className="flex-shrink-0">
               {task.source === 'whatsapp' ? (
@@ -285,9 +309,13 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
                   <img src={finlozLogo} alt="Finloz" className="w-3 h-3 object-contain" />
                   <span className="text-[8px] font-bold text-[#37352f] tracking-wider uppercase">Lui</span>
                 </div>
+              ) : isWorkspaceView && task.authorAvatar ? (
+                <div className="border border-[#e9e9e7]/60 rounded-full shadow-sm overflow-hidden scale-90 flex items-center justify-center bg-white" title={task.authorName}>
+                  <img src={task.authorAvatar} alt={task.authorName} className="w-[18px] h-[18px] object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                </div>
               ) : (
                 <div className="border border-[#e9e9e7]/60 rounded-full shadow-sm overflow-hidden scale-90 flex items-center justify-center bg-white">
-                  <Avvvatars value={userEmail || 'guest'} size={18} style="character" />
+                  <Avvvatars value={isWorkspaceView && task.authorEmail ? task.authorEmail : (userEmail || 'guest')} size={18} style="character" />
                 </div>
               )}
             </div>
@@ -541,6 +569,7 @@ const SortableTaskCard: React.FC<{
   onToggleSubtask?: (taskId: string, subtaskId: string) => void
   onStopTimer?: (taskId: string) => void
   onCardClick?: (task: Task) => void
+  isWorkspaceView?: boolean
 }> = (props) => {
   const {
     attributes,
@@ -575,6 +604,7 @@ const SortableTaskCard: React.FC<{
         onToggleSubtask={props.onToggleSubtask}
         onStopTimer={props.onStopTimer}
         onCardClick={props.onCardClick}
+        isWorkspaceView={props.isWorkspaceView}
       />
     </div>
   )
@@ -601,7 +631,9 @@ const DroppableContainer: React.FC<{
 
 const Tasks: React.FC = () => {
   const { user } = useAuth()
+  const { isWorkspaceMember, workspaceMembership, hasPulse } = useSubscription()
   const [viewMode, setViewMode] = useState<'board' | 'table'>('board')
+  const [taskView, setTaskView] = useState<'personal' | 'workspace'>('personal')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [tasks, setTasks] = useState<Task[]>([])
@@ -613,6 +645,9 @@ const Tasks: React.FC = () => {
   const [detailTask, setDetailTask] = useState<Task | null>(null)
   const dragOriginalStatus = useRef<{ id: string; status: Task['status'] } | null>(null)
   const justDraggedRef = useRef(false)
+
+  // Determina se o usuário tem acesso ao workspace (membro ou dono Pulse)
+  const hasWorkspaceAccess = isWorkspaceMember || hasPulse
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -640,27 +675,53 @@ const Tasks: React.FC = () => {
     whatsappMessage: dbTask.whatsapp_message || undefined,
     reminderDaysBefore: dbTask.reminder_days_before ?? undefined,
     reminderFired: dbTask.reminder_fired || false,
+    visibility: dbTask.visibility || 'personal',
+    workspaceOwnerId: dbTask.workspace_owner_id || undefined,
+    authorName: dbTask.author?.name || undefined,
+    authorAvatar: dbTask.author?.avatar || undefined,
+    authorEmail: dbTask.author?.email || undefined,
   }), [])
 
-  const fetchTasks = useCallback(async () => {
+  const fetchTasks = useCallback(async (view?: 'personal' | 'workspace') => {
+    const currentView = view ?? taskView
     try {
       setLoading(true)
-      const { data, error } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('user_id', user?.id)
-        .order('created_at', { ascending: false })
 
-      if (error) throw error
+      if (currentView === 'workspace') {
+        // Busca tarefas compartilhadas via API (owner ou membro)
+        const result = await apiFetch<{ tasks: any[]; workspaceOwnerId: string | null }>(
+          `/api/workspace/shared-tasks`,
+          undefined,
+          { userId: user?.id }
+        )
+        const mappedTasks = (result.tasks || []).map(mapDbTask)
+        setTasks(mappedTasks)
+      } else {
+        // Busca tarefas pessoais do usuário
+        const { data, error } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('user_id', user?.id)
+          .eq('visibility', 'personal')
+          .order('created_at', { ascending: false })
 
-      const mappedTasks = (data || []).map(mapDbTask)
-      setTasks(mappedTasks)
+        if (error) throw error
+
+        const mappedTasks = (data || []).map(mapDbTask)
+        setTasks(mappedTasks)
+      }
     } catch (error) {
       console.error('Erro ao buscar tarefas:', error)
     } finally {
       setLoading(false)
     }
-  }, [mapDbTask, user])
+  }, [mapDbTask, user, taskView])
+
+  // Recarrega quando muda de view
+  useEffect(() => {
+    fetchTasks(taskView)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskView])
 
   useEffect(() => {
     fetchTasks()
@@ -672,10 +733,21 @@ const Tasks: React.FC = () => {
         { event: 'INSERT', schema: 'public', table: 'tasks' },
         (payload) => {
           const newTask = mapDbTask(payload.new)
-          setTasks(prev => {
-            if (prev.some(t => t.id === newTask.id)) return prev
-            return [newTask, ...prev]
-          })
+          // Só adiciona se for da view atual
+          const isPersonalView = taskView === 'personal'
+          const taskIsPersonal = !newTask.visibility || newTask.visibility === 'personal'
+          const taskIsWorkspace = newTask.visibility === 'workspace'
+          if (isPersonalView && taskIsPersonal && payload.new.user_id === user?.id) {
+            setTasks(prev => {
+              if (prev.some(t => t.id === newTask.id)) return prev
+              return [newTask, ...prev]
+            })
+          } else if (!isPersonalView && taskIsWorkspace) {
+            setTasks(prev => {
+              if (prev.some(t => t.id === newTask.id)) return prev
+              return [newTask, ...prev]
+            })
+          }
         }
       )
       .on(
@@ -715,6 +787,8 @@ const Tasks: React.FC = () => {
 
   const handleAddTask = async (newTask: any) => {
     try {
+      const isWorkspaceTask = newTask.visibility === 'workspace'
+
       if (editingTask) {
         const { error } = await supabase
           .from('tasks')
@@ -722,16 +796,28 @@ const Tasks: React.FC = () => {
             title: newTask.title,
             status: newTask.status,
             priority: newTask.priority,
-            due_date: newTask.dueDate,
+            due_date: (newTask.dueDate && newTask.dueDate !== 'Sem prazo') ? newTask.dueDate : null,
             source: newTask.source,
             progress: newTask.progress,
             description: newTask.description,
-            subtasks: newTask.subtasks
+            subtasks: newTask.subtasks,
+            visibility: newTask.visibility || 'personal',
           })
           .eq('id', editingTask.id)
 
         if (error) throw error
         setTasks(tasks.map(t => t.id === editingTask.id ? { ...t, ...newTask } : t))
+      } else if (isWorkspaceTask) {
+        // Cria tarefa workspace via API (garante workspace_owner_id correto)
+        const result = await apiFetch<{ task: any }>('/api/workspace/shared-tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user?.id, task: newTask }),
+        })
+        if (result.task) {
+          const newTaskWithId = { ...mapDbTask(result.task), authorName: user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0], authorEmail: user?.email }
+          setTasks([newTaskWithId, ...tasks])
+        }
       } else {
         const { id, ...taskData } = newTask
         const { data, error } = await supabase
@@ -739,16 +825,14 @@ const Tasks: React.FC = () => {
           .insert([{
             user_id: user?.id,
             title: taskData.title, status: taskData.status, priority: taskData.priority,
-            due_date: taskData.dueDate, source: taskData.source, progress: taskData.progress,
-            description: taskData.description, subtasks: taskData.subtasks
+            due_date: (taskData.dueDate && taskData.dueDate !== 'Sem prazo') ? taskData.dueDate : null, source: taskData.source, progress: taskData.progress,
+            description: taskData.description, subtasks: taskData.subtasks,
+            visibility: 'personal',
           }]).select()
 
         if (error) throw error
         if (data && data[0]) {
-          const newTaskWithId = {
-            ...newTask,
-            id: data[0].id,
-          }
+          const newTaskWithId = { ...newTask, id: data[0].id, visibility: 'personal' }
           setTasks([newTaskWithId, ...tasks])
         }
       }
@@ -1002,7 +1086,11 @@ const Tasks: React.FC = () => {
           <div className="flex items-center justify-between mb-4 sm:mb-6">
             <div className="min-w-0">
               <h1 className="text-lg sm:text-2xl font-bold tracking-tight mb-0.5 sm:mb-1">Tarefas</h1>
-              <p className="text-xs sm:text-sm text-[#37352f]/50 font-medium truncate">Veja e organize seu fluxo de trabalho.</p>
+              <p className="text-xs sm:text-sm text-[#37352f]/50 font-medium truncate">
+                {taskView === 'workspace'
+                  ? (isWorkspaceMember ? `Workspace de ${workspaceMembership?.ownerName || 'Equipe'}` : 'Tarefas do seu workspace')
+                  : 'Veja e organize seu fluxo de trabalho.'}
+              </p>
             </div>
             <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
               {!loading && tasks.length > 0 && (
@@ -1022,29 +1110,59 @@ const Tasks: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 sm:gap-6">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => !tab.disabled && setViewMode(tab.id as any)}
-                disabled={tab.disabled}
-                className={`flex items-center gap-1.5 sm:gap-2 pb-3 text-xs sm:text-sm font-semibold transition-all relative ${viewMode === tab.id
-                  ? 'text-[#37352f]'
-                  : tab.disabled ? 'text-[#37352f]/20 cursor-not-allowed' : 'text-[#37352f]/40 hover:text-[#37352f]/60'
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4 sm:gap-6">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => !tab.disabled && setViewMode(tab.id as any)}
+                  disabled={tab.disabled}
+                  className={`flex items-center gap-1.5 sm:gap-2 pb-3 text-xs sm:text-sm font-semibold transition-all relative ${viewMode === tab.id
+                    ? 'text-[#37352f]'
+                    : tab.disabled ? 'text-[#37352f]/20 cursor-not-allowed' : 'text-[#37352f]/40 hover:text-[#37352f]/60'
+                    }`}
+                >
+                  <tab.icon size={16} strokeWidth={viewMode === tab.id ? 2.5 : 2} />
+                  {tab.label}
+                  {tab.disabled && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[#f1f1ef] text-[#37352f]/40 text-[9px] font-bold tracking-wider">
+                      Em breve
+                    </span>
+                  )}
+                  {viewMode === tab.id && (
+                    <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#37352f]" />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Toggle pessoal / workspace */}
+            {hasWorkspaceAccess && (
+              <div className="flex items-center gap-1 bg-[#f7f7f5] border border-[#e9e9e7] rounded-lg p-0.5 mb-3">
+                <button
+                  onClick={() => setTaskView('personal')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold transition-all ${
+                    taskView === 'personal'
+                      ? 'bg-white text-[#37352f] shadow-sm border border-[#e9e9e7]'
+                      : 'text-[#37352f]/40 hover:text-[#37352f]/70'
                   }`}
-              >
-                <tab.icon size={16} strokeWidth={viewMode === tab.id ? 2.5 : 2} />
-                {tab.label}
-                {tab.disabled && (
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[#f1f1ef] text-[#37352f]/40 text-[9px] font-bold tracking-wider">
-                    Em breve
-                  </span>
-                )}
-                {viewMode === tab.id && (
-                  <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#37352f]" />
-                )}
-              </button>
-            ))}
+                >
+                  <Lock size={11} strokeWidth={2.5} />
+                  <span className="hidden sm:inline">Pessoal</span>
+                </button>
+                <button
+                  onClick={() => setTaskView('workspace')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold transition-all ${
+                    taskView === 'workspace'
+                      ? 'bg-white text-[#37352f] shadow-sm border border-[#e9e9e7]'
+                      : 'text-[#37352f]/40 hover:text-[#37352f]/70'
+                  }`}
+                >
+                  <Users size={11} strokeWidth={2.5} />
+                  <span className="hidden sm:inline">Workspace</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1067,9 +1185,13 @@ const Tasks: React.FC = () => {
                 alt="Nenhuma tarefa"
                 className="w-28 sm:w-40 h-auto mx-auto mb-4 sm:mb-6 opacity-80"
               />
-              <h2 className="text-lg sm:text-xl font-bold text-[#37352f] mb-2 sm:mb-3">Tudo limpo por aqui!</h2>
+              <h2 className="text-lg sm:text-xl font-bold text-[#37352f] mb-2 sm:mb-3">
+                {taskView === 'workspace' ? 'Nenhuma tarefa compartilhada!' : 'Tudo limpo por aqui!'}
+              </h2>
               <p className="text-[#37352f]/50 text-xs sm:text-sm mb-6 sm:mb-10 leading-relaxed font-medium">
-                Você ainda não tem nenhuma tarefa cadastrada. Organize seu trabalho e acompanhe seu progresso criando sua primeira tarefa agora.
+                {taskView === 'workspace'
+                  ? 'Nenhuma tarefa foi compartilhada no workspace ainda. Crie uma tarefa e defina a visibilidade como Workspace para que todos vejam.'
+                  : 'Você ainda não tem nenhuma tarefa cadastrada. Organize seu trabalho e acompanhe seu progresso criando sua primeira tarefa agora.'}
               </p>
               <motion.button
                 onClick={openCreateModal}
@@ -1126,6 +1248,7 @@ const Tasks: React.FC = () => {
                                   onToggleSubtask={handleToggleSubtask}
                                   onStopTimer={handleStopTimer}
                                   onCardClick={handleCardClick}
+                                  isWorkspaceView={taskView === 'workspace'}
                                 />
                               ))}
                             </div>
@@ -1247,7 +1370,15 @@ const Tasks: React.FC = () => {
       </div>
 
       <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingTask(null); }} title={editingTask ? 'Editar Tarefa' : 'Nova Tarefa'} hideScrollbar={true}>
-        <TaskForm initialData={editingTask} onSubmit={handleAddTask} onCancel={() => { setIsModalOpen(false); setEditingTask(null); }} />
+        <TaskForm
+          initialData={editingTask}
+          onSubmit={handleAddTask}
+          onCancel={() => { setIsModalOpen(false); setEditingTask(null); }}
+          isEditing={!!editingTask}
+          hasWorkspaceAccess={hasWorkspaceAccess}
+          defaultVisibility={taskView === 'workspace' ? 'workspace' : 'personal'}
+          workspaceName={isWorkspaceMember ? (workspaceMembership?.ownerName || 'Workspace') : undefined}
+        />
       </Modal>
 
       <DeleteConfirmation isOpen={!!taskToDelete} onConfirm={executeDelete} onCancel={() => setTaskToDelete(null)} />

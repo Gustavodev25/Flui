@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import logo from '../assets/logo/logo.png'
+import logo from '../assets/logo/logo.svg'
 import TermsContent from '../components/TermsContent'
 
 const TermsPage: React.FC = () => {

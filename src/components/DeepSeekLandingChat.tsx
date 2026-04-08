@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Send, X } from 'lucide-react'
 import { apiFetch } from '../lib/api'
-import finloz from '../assets/logo/finloz.png'
+import finloz from '../assets/logo/lui.svg'
 
 interface Message {
   role: 'user' | 'assistant'
