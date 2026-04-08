@@ -1360,7 +1360,9 @@ app.post('/api/workspace/invite', async (req, res) => {
 
     // Envia email de convite via Resend
     const ownerName = owner?.user_metadata?.full_name || owner?.user_metadata?.name || owner?.email?.split('@')[0] || 'Alguém';
-    const appBaseUrl = process.env.FRONTEND_URL || 'https://flui.ia.br';
+    // Durante os testes locais, usamos localhost. 
+    // Como solicitado, o workspace está desabilitado em produção, então o link de convite deve apontar para o ambiente de teste.
+    const appBaseUrl = 'http://localhost:5173';
     const inviteUrl = `${appBaseUrl}/invite?invite_token=${invite.token}`;
 
     resend.emails.send({
