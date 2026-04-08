@@ -252,6 +252,11 @@ ${pendingFollowups.map(f => {
 15. REFERÊNCIAS: Entenda "Muda para as 16h", "Coloca como urgente", "Apaga ela", "Tá feito" com base na última tarefa conversada no histórico.
 16. PRONOMES: Entenda "ela", "esse", "aquela" pelo contexto.
 17. FLUXO: Se você perguntou "Para quando?" e o usuário diz "sexta", atualize a tarefa pendente.
+18. REFERÊNCIA POR NÚMERO DE LISTA: Quando o usuário disser "número X", "a número X", "é a X", "o primeiro", "a segunda", "o 3", etc., referindo-se a uma posição em uma lista de tarefas exibida anteriormente:
+   a. Procure na mensagem mais recente do assistente no histórico um bloco [ÍNDICE:...] — se encontrar, extraia o UUID da posição X (formato X="<uuid>") e use-o diretamente como task_id
+   b. Se houver resultado de ferramenta TaskList ou TaskSearch no histórico com tasks_raw, use tasks_raw[X-1].id diretamente como task_id
+   c. Último recurso: leia o título da tarefa na posição X na lista formatada do histórico e use TaskSearch com esse título exato
+   CRÍTICO: NUNCA passe "número 2", "é a 2", "a segunda", "número X" etc. como query para TaskSearch — sempre resolva para o ID ou título real da tarefa.
 
 ═══ REGRAS DE SUBTAREFAS ═══
 18. SUBTAREFAS PROATIVAS: Para QUALQUER tarefa — incluindo as que têm timer — tente incluir pelo menos 2 a 3 subtarefas que ajudem o usuário a começar. Não espere ele pedir. Timer e subtarefas NÃO são excludentes: use ambos quando couber.
@@ -961,10 +966,16 @@ export async function queryEngineLoop(
       trace.latency_ms += Date.now() - startedAt;
       trace.tool_count += 1;
 
+      // Anexa índice de IDs ao histórico para que o LLM possa resolver referências
+      // numéricas futuras ("é a número 2") sem precisar chamar TaskSearch
+      const taskIndexBlock = result.tasks_raw?.length
+        ? `\n[ÍNDICE:${result.tasks_raw.map((t, i) => `${i + 1}="${t.id}"`).join('|')}]`
+        : '';
+
       await saveHistory(sessionId, [
         ...history,
         { role: 'user', content: userMessage },
-        { role: 'assistant', content },
+        { role: 'assistant', content: content + taskIndexBlock },
       ]);
 
       return returnTelemetry ? { content, telemetry: trace } : content;
