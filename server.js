@@ -214,7 +214,7 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const resend = new Resend('re_AaQ8QNKS_Ljvo7xxJoGEKMLvnWmaXcYUd');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const VITE_API_URL = process.env.VITE_API_URL || '';
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://flui.ia.br';
+const FRONTEND_URL = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? 'https://flui.ia.br' : 'http://localhost:5173');
 const nimClient = new OpenAI({
   apiKey: process.env.NVIDIA_API_KEY,
   baseURL: 'https://integrate.api.nvidia.com/v1',
@@ -1802,8 +1802,7 @@ app.post('/api/workspace/invite', async (req, res) => {
 
     // Envia email de convite via Resend
     const ownerName = owner?.user_metadata?.full_name || owner?.user_metadata?.name || owner?.email?.split('@')[0] || 'Alguém';
-    // Workspace em fase de testes — links de convite apontam para localhost
-    const inviteUrl = `http://localhost:5173/invite?invite_token=${invite.token}`;
+    const inviteUrl = `${FRONTEND_URL}/invite?invite_token=${invite.token}`;
 
     resend.emails.send({
       from: 'Flui <noreply@flui.ia.br>',
