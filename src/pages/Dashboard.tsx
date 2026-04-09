@@ -304,7 +304,7 @@ const Dashboard: React.FC = () => {
           className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6"
         >
           {/* Card: Total */}
-          <motion.div variants={itemVariants} className="bg-[#f7f7f5] border border-[#e9e9e7] p-5 rounded-2xl hover:shadow-md transition-shadow">
+          <motion.div variants={itemVariants} className="bg-[#f7f7f5] border border-[#e9e9e7] p-5 rounded-2xl">
             <div className="flex justify-between items-start mb-4">
               <div className="p-2.5 bg-white rounded-xl shadow-sm">
                 <ClipboardList size={22} className="text-[#37352f]/70" />
@@ -312,7 +312,7 @@ const Dashboard: React.FC = () => {
               <TrendingUp size={16} className="text-[#2383e2]" />
             </div>
             <div className="space-y-0.5">
-              <p className="text-[12px] font-bold text-[#37352f]/40 tracking-widest">Total Geral</p>
+              <p className="text-[10px] font-medium text-[#37352f]/65 tracking-widest">Total Geral</p>
               <h3 className="text-3xl font-black text-[#37352f] tracking-tight">
                 <NumberFlow value={stats.todo + stats.doing + stats.done} />
               </h3>
@@ -327,7 +327,7 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
             <div className="space-y-0.5">
-              <p className="text-[12px] font-bold text-[#37352f]/40 tracking-widest">Em Execução</p>
+              <p className="text-[10px] font-medium text-[#37352f]/65 tracking-widest">Em Execução</p>
               <h3 className="text-3xl font-black text-[#37352f] tracking-tight">
                 <NumberFlow value={stats.doing} />
               </h3>
@@ -342,7 +342,7 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
             <div className="space-y-0.5">
-              <p className="text-[12px] font-bold text-[#37352f]/40 tracking-widest">Finalizadas</p>
+              <p className="text-[10px] font-medium text-[#37352f]/65 tracking-widest">Finalizadas</p>
               <h3 className="text-3xl font-black text-[#37352f] tracking-tight">
                 <NumberFlow value={stats.done} />
               </h3>
@@ -357,7 +357,7 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
             <div className="space-y-1.5">
-              <p className="text-[12px] font-bold text-[#37352f]/40 tracking-widest">Frase do Dia</p>
+              <p className="text-[10px] font-medium text-[#37352f]/65 tracking-widest">Frase do Dia</p>
               <h3 className="text-[13px] font-semibold text-[#37352f]/80 leading-relaxed min-h-[40px]">
                 {isLoadingQuote ? (
                   <span className="animate-pulse text-[#37352f]/40 flex items-center h-full">Gerando IA...</span>
@@ -468,9 +468,9 @@ const Dashboard: React.FC = () => {
                   </div>
                 ))
               ) : recentTasks.length === 0 ? (
-                <div className="text-center py-10 space-y-2 opacity-50">
-                  <p className="text-xs font-bold">Nada por aqui</p>
-                  <p className="text-[11px]">Suas atividades aparecerão aqui.</p>
+                <div className="text-center py-10 space-y-1.5">
+                  <p className="text-xs font-semibold text-[#37352f]/70">Nada por aqui</p>
+                  <p className="text-[11px] text-[#37352f]/50">Suas atividades aparecerão aqui.</p>
                 </div>
               ) : (
                 recentTasks.map((task, i) => (

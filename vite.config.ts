@@ -7,6 +7,7 @@ export default defineConfig({
     react(),
   ],
   server: {
+    port: parseInt(process.env.PORT || '5173'),
     proxy: {
       '/api/nvidia': {
         target: 'https://integrate.api.nvidia.com',
