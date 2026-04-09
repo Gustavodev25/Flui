@@ -83,7 +83,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const effectivePlanId = isWorkspaceMember ? workspaceMembership!.planId : subscription?.plan_id
   const effectiveStatus = isWorkspaceMember ? 'active' : subscription?.status
 
-  const hasFlow = effectiveStatus === 'active'
+  const hasFlow = effectiveStatus === 'active' && ['flow', 'pulse'].includes(effectivePlanId ?? '')
   const hasPulse = effectiveStatus === 'active' && effectivePlanId === 'pulse'
   const planId = hasFlow ? effectivePlanId : null
 

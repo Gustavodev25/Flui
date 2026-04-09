@@ -18,6 +18,7 @@ import { useSubscription } from '../contexts/SubscriptionContext'
 import { useNavigate } from 'react-router-dom'
 import luiLogo from '../assets/logo/lui.svg'
 import { apiFetch } from '../lib/api'
+import { supabase } from '../lib/supabase'
 
 // Componente que usa lottie-web diretamente via ref
 const LottieHand: React.FC = () => {
@@ -262,7 +263,7 @@ const Dashboard: React.FC = () => {
               </motion.div>
             </h1>
 
-            <motion.p
+            <motion.div
               className="text-[#72706a] text-sm sm:text-lg font-medium flex items-center gap-2"
             >
               <motion.div
@@ -291,7 +292,7 @@ const Dashboard: React.FC = () => {
                   </motion.span>
                 ))}
               </span>
-            </motion.p>
+            </motion.div>
           </div>
         </motion.header>
 

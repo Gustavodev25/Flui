@@ -8,6 +8,7 @@ import {
   Filter, RefreshCw
 } from 'lucide-react';
 import logo from '../assets/logo/logo.svg';
+import luiLogo from '../assets/logo/lui.svg';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface User {
@@ -83,6 +84,8 @@ export function AdminPanel() {
   const [messagesChannel, setMessagesChannel] = useState<string>('all');
   const [messagesSearch, setMessagesSearch] = useState('');
   const [expandedMessage, setExpandedMessage] = useState<string | null>(null);
+  const [selectedUserMessages, setSelectedUserMessages] = useState<User | null>(null);
+  const [messagesMode, setMessagesMode] = useState<'all' | 'by-user'>('by-user');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,6 +143,7 @@ export function AdminPanel() {
         limit: 50,
         channel: messagesChannel,
         search: messagesSearch || undefined,
+        userId: selectedUserMessages?.id || undefined,
       });
       setMessages(resp.messages || []);
       setMessagesTotalPages(resp.totalPages || 1);
@@ -149,7 +153,7 @@ export function AdminPanel() {
     } finally {
       setMessagesLoading(false);
     }
-  }, [isAuthenticated, password, messagesPage, messagesChannel, messagesSearch]);
+  }, [isAuthenticated, password, messagesPage, messagesChannel, messagesSearch, selectedUserMessages]);
 
   useEffect(() => {
     if (activeTab === 'messages' && isAuthenticated) {
@@ -160,7 +164,7 @@ export function AdminPanel() {
   // Reset page when filters change
   useEffect(() => {
     setMessagesPage(1);
-  }, [messagesChannel, messagesSearch]);
+  }, [messagesChannel, messagesSearch, selectedUserMessages, messagesMode]);
 
   // ---------------------------------------------
   // TELA DE LOGIN (Estilo Landing Page)
@@ -443,44 +447,60 @@ export function AdminPanel() {
                             )}
                           </td>
                           <td className="py-4 px-6 text-right">
-                            {!user.hasFlow ? (
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => handleGrantAccess(user.id, 'flow')}
-                                  className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
-                                >
-                                  Flow
-                                </button>
-                                <button
-                                  onClick={() => handleGrantAccess(user.id, 'pulse')}
-                                  className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
-                                >
-                                  Pulse
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-end gap-2">
-                                {user.planId !== 'pulse' && (
-                                  <button
-                                    onClick={() => handleGrantAccess(user.id, 'pulse')}
-                                    className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
-                                  >
-                                    Pulse
-                                  </button>
-                                )}
-                                {user.planId !== 'flow' && (
+                            <div className="flex items-center justify-end gap-2">
+                              {/* New Button to view logs */}
+                              <button
+                                onClick={() => {
+                                  setSelectedUserMessages(user);
+                                  setMessagesMode('by-user');
+                                  setActiveTab('messages');
+                                  setMessagesPage(1);
+                                }}
+                                className="p-1.5 bg-[#f7f7f5] border border-[#e9e9e7] text-[#37352f]/40 hover:text-[#202020] hover:border-[#202020] rounded-lg transition-all"
+                                title="Ver Logs de Mensagens"
+                              >
+                                <MessageSquare size={14} />
+                              </button>
+                              
+                              {!user.hasFlow ? (
+                                <div className="flex items-center gap-2">
                                   <button
                                     onClick={() => handleGrantAccess(user.id, 'flow')}
                                     className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
                                   >
                                     Flow
                                   </button>
-                                )}
-                                <span className="text-[10px] font-bold text-[#37352f]/25 uppercase tracking-widest">
-                                  {user.planId === 'pulse' ? 'Pulse ativo' : 'Flow ativo'}
-                                </span>
-                              </div>
-                            )}
+                                  <button
+                                    onClick={() => handleGrantAccess(user.id, 'pulse')}
+                                    className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
+                                  >
+                                    Pulse
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-end gap-2">
+                                  {user.planId !== 'pulse' && (
+                                    <button
+                                      onClick={() => handleGrantAccess(user.id, 'pulse')}
+                                      className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
+                                    >
+                                      Pulse
+                                    </button>
+                                  )}
+                                  {user.planId !== 'flow' && (
+                                    <button
+                                      onClick={() => handleGrantAccess(user.id, 'flow')}
+                                      className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
+                                    >
+                                      Flow
+                                    </button>
+                                  )}
+                                  <span className="text-[10px] font-bold text-[#37352f]/25 uppercase tracking-widest whitespace-nowrap">
+                                    {user.planId === 'pulse' ? 'Pulse ativo' : 'Flow ativo'}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -576,185 +596,280 @@ export function AdminPanel() {
                 </button>
               </div>
 
-              {/* Filters */}
-              <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-2xl p-4 mb-6 flex flex-col sm:flex-row gap-3">
-                {/* Channel filter */}
-                <div className="flex items-center gap-2">
-                  <Filter size={14} className="text-[#37352f]/40" />
-                  <select
-                    value={messagesChannel}
-                    onChange={(e) => setMessagesChannel(e.target.value)}
-                    className="bg-white border border-[#e9e9e7] rounded-lg px-3 py-2 text-sm font-medium text-[#37352f] focus:outline-none focus:border-[#202020] focus:ring-1 focus:ring-[#202020] shadow-sm"
-                  >
-                    <option value="all">Todos os canais</option>
-                    <option value="whatsapp">WhatsApp</option>
-                    <option value="web">Web</option>
-                  </select>
-                </div>
-
-                {/* Search */}
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#37352f]/40 w-4 h-4" />
-                  <input
-                    type="text"
-                    placeholder="Buscar por nome, email ou conteúdo..."
-                    value={messagesSearch}
-                    onChange={(e) => setMessagesSearch(e.target.value)}
-                    className="w-full bg-white border border-[#e9e9e7] rounded-lg pl-9 pr-4 py-2 text-sm font-medium text-[#37352f] focus:outline-none focus:border-[#202020] focus:ring-1 focus:ring-[#202020] shadow-sm transition-all"
-                  />
-                </div>
+              {/* Subtabs for Messages */}
+              <div className="flex items-center gap-4 mb-6 border-b border-[#e9e9e7]">
+                <button
+                  onClick={() => {
+                    setMessagesMode('by-user');
+                    if (selectedUserMessages) setSelectedUserMessages(null);
+                  }}
+                  className={`pb-3 text-sm font-bold transition-all relative ${
+                    messagesMode === 'by-user' ? 'text-[#202020]' : 'text-[#37352f]/40 hover:text-[#37352f]/60'
+                  }`}
+                >
+                  Por Usuário
+                  {messagesMode === 'by-user' && (
+                    <motion.div layoutId="msgTab" className="absolute bottom-0 left-0 w-full h-0.5 bg-[#202020]" />
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    setMessagesMode('all');
+                    setSelectedUserMessages(null);
+                  }}
+                  className={`pb-3 text-sm font-bold transition-all relative ${
+                    messagesMode === 'all' ? 'text-[#202020]' : 'text-[#37352f]/40 hover:text-[#37352f]/60'
+                  }`}
+                >
+                  Todos os Logs
+                  {messagesMode === 'all' && (
+                    <motion.div layoutId="msgTab" className="absolute bottom-0 left-0 w-full h-0.5 bg-[#202020]" />
+                  )}
+                </button>
               </div>
 
-              {/* Messages List */}
-              <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl shadow-sm overflow-hidden">
-                {messagesLoading ? (
-                  <div className="py-20 flex flex-col items-center gap-3">
-                    <RefreshCw size={24} className="text-[#37352f]/30 animate-spin" />
-                    <span className="text-[#37352f]/40 font-medium text-sm">Carregando mensagens...</span>
-                  </div>
-                ) : messages.length === 0 ? (
-                  <div className="py-20 flex flex-col items-center gap-3">
-                    <MessageSquare size={32} className="text-[#e9e9e7]" />
-                    <span className="text-[#37352f]/40 font-medium text-sm">Nenhuma mensagem encontrada.</span>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-[#e9e9e7]">
-                    {messages.map((msg) => {
-                      const isExpanded = expandedMessage === msg.id;
-                      const isAI = msg.role === 'assistant';
-                      
-                      return (
-                        <div
-                          key={msg.id}
-                          className={`group relative transition-colors cursor-pointer ${
-                            isAI ? 'bg-purple-50/30 hover:bg-purple-50/60' : 'bg-white hover:bg-[#fcfcfc]'
-                          }`}
-                          onClick={() => setExpandedMessage(isExpanded ? null : msg.id)}
-                        >
-                          <div className="px-6 py-4">
-                            {/* Top Row: User info + Badges + Time */}
-                            <div className="flex items-center gap-3 mb-2">
-                              {/* User avatar */}
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white text-xs font-bold ${
-                                isAI ? 'bg-gradient-to-br from-purple-500 to-purple-700' : 'bg-gradient-to-br from-blue-500 to-blue-700'
-                              }`}>
-                                {isAI ? <Bot size={14} /> : (msg.user.name?.[0]?.toUpperCase() || 'U')}
-                              </div>
-
-                              {/* User name + email */}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-bold text-sm text-[#202020] truncate">
-                                    {isAI ? 'Lui (Assistente IA)' : msg.user.name}
-                                  </span>
-                                  {!isAI && (
-                                    <span className="text-[11px] font-medium text-[#37352f]/40 truncate">
-                                      {msg.user.email}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Badges */}
-                              <div className="flex items-center gap-2 shrink-0">
-                                {getRoleBadge(msg.role)}
-                                {getChannelBadge(msg.channel)}
-                              </div>
-
-                              {/* Timestamp */}
-                              <div className="flex items-center gap-1 text-[#37352f]/35 shrink-0">
-                                <Clock size={11} />
-                                <span className="text-[11px] font-semibold">{formatDate(msg.created_at)}</span>
-                              </div>
-                            </div>
-
-                            {/* Message Content */}
-                            <div className="pl-11">
-                              <p className={`text-sm font-medium text-[#37352f]/80 ${!isExpanded ? 'line-clamp-2' : ''} whitespace-pre-wrap break-words`}>
-                                {msg.content || '(sem conteúdo)'}
-                              </p>
-
-                              {/* Expanded Metadata */}
-                              <AnimatePresence>
-                                {isExpanded && (
-                                  <motion.div
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: 'auto' }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    transition={{ duration: 0.2 }}
-                                    className="overflow-hidden"
-                                  >
-                                    <div className="mt-3 pt-3 border-t border-[#e9e9e7]/60 flex flex-wrap gap-4 text-[11px] font-semibold text-[#37352f]/40">
-                                      {msg.provider && (
-                                        <span className="flex items-center gap-1">
-                                          <Zap size={10} className="text-amber-500" />
-                                          Provider: <span className="text-[#37352f]/60">{msg.provider}</span>
-                                        </span>
-                                      )}
-                                      {msg.model && (
-                                        <span>
-                                          Modelo: <span className="text-[#37352f]/60">{msg.model}</span>
-                                        </span>
-                                      )}
-                                      {msg.latency_ms != null && (
-                                        <span>
-                                          Latência: <span className="text-[#37352f]/60">{msg.latency_ms}ms</span>
-                                        </span>
-                                      )}
-                                      {msg.tool_count > 0 && (
-                                        <span>
-                                          Tools usadas: <span className="text-[#37352f]/60">{msg.tool_count}</span>
-                                        </span>
-                                      )}
-                                      {msg.fallback_used && (
-                                        <span className="text-amber-600">⚠ Fallback usado</span>
-                                      )}
-                                      <span>
-                                        Tipo: <span className="text-[#37352f]/60">{msg.message_type}</span>
-                                      </span>
-                                      <span>
-                                        Status: <span className="text-[#37352f]/60">{msg.status}</span>
-                                      </span>
-                                      <span className="text-[#37352f]/25">
-                                        ID: {msg.id.substring(0, 12)}…
-                                      </span>
-                                    </div>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </div>
-                          </div>
+              {/* View: User List for selection */}
+              {messagesMode === 'by-user' && !selectedUserMessages && (
+                <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-6 shadow-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredUsers.map(u => (
+                      <button
+                        key={u.id}
+                        onClick={() => {
+                          setMessages([]);
+                          setSelectedUserMessages(u);
+                          setMessagesPage(1);
+                        }}
+                        className="flex items-center gap-3 p-4 bg-white border border-[#e9e9e7] rounded-2xl hover:border-[#202020] hover:shadow-md transition-all text-left group"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#37352f]/5 to-[#37352f]/10 flex items-center justify-center font-bold text-[#37352f]/40 shrink-0 group-hover:from-[#202020]/5 group-hover:to-[#202020]/10 transition-colors">
+                          {u.name?.[0]?.toUpperCase() || u.email[0].toUpperCase()}
                         </div>
-                      );
-                    })}
+                        <div className="min-w-0">
+                          <p className="font-bold text-sm text-[#202020] truncate">{u.name || 'Sem nome'}</p>
+                          <p className="text-[11px] font-medium text-[#37352f]/40 truncate">{u.email}</p>
+                        </div>
+                        <ArrowRight size={14} className="ml-auto text-[#37352f]/20 group-hover:text-[#202020] transition-colors" />
+                      </button>
+                    ))}
+                    {filteredUsers.length === 0 && (
+                      <div className="col-span-full py-12 text-center">
+                        <div className="flex flex-col items-center gap-2">
+                          <Users className="w-10 h-10 text-[#e9e9e7]" />
+                          <span className="text-[#37352f]/40 font-medium text-sm">Nenhum usuário encontrado para selecionar.</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
+              )}
 
-                {/* Pagination */}
-                {messagesTotalPages > 1 && (
-                  <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-[#e9e9e7]">
-                    <span className="text-sm font-medium text-[#37352f]/50">
-                      Página {messagesPage} de {messagesTotalPages}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setMessagesPage(p => Math.max(1, p - 1))}
-                        disabled={messagesPage <= 1}
-                        className="p-2 rounded-lg bg-[#f7f7f5] border border-[#e9e9e7] text-[#37352f]/60 hover:bg-[#e9e9e7] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <ChevronLeft size={16} />
-                      </button>
-                      <button
-                        onClick={() => setMessagesPage(p => Math.min(messagesTotalPages, p + 1))}
-                        disabled={messagesPage >= messagesTotalPages}
-                        className="p-2 rounded-lg bg-[#f7f7f5] border border-[#e9e9e7] text-[#37352f]/60 hover:bg-[#e9e9e7] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <ChevronRight size={16} />
-                      </button>
+              {/* Filters (only show if viewed something) */}
+              {(messagesMode === 'all' || selectedUserMessages) && (
+                <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-2xl p-4 mb-6 flex flex-col sm:flex-row gap-3">
+                  {/* Back button if single user */}
+                  {selectedUserMessages && (
+                    <button
+                      onClick={() => setSelectedUserMessages(null)}
+                      className="flex items-center gap-2 px-3 py-2 bg-white border border-[#e9e9e7] rounded-lg text-sm font-bold text-[#37352f]/60 hover:text-[#202020] transition-colors"
+                    >
+                      <ChevronLeft size={16} />
+                      Voltar
+                    </button>
+                  )}
+                  
+                  {/* Selected user badge */}
+                  {selectedUserMessages && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-[#202020] text-white rounded-lg text-sm font-bold shadow-sm">
+                      <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">
+                        {selectedUserMessages.name?.[0]?.toUpperCase() || selectedUserMessages.email[0].toUpperCase()}
+                      </div>
+                      <span className="truncate max-w-[150px]">{selectedUserMessages.name || selectedUserMessages.email}</span>
                     </div>
+                  )}
+
+                  {/* Channel filter */}
+                  <div className="flex items-center gap-2">
+                    <Filter size={14} className="text-[#37352f]/40" />
+                    <select
+                      value={messagesChannel}
+                      onChange={(e) => setMessagesChannel(e.target.value)}
+                      className="bg-white border border-[#e9e9e7] rounded-lg px-3 py-2 text-sm font-medium text-[#37352f] focus:outline-none focus:border-[#202020] focus:ring-1 focus:ring-[#202020] shadow-sm"
+                    >
+                      <option value="all">Todos os canais</option>
+                      <option value="whatsapp">WhatsApp</option>
+                      <option value="web">Web</option>
+                    </select>
                   </div>
-                )}
-              </div>
+
+                  {/* Search */}
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#37352f]/40 w-4 h-4" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por nome, email ou conteúdo..."
+                      value={messagesSearch}
+                      onChange={(e) => setMessagesSearch(e.target.value)}
+                      className="w-full bg-white border border-[#e9e9e7] rounded-lg pl-9 pr-4 py-2 text-sm font-medium text-[#37352f] focus:outline-none focus:border-[#202020] focus:ring-1 focus:ring-[#202020] shadow-sm transition-all"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Messages List (only show if viewed something) */}
+              {(messagesMode === 'all' || selectedUserMessages) && (
+                <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl shadow-sm overflow-hidden">
+                  {messagesLoading ? (
+                    <div className="py-20 flex flex-col items-center gap-3">
+                      <RefreshCw size={24} className="text-[#37352f]/30 animate-spin" />
+                      <span className="text-[#37352f]/40 font-medium text-sm">Carregando mensagens...</span>
+                    </div>
+                  ) : messages.length === 0 ? (
+                    <div className="py-20 flex flex-col items-center gap-3">
+                      <MessageSquare size={32} className="text-[#e9e9e7]" />
+                      <span className="text-[#37352f]/40 font-medium text-sm">Nenhuma mensagem encontrada.</span>
+                    </div>
+                  ) : (
+                    <div className="p-6 flex flex-col gap-10">
+                      {(() => {
+                        const groups: { [key: string]: typeof messages } = {};
+                        messages.forEach(msg => {
+                          const date = new Date(msg.created_at);
+                          const dateKey = date.toLocaleDateString('pt-BR');
+                          if (!groups[dateKey]) groups[dateKey] = [];
+                          groups[dateKey].push(msg);
+                        });
+
+                        return Object.entries(groups).map(([dateKey, groupMessages]) => {
+                          const today = new Date().toLocaleDateString('pt-BR');
+                          const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('pt-BR');
+                          
+                          let displayDate = dateKey;
+                          if (dateKey === today) displayDate = 'Hoje';
+                          else if (dateKey === yesterday) displayDate = 'Ontem';
+
+                          return (
+                            <div key={dateKey} className="flex flex-col gap-6">
+                              {/* Date Header - Ultra Minimal */}
+                              <div className="flex justify-center py-4">
+                                <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#37352f]/20">
+                                  {displayDate}
+                                </span>
+                              </div>
+
+                              <div className="flex flex-col gap-6">
+                                {groupMessages.map((msg) => {
+                                  const isExpanded = expandedMessage === msg.id;
+                                  const isAI = msg.role === 'assistant';
+                                  
+                                  return (
+                                    <div
+                                      key={msg.id}
+                                      className={`flex w-full ${isAI ? 'justify-start' : 'justify-end'}`}
+                                    >
+                                      <div className={`max-w-[75%] flex flex-col ${isAI ? 'items-start' : 'items-end'}`}>
+                                        {/* Sender Header - With Avatars */}
+                                        <div className={`flex items-center gap-2 mb-1.5 px-0.5 ${isAI ? 'flex-row' : 'flex-row-reverse'}`}>
+                                          <div className={`w-4 h-4 rounded-full overflow-hidden flex items-center justify-center shrink-0 ${
+                                            isAI ? 'bg-[#202020]' : 'bg-[#37352f]/10'
+                                          }`}>
+                                            {isAI ? (
+                                              <img src={luiLogo} alt="Lui" className="w-2.5 h-2.5 object-cover" />
+                                            ) : msg.user.avatar ? (
+                                              <img src={msg.user.avatar} alt={msg.user.name} className="w-full h-full object-cover" />
+                                            ) : (
+                                              <span className="text-[7px] font-black text-[#37352f]/40 uppercase">
+                                                {msg.user.name?.[0] || 'U'}
+                                              </span>
+                                            )}
+                                          </div>
+                                          
+                                          <div className={`flex items-center gap-2 opacity-40 hover:opacity-100 transition-opacity ${isAI ? 'flex-row' : 'flex-row-reverse'}`}>
+                                            <span className="text-[10px] font-black tracking-widest uppercase text-[#37352f]">
+                                              {isAI ? 'Lui' : msg.user.name.split(' ')[0]}
+                                            </span>
+                                            <span className="text-[8px] font-bold text-[#37352f]/30 uppercase">
+                                              {msg.channel}
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        {/* Message Bubble - Defined & Minimal */}
+                                        <div 
+                                          onClick={() => setExpandedMessage(isExpanded ? null : msg.id)}
+                                          className={`px-5 py-3.5 rounded-2xl transition-all cursor-pointer ${
+                                            isAI 
+                                              ? 'bg-[#efefee] text-[#37352f]/90 rounded-tl-none border border-[#e9e9e7]/50' 
+                                              : 'bg-[#202020] text-white/90 rounded-tr-none'
+                                          }`}
+                                        >
+                                          <p className="text-[13px] leading-relaxed font-medium whitespace-pre-wrap break-words">
+                                            {msg.content || '(sem conteúdo)'}
+                                          </p>
+
+                                          {/* Metadata - Ultra Minimalist Technical Details */}
+                                          <AnimatePresence>
+                                            {isExpanded && (
+                                              <motion.div
+                                                initial={{ opacity: 0, y: -5 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                exit={{ opacity: 0, y: -5 }}
+                                                className={`mt-3 flex gap-3 text-[7px] font-black uppercase tracking-[0.2em] ${
+                                                  isAI ? 'text-[#37352f]/20' : 'text-white/20'
+                                                }`}
+                                              >
+                                                {msg.model && <span>{msg.model}</span>}
+                                                {msg.latency_ms && <span>{msg.latency_ms}ms</span>}
+                                                <span className="ml-auto opacity-50">Ref: {msg.id.substring(0, 6)}</span>
+                                              </motion.div>
+                                            )}
+                                          </AnimatePresence>
+                                        </div>
+
+                                        {/* Time - Subtle */}
+                                        <div className="mt-1.5 px-1 opacity-20">
+                                          <span className="text-[8px] font-black uppercase tracking-tighter">
+                                            {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Pagination */}
+                  {messagesTotalPages > 1 && (
+                    <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-[#e9e9e7]">
+                      <span className="text-sm font-medium text-[#37352f]/50">
+                        Página {messagesPage} de {messagesTotalPages}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setMessagesPage(p => Math.max(1, p - 1))}
+                          disabled={messagesPage <= 1}
+                          className="p-2 rounded-lg bg-[#f7f7f5] border border-[#e9e9e7] text-[#37352f]/60 hover:bg-[#e9e9e7] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <button
+                          onClick={() => setMessagesPage(p => Math.min(messagesTotalPages, p + 1))}
+                          disabled={messagesPage >= messagesTotalPages}
+                          className="p-2 rounded-lg bg-[#f7f7f5] border border-[#e9e9e7] text-[#37352f]/60 hover:bg-[#e9e9e7] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

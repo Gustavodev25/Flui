@@ -1226,7 +1226,9 @@ app.get('/api/admin/users', async (req, res) => {
   }
 
   try {
-    const { data: { users }, error: authError } = await supabaseAdmin.auth.admin.listUsers();
+    const { data: { users }, error: authError } = await supabaseAdmin.auth.admin.listUsers({
+      perPage: 1000
+    });
     if (authError) throw authError;
 
     const { data: subscriptions, error: subError } = await supabaseAdmin
@@ -1342,7 +1344,7 @@ app.get('/api/admin/stats', async (req, res) => {
 
 // ── Admin Messages Log ────────────────────────────────────────────
 app.get('/api/admin/messages', async (req, res) => {
-  const { password, page = 1, limit = 50, channel, search } = req.query;
+  const { password, page = 1, limit = 50, channel, search, userId } = req.query;
   if (password !== 'AdminFlui123@') {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -1363,27 +1365,38 @@ app.get('/api/admin/messages', async (req, res) => {
       query = query.eq('channel', channel);
     }
 
+    if (userId) {
+      query = query.eq('user_id', userId);
+    }
+
     const { data: messages, count, error: msgError } = await query;
     if (msgError) throw msgError;
 
     // Get unique user IDs to fetch user info
     const userIds = [...new Set((messages || []).map(m => m.user_id).filter(Boolean))];
+    if (userId && !userIds.includes(userId)) userIds.push(userId);
+    
     let usersMap = {};
 
     if (userIds.length > 0) {
-      const { data: { users }, error: usersErr } = await supabaseAdmin.auth.admin.listUsers();
-      if (!usersErr && users) {
-        for (const u of users) {
-          if (userIds.includes(u.id)) {
-            usersMap[u.id] = {
-              name: u.user_metadata?.full_name || u.user_metadata?.name || u.email?.split('@')[0] || 'Desconhecido',
-              email: u.email,
-              avatar: u.user_metadata?.avatar_url || null,
+      // Fetch users individually by ID to avoid first-page limits of listUsers()
+      await Promise.all(userIds.map(async (id) => {
+        try {
+          const { data: { user: authUser }, error: getUserErr } = await supabaseAdmin.auth.admin.getUserById(id);
+          if (!getUserErr && authUser) {
+            usersMap[id] = {
+              name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'Desconhecido',
+              email: authUser.email,
+              avatar: authUser.user_metadata?.avatar_url || null,
             };
           }
+        } catch (err) {
+          console.error(`Erro ao buscar usuário ${id}:`, err);
         }
-      }
+      }));
     }
+
+    console.log(`[Admin] Buscando mensagens para userId=${userId || 'todos'}. Encontradas: ${messages?.length || 0}`);
 
     // Merge user info into messages
     let enrichedMessages = (messages || []).map(m => ({
