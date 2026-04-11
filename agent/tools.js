@@ -38,6 +38,7 @@ const taskCreateSchema = z.object({
   tags: z.array(z.string()).optional(),
   subtasks: z.array(subtaskItemSchema).optional(),
   timer_minutes: optionalPositiveInt(1440),
+  timer_at_override: z.string().optional(),
   reminder_days_before: optionalPositiveInt(365),
   whatsapp_message: z.string().optional(),
   source: z.enum(['user', 'whatsapp']).optional(),
@@ -503,9 +504,12 @@ async function executeTaskCreate(args, userId) {
     timer_warned: false,
   }));
 
-  // Calcula timer_at se o usuário pediu um timer em minutos
+  // Calcula timer_at: prefere timer_at_override (preciso) sobre timer_minutes (relativo)
   let timerAt = null;
-  if (parsed.timer_minutes) {
+  if (parsed.timer_at_override) {
+    timerAt = parsed.timer_at_override;
+    console.log(`[Timer] Usando timer_at_override preciso: ${timerAt}`);
+  } else if (parsed.timer_minutes) {
     timerAt = new Date(Date.now() + parsed.timer_minutes * 60 * 1000).toISOString();
   }
 

@@ -199,6 +199,15 @@ const requireEnv = (name) => {
   return process.env[name];
 };
 
+// ================== FETCH UTILS ==================
+function fetchWithTimeout(timeout) {
+  return (url, options = {}) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(id));
+  };
+}
+
 requireEnv('NVIDIA_API_KEY'); // validação na inicialização; consumido pelo queryEngine
 const WHATSAPP_ACCESS_TOKEN = requireEnv('WHATSAPP_ACCESS_TOKEN');
 const WHATSAPP_PHONE_NUMBER_ID = requireEnv('WHATSAPP_PHONE_NUMBER_ID');
@@ -210,7 +219,9 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_K
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // Cliente admin para operações do servidor (bypassa RLS)
-const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+  global: { fetch: fetchWithTimeout(30_000) },
+});
 const resend = new Resend('re_AaQ8QNKS_Ljvo7xxJoGEKMLvnWmaXcYUd');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const VITE_API_URL = process.env.VITE_API_URL || '';
@@ -360,6 +371,8 @@ async function sendTypingIndicator(to, messageId) {
 }
 
 async function sendWhatsAppPayload(to, payload) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch(`https://graph.facebook.com/v22.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
       method: 'POST',
@@ -371,7 +384,8 @@ async function sendWhatsAppPayload(to, payload) {
         messaging_product: 'whatsapp',
         to: to.replace(/\D/g, ''),
         ...payload,
-      })
+      }),
+      signal: controller.signal,
     });
 
     const data = await response.json();
@@ -392,6 +406,8 @@ async function sendWhatsAppPayload(to, payload) {
       error,
       externalMessageId: null,
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -411,10 +427,13 @@ function mapWhatsAppStatus(status) {
 }
 
 async function dispatchOutboundMessageJobs() {
-  const jobs = await claimDueJobs({
-    workerId: OUTBOUND_WORKER_ID,
-    limit: 10,
-  });
+  let jobs;
+  try {
+    jobs = await claimDueJobs({ workerId: OUTBOUND_WORKER_ID, limit: 10 });
+  } catch (error) {
+    console.error('[OutboundJobs] Falha ao buscar jobs no DB:', error.message);
+    return;
+  }
 
   for (const job of jobs) {
     try {
@@ -2270,7 +2289,7 @@ function pickTimerTemplate(templates, name, title, timeLabel) {
 }
 
 // Aviso prévio: envia X minutos antes do timer expirar
-// Regra: timers <= 5 min → avisa 1 min antes | <= 30 min → 2 min antes | > 30 min → 5 min antes
+// Regra: <= 5min → 1min antes | <= 30min → 5min antes | <= 90min → 15min antes | > 90min → 1h antes
 function warnBeforeMs(timerAt) {
   const totalMs = new Date(timerAt).getTime() - Date.now();
   const totalMin = totalMs / 60_000;

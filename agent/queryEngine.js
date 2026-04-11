@@ -250,6 +250,8 @@ REGRAS DE VISIBILIDADE:
    2. *Ligar pro contador* -- sem prazo
    3. *Enviar proposta* -- pra sexta
    Tudo certinho! Quer ajustar alguma coisa?"
+   Se uma das tarefas do batch tiver horário vago ("mais tarde", "depois", "em breve"), crie TODAS as tarefas normalmente SEM timer na tarefa vaga. No resumo final, pergunte o horário só dessa tarefa:
+   "A tarefa *[nome]* ficou sem horário. Quer que eu coloque um lembrete pra ela?"
 5. BUSCA E CONSULTA INTELIGENTE: Quando o usuário perguntar sobre suas tarefas de forma geral ou específica, use as ferramentas para consultar em tempo real:
    - "O que eu tenho pra fazer hoje?" → TaskList com due_date=today
    - "Qual era aquela tarefa do relatório?" → TaskSearch com query="relatório"
@@ -338,6 +340,12 @@ REGRAS DE VISIBILIDADE:
 - O sistema enviará uma notificação no WhatsApp quando o timer expirar.
 - Ao confirmar a criação, mencione o timer: "Anotado! Vou te avisar em 10 minutos." ou "Vou te lembrar em 1 hora e meia."
 - NÃO use timer_minutes para prazos de dias/semanas — apenas para alertas em minutos/horas curtos (até 24h).
+- Para HORÁRIOS ABSOLUTOS ("às 16h", "as 14h30", "9h da manhã"):
+  NÃO tente calcular a diferença de minutos — o sistema já calcula automaticamente.
+  Basta usar timer_minutes com qualquer valor positivo (ex: 1) — o sistema vai sobrescrever com o valor correto.
+- TEMPO VAGO: Se o usuário mencionar tempo vago como "mais tarde", "depois", "em breve", "quando der", "quando puder", "uma hora dessas", "num momento", NÃO invente um horário ou timer_minutes. Crie a tarefa SEM timer_minutes e pergunte depois:
+  "${userName}, anotei! *[tarefa]* ficou registrado. Quer que eu te avise num horário específico?"
+  NUNCA adivinhe minutos quando o horário não for explícito.
 
 ═══ LEMBRETE DE ANTECEDÊNCIA (DIAS) ═══
 - Use reminder_days_before quando o usuário pedir lembrete com dias de antecedência:
@@ -372,7 +380,7 @@ const CREATION_TRIGGERS = [
   /\bnão\s+deixa\s+(eu\s+)?esquecer/i,
   /\banota\s+(aí|isso|pra mim)?/i,
   /\bregistr/i,
-  /\bpreciso\s+(fazer|de|comprar|ligar|ir)/i,
+  /\bpreciso\s+(fazer|de|comprar|ligar|ir|mais\s+tarde|criar|mandar|enviar|resolver|terminar|come[cç]ar|preparar)/i,
   /\btenho\s+que/i,
   /\btenho\s+uma\s+tarefa/i,
   /\bcri(a|ar|ei)\s+(uma\s+)?tarefa/i,
@@ -501,7 +509,7 @@ function extractSimpleTaskTitle(message) {
   return cleanupTaskTitle(withoutTimers);
 }
 
-function getSimpleTaskCreateRequest(message, { resolvedDate, resolvedTimerMinutes, sourceChannel }) {
+function getSimpleTaskCreateRequest(message, { resolvedDate, resolvedTimerMinutes, resolvedTimerAt, sourceChannel }) {
   if (!isCreationIntent(message)) return null;
   if (hasMultipleTasks(message)) return null;
   if (!resolvedTimerMinutes && !resolvedDate) return null;
@@ -513,6 +521,7 @@ function getSimpleTaskCreateRequest(message, { resolvedDate, resolvedTimerMinute
     priority: 'medium',
     due_date: resolvedDate || (resolvedTimerMinutes ? getTodayISO() : undefined),
     ...(resolvedTimerMinutes ? { timer_minutes: resolvedTimerMinutes } : {}),
+    ...(resolvedTimerAt ? { timer_at_override: resolvedTimerAt } : {}),
     source: sourceChannel === 'whatsapp' ? 'whatsapp' : 'user',
     ...(sourceChannel === 'whatsapp' ? { whatsapp_message: message } : {}),
   };
@@ -690,6 +699,23 @@ function parseTimerCandidateMinutes(candidate) {
   return null;
 }
 
+// ── Detecção de tempo vago ("mais tarde", "depois", "em breve") ─────────────
+const VAGUE_TIME_PATTERNS = [
+  /\bmais\s+tarde\b/i,
+  /\bem\s+breve\b/i,
+  /\bquando\s+(?:der|puder|poss[ií]vel)\b/i,
+  /\buma\s+hora\s+dessas\b/i,
+  /\bnum\s+momento\b/i,
+  /\balguma\s+hora\b/i,
+];
+
+function hasVagueTimeReference(message) {
+  const lower = message.toLowerCase();
+  // "depois de amanhã" é data concreta, não é vago
+  if (/\bdepois\s+de\s+amanh[aã]\b/i.test(lower)) return false;
+  return VAGUE_TIME_PATTERNS.some(re => re.test(lower));
+}
+
 /**
  * Extrai o número de minutos de timer a partir de expressões naturais em português.
  * Exemplos cobertos:
@@ -805,6 +831,58 @@ function extractTimerMinutesFromMessage(message) {
   }
 
   return null;
+}
+
+// ── Extrai timer_at absoluto (ISO) para horários como "às 16h" ──────────────
+// Retorna ISO timestamp preciso em vez de minutos relativos (evita drift)
+function extractAbsoluteTimerAt(message) {
+  const lower = message.toLowerCase();
+
+  const absMatch = lower.match(
+    /(?:às\s+|as\s+)(\d{1,2})(?:[h:](\d{2}))?\s*(?:horas?)?\s*(?:da\s+(manh[aã]|tarde|noite))?/
+  ) || lower.match(
+    /\b(\d{1,2})[h:](\d{2})\s*(?:da\s+(manh[aã]|tarde|noite))?/
+  ) || lower.match(
+    /\b(\d{1,2})\s*h(?:oras?)?\s*(?:da\s+(manh[aã]|tarde|noite))\b/
+  );
+
+  if (!absMatch) return null;
+
+  let targetHour = parseInt(absMatch[1]);
+  const targetMin = parseInt(absMatch[2] || '0');
+  const period = (absMatch[3] || '').replace('manhã', 'manha');
+
+  const now = new Date();
+  const spFull = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    timeZone: 'America/Sao_Paulo',
+  }).format(now);
+  const [curH, curM, curS] = spFull.split(':').map(Number);
+
+  // AM/PM disambiguation (mesma lógica de extractTimerMinutesFromMessage)
+  if (period === 'manha') {
+    if (targetHour === 12) targetHour = 0;
+  } else if (period === 'tarde' || period === 'noite') {
+    if (targetHour < 12) targetHour += 12;
+  } else if (targetHour < 12) {
+    const curTotalMins = curH * 60 + curM;
+    const targetTotalMins = targetHour * 60 + targetMin;
+    if (curTotalMins >= targetTotalMins) targetHour += 12;
+  }
+
+  // Calcula diff preciso incluindo segundos
+  const curTotalSecs = curH * 3600 + curM * 60 + curS;
+  const targetTotalSecs = targetHour * 3600 + targetMin * 60;
+  let diffSecs = targetTotalSecs - curTotalSecs;
+  if (diffSecs <= 0) diffSecs += 24 * 3600;
+
+  if (diffSecs <= 0 || diffSecs >= 86400) return null;
+
+  // timer_at preciso: agora + diff em milissegundos, zerado nos segundos do alvo
+  const timerAt = new Date(now.getTime() + diffSecs * 1000);
+  timerAt.setMilliseconds(0);
+
+  return timerAt.toISOString();
 }
 
 // ── Resposta rápida para mutações (evita chamada LLM extra) ──────────────────
@@ -1013,14 +1091,18 @@ export async function queryEngineLoop(
     }
   }
   const resolvedDate = extractDateFromMessage(userMessage);
-  const resolvedTimerMinutes = extractTimerMinutesFromMessage(userMessage);
+  const hasVagueTime = hasVagueTimeReference(userMessage);
+  const resolvedTimerMinutes = hasVagueTime ? null : extractTimerMinutesFromMessage(userMessage);
+  const resolvedTimerAt = hasVagueTime ? null : extractAbsoluteTimerAt(userMessage);
   const resolvedDateWithTimerFallback = resolvedDate || (resolvedTimerMinutes ? getTodayISO() : null);
+  if (hasVagueTime) console.log(`[VagueTime] Tempo vago detectado, timer suprimido: "${userMessage.substring(0, 80)}"`);
   const creationIntent = isCreationIntent(userMessage);
   const multipleTasksIntent = hasMultipleTasks(userMessage);
 
   const simpleTaskCreateRequest = getSimpleTaskCreateRequest(userMessage, {
     resolvedDate,
     resolvedTimerMinutes,
+    resolvedTimerAt,
     sourceChannel,
   });
 
@@ -1164,19 +1246,39 @@ export async function queryEngineLoop(
               }
             }
 
-            // Se o modelo esqueceu timer_minutes mas a mensagem tinha expressão de tempo, injeta
+            // SEMPRE sobrescreve timer_minutes com o valor extraído por regex (mais preciso que o LLM)
             if (resolvedTimerMinutes) {
-              if (toolCall.function.name === 'TaskCreate' && !args.timer_minutes) {
+              if (toolCall.function.name === 'TaskCreate') {
+                if (args.timer_minutes && args.timer_minutes !== resolvedTimerMinutes) {
+                  console.log(`[TimerOverride] LLM=${args.timer_minutes} → extracted=${resolvedTimerMinutes} em TaskCreate`);
+                } else if (!args.timer_minutes) {
+                  console.log(`[TimerInject] timer_minutes=${resolvedTimerMinutes} injetado em TaskCreate`);
+                }
                 args.timer_minutes = resolvedTimerMinutes;
-                console.log(`[TimerInject] timer_minutes=${resolvedTimerMinutes} injetado em TaskCreate`);
               }
-              if (toolCall.function.name === 'TaskUpdate' && !args.timer_minutes) {
+              if (toolCall.function.name === 'TaskUpdate') {
+                if (args.timer_minutes && args.timer_minutes !== resolvedTimerMinutes) {
+                  console.log(`[TimerOverride] LLM=${args.timer_minutes} → extracted=${resolvedTimerMinutes} em TaskUpdate`);
+                } else if (!args.timer_minutes) {
+                  console.log(`[TimerInject] timer_minutes=${resolvedTimerMinutes} injetado em TaskUpdate`);
+                }
                 args.timer_minutes = resolvedTimerMinutes;
-                console.log(`[TimerInject] timer_minutes=${resolvedTimerMinutes} injetado em TaskUpdate`);
               }
               if (toolCall.function.name === 'TaskBatchCreate' && Array.isArray(args.tasks)) {
-                args.tasks = args.tasks.map(t => t.timer_minutes ? t : { ...t, timer_minutes: resolvedTimerMinutes });
-                console.log(`[TimerInject] timer_minutes=${resolvedTimerMinutes} injetado em TaskBatchCreate`);
+                args.tasks = args.tasks.map(t => {
+                  if (t.timer_minutes && t.timer_minutes !== resolvedTimerMinutes) {
+                    console.log(`[TimerOverride] LLM=${t.timer_minutes} → extracted=${resolvedTimerMinutes} em TaskBatchCreate`);
+                  }
+                  return { ...t, timer_minutes: resolvedTimerMinutes };
+                });
+              }
+            }
+
+            // Injeta timer_at_override para horários absolutos (mais preciso que timer_minutes)
+            if (resolvedTimerAt) {
+              if (toolCall.function.name === 'TaskCreate') {
+                args.timer_at_override = resolvedTimerAt;
+                console.log(`[TimerAtInject] timer_at_override=${resolvedTimerAt} injetado em TaskCreate`);
               }
             }
 
