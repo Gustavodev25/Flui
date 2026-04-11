@@ -11,6 +11,7 @@ import LandingPage from './pages/LandingPage'
 import TermsPage from './pages/TermsPage'
 import CalendarPage from './pages/Calendar'
 import InvitePage from './pages/InvitePage'
+import MockupsPage from './pages/MockupsPage'
 import { AppLayout } from './components/layout/AppLayout'
 import { AppToaster } from './components/ui/Toast'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
@@ -86,6 +87,7 @@ function App() {
               </Route>
   
               <Route path="/terms" element={<TermsPage />} />
+              <Route path="/mockups" element={<MockupsPage />} />
               <Route path="/" element={<LandingPage />} />
             </Routes>
           <ThankYouModal isOpen={showThankYou} onClose={() => setShowThankYou(false)} />
