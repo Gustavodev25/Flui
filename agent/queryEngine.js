@@ -5,6 +5,9 @@ import { createClient } from '@supabase/supabase-js';
 import { TOOLS, executeTool } from './tools.js';
 import { getHistory, saveHistory } from './sessionHistory.js';
 import { createChatCompletion } from './llmClient.js';
+import { getProfileContext } from './behavioralProfile.js';
+import { getPendingInsights, markInsightDelivered } from './proactiveIntelligence.js';
+import { getMemoryContext } from './memoryEngine.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -322,7 +325,38 @@ REGRAS DE VISIBILIDADE:
 25. CONTEXTO: Use o snapshot acima para sugestões amigáveis. Ex: "${userName}, vi que *[tarefa]* tá atrasada, quer que eu mude a data?"
 
 26. RESUMO OBRIGATÓRIO: Sempre que criar uma tarefa (TaskCreate ou TaskBatchCreate), você DEVE preencher o campo 'description' com um resumo do que deve ser feito, detalhando um pouco o que o usuário pediu. NUNCA deixe vazio.
- 
+
+═══ MEMORIA DE LONGO PRAZO & SEGUNDO CEREBRO ═══
+27. QUANDO SALVAR MEMORIAS (MemorySave): Salve AUTOMATICAMENTE quando o usuário compartilhar:
+   - Fatos pessoais: "trabalho na empresa X", "meu aniversário é dia 5", "estou fazendo faculdade de..."
+   - Preferências: "gosto de trabalhar de manhã", "prefiro tarefas curtas"
+   - Contexto de vida: "estou em período de provas", "vou viajar semana que vem"
+   - Eventos importantes: "fui promovido", "mudei de emprego", "comecei a malhar"
+   - Informações sobre pessoas: "João é meu chefe", "Maria cuida do backend"
+   NÃO peça confirmação — salve automaticamente e confirme: "Anotei, vou lembrar disso!"
+
+28. QUANDO SALVAR NO SEGUNDO CEREBRO (KnowledgeSave): Use quando o usuário disser:
+   - "anota isso" / "guarda essa info" / "salva isso pra mim" → note
+   - "tive uma ideia" / "ideia:" / "pensei em" → idea
+   - "a senha é" / "o link é" / "o endereço é" / "o telefone do X é" → reference
+   - "decidimos que" / "ficou decidido" / "a decisão foi" → decision
+   - Informações sobre uma pessoa/contato específico → contact
+   - "toda sexta eu faço" / "o processo é" / "o fluxo é" → routine
+   DIFERENÇA ENTRE TAREFA E CONHECIMENTO:
+   - TAREFA = algo que o usuário PRECISA FAZER (ação futura) → TaskCreate
+   - CONHECIMENTO = algo que o usuário quer GUARDAR/LEMBRAR (informação) → KnowledgeSave
+   - Se ambíguo (ex: "reunião com João: decidimos X e preciso fazer Y"):
+     → KnowledgeSave para a decisão + TaskCreate para a ação
+
+29. QUANDO BUSCAR (MemoryRecall / KnowledgeSearch): Use quando o usuário perguntar:
+   - "você lembra...", "o que eu te falei sobre...", "quando foi que..."
+   - "o que eu anotei sobre...", "tenho alguma nota sobre..."
+   - "quais são minhas ideias?", "o que eu sei sobre o João?"
+   - "qual era a senha do...", "qual o telefone do..."
+   Busque e responda como se VOCE lembrasse naturalmente.
+
+30. CAPTURA PROATIVA: Quando o usuário mencionar informações importantes DURANTE uma conversa sobre tarefas, salve como memória SEM INTERROMPER o fluxo. Ex: se ele diz "preciso ligar pro João, ele é meu gerente novo", crie a tarefa E salve a memória sobre João em paralelo.
+
 ═══ TIMER / LEMBRETE RÁPIDO ═══
 - Se o usuário mencionar expressão de tempo curto junto com uma tarefa, use o campo timer_minutes no TaskCreate ou TaskBatchCreate.
 - Converta QUALQUER variação de:
@@ -368,8 +402,48 @@ O ANO ATUAL é ${dates.currentYear}. NUNCA use anos passados.
 - "mês que vem" → ${dates.nextMonthISO}
 SEMPRE passe due_date como YYYY-MM-DD nas ferramentas.`;
 
-  contextCache.set(userId, { prompt, ts: Date.now() });
-  return prompt;
+  // ── Perfil comportamental (se disponível) ─────────────────────────────
+  let behavioralContext = '';
+  try {
+    behavioralContext = await getProfileContext(userId);
+  } catch { /* silently skip if table doesn't exist yet */ }
+
+  // ── Memória de longo prazo ────────────────────────────────────────────
+  let memoryContext = '';
+  try {
+    memoryContext = await getMemoryContext(userId);
+  } catch { /* silently skip if table doesn't exist yet */ }
+
+  // ── Insights proativos pendentes ──────────────────────────────────────
+  let insightsContext = '';
+  try {
+    const insights = await getPendingInsights(userId, 2);
+    if (insights.length > 0) {
+      insightsContext = `\n═══ INSIGHTS PROATIVOS (USE COM NATURALIDADE) ═══
+Voce detectou os seguintes padroes sobre ${userName}. Mencione NO MAXIMO 1 por resposta, e SOMENTE quando for relevante ao contexto da conversa (nao force):
+${insights.map(i => `- [${i.insight_type}]: ${i.content}`).join('\n')}
+
+REGRAS DE USO:
+- NAO mencione todos de uma vez — escolha o mais relevante ao momento.
+- Integre de forma NATURAL ("Ei, percebi que...", "A proposito...").
+- Se o usuario estiver focado em outra coisa, IGNORE os insights nessa resposta.
+- Se usar um insight, seja gentil e ofereça ajuda concreta.`;
+
+      // Marca como entregues (serão vistos pela IA nessa resposta)
+      for (const ins of insights) {
+        markInsightDelivered(ins.id).catch(() => {});
+      }
+    }
+  } catch { /* silently skip */ }
+
+  // ── Monta prompt completo com todos os contextos ──────────────────────
+  let fullPrompt = prompt;
+  if (behavioralContext) fullPrompt += `\n\n${behavioralContext}`;
+  if (memoryContext) fullPrompt += `\n\n${memoryContext}`;
+  if (insightsContext) fullPrompt += insightsContext;
+
+  contextCache.set(userId, { prompt: fullPrompt, ts: Date.now() });
+  return fullPrompt;
 }
 
 // ── Detecção de intenção de criação ──────────────────────────────────────────

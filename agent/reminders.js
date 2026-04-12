@@ -3,6 +3,8 @@ dotenv.config();
 
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
+import { generateInsights, buildSmartProactiveMessage, expireOldInsights } from './proactiveIntelligence.js';
+import { getProfile } from './behavioralProfile.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -427,14 +429,32 @@ function getCurrentPeriod() {
 }
 
 /**
+ * Verifica se o momento atual é adequado para o usuário (baseado no perfil).
+ * Retorna true se deve enviar, false se deve pular.
+ */
+function isGoodTimeForUser(profile, period) {
+  if (!profile || !profile.preferred_reminder_hours?.length) return true;
+
+  const currentHour = getSPHour();
+  const preferredHours = profile.preferred_reminder_hours;
+
+  // Verifica se a hora atual está próxima de algum horário preferido (±1h)
+  return preferredHours.some(h => Math.abs(currentHour - h) <= 1);
+}
+
+/**
  * Executa o ciclo de lembretes.
  * Chamado pelo servidor a cada 15 minutos.
+ * Agora com inteligência proativa: gera insights, adapta horários ao perfil.
  */
 export async function runReminderCycle(sessions, sendMessage) {
   const period = getCurrentPeriod();
   if (!period) return;
 
   console.log(`[Reminders] Verificando lembretes (${period})...`);
+
+  // Expira insights antigos uma vez por ciclo
+  expireOldInsights().catch(() => {});
 
   for (const [phone, session] of Object.entries(sessions)) {
     if (!session.authenticated || !session.userId) continue;
@@ -454,20 +474,49 @@ export async function runReminderCycle(sessions, sendMessage) {
 
       if (!windowOpen) {
         console.log(`[Reminders] Janela 24h fechada — skip ${period} para ${phone}`);
-        markSent(phone, period); // marcar como enviado pra não tentar de novo nesse período
+        markSent(phone, period);
         continue;
       }
 
+      // ── Perfil comportamental: verifica se é bom momento ──────────────
+      let profile = null;
+      try {
+        profile = await getProfile(session.userId);
+        if (profile && !isGoodTimeForUser(profile, period)) {
+          console.log(`[Reminders] Horario nao ideal para ${phone} (perfil) — skip`);
+          markSent(phone, period);
+          continue;
+        }
+      } catch { /* perfil não disponível, continua normalmente */ }
+
+      // ── Gera insights proativos para este usuário ────────���────────────
+      try {
+        await generateInsights(session.userId, session.userName);
+      } catch (err) {
+        console.error(`[Reminders] Erro ao gerar insights para ${phone}:`, err.message);
+      }
+
+      // ── Gera mensagem (smart se possível, fallback para original) ─────
       let message;
 
       if (period === 'weekly') {
         message = await buildWeeklySummary(session.userId, session.userName);
       } else {
-        message = await buildReminderMessage(session.userId, session.userName, period);
+        // Tenta mensagem proativa inteligente primeiro
+        try {
+          message = await buildSmartProactiveMessage(session.userId, session.userName, period);
+        } catch (err) {
+          console.error(`[Reminders] Smart message falhou, usando fallback:`, err.message);
+        }
+
+        // Fallback para mensagem tradicional
+        if (!message) {
+          message = await buildReminderMessage(session.userId, session.userName, period);
+        }
       }
 
       if (message) {
-        console.log(`[Reminders] Enviando ${period} → ${phone}`);
+        console.log(`[Reminders] Enviando ${period} → ${phone} (proativo)`);
         const sent = await sendMessage(phone, message);
         if (sent) markSent(phone, period);
       } else {

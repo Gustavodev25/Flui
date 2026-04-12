@@ -32,6 +32,7 @@ import {
   getDefaultThreadForUser,
   processConversationTurn,
 } from './agent/conversationOrchestrator.js';
+import { trackEvent, analyzeAndUpdateProfile } from './agent/behavioralProfile.js';
 import OpenAI from 'openai';
 import Stripe from 'stripe';
 
@@ -236,6 +237,9 @@ const pendingAuthSessions = new Map();
 const processedMessages = new Map();
 const DEDUP_TTL_MS = 5 * 60 * 1000;
 const OUTBOUND_WORKER_ID = `server-${crypto.randomUUID()}`;
+
+// Track last proactive message time per userId for engagement detection
+const lastProactiveMessageAt = new Map();
 
 function getCorrelationId(req) {
   return req.correlationId || crypto.randomUUID();
@@ -699,6 +703,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
       .then(() => { })
       .catch(err => console.error('[24hWindow] Erro ao atualizar last_inbound_at:', err.message));
 
+    const turnStart = Date.now();
     const result = await processConversationTurn({
       userId: session.userId,
       userName: session.userName,
@@ -714,6 +719,36 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     });
     console.log(`[AI] Resposta: "${result.reply?.substring(0, 80)}..."`);
     await dispatchOutboundMessageJobs();
+
+    // ── Behavioral event tracking (fire-and-forget) ─────────────────────
+    const turnDuration = Date.now() - turnStart;
+    trackEvent(session.userId, 'message_sent', {
+      message_length: cleanMessage.length,
+      from_audio: fromAudio,
+    }).catch(() => {});
+    trackEvent(session.userId, 'message_response', {
+      response_time_ms: turnDuration,
+      response_length: result.reply?.length || 0,
+    }).catch(() => {});
+
+    // Detect reminder engagement: user responded within 15min of proactive message
+    const lastProactive = lastProactiveMessageAt.get(session.userId);
+    if (lastProactive && (Date.now() - lastProactive) < 15 * 60 * 1000) {
+      trackEvent(session.userId, 'reminder_engaged', {
+        response_delay_ms: Date.now() - lastProactive,
+      }).catch(() => {});
+      lastProactiveMessageAt.delete(session.userId);
+    } else if (lastProactive && (Date.now() - lastProactive) >= 15 * 60 * 1000) {
+      trackEvent(session.userId, 'reminder_ignored', {
+        time_since_reminder_ms: Date.now() - lastProactive,
+      }).catch(() => {});
+      lastProactiveMessageAt.delete(session.userId);
+    }
+
+    // Periodically re-analyze profile (every ~20 interactions)
+    if (Math.random() < 0.05) {
+      analyzeAndUpdateProfile(session.userId).catch(() => {});
+    }
 
   } catch (error) {
     console.error('[processAndRespondWithAI] ❌ ERRO:', error);
@@ -2227,6 +2262,7 @@ setInterval(() => {
     .then((sessions) => runReminderCycle(sessions, async (phone, message) => {
       const binding = await findBindingByExternalUserId('whatsapp', phone);
       if (binding?.user_id) {
+        lastProactiveMessageAt.set(binding.user_id, Date.now());
         return enqueueSystemWhatsAppMessage(binding.user_id, message, 'assistant_text');
       }
       return sendWhatsAppMessage(phone, message);
@@ -2247,6 +2283,25 @@ setTimeout(() => {
     }))
     .catch((error) => console.error('[Reminders] Worker error:', error.message));
 }, 30_000);
+
+// ── Behavioral Profile: atualiza perfis 1x por dia (3h da manhã SP) ─────────
+setInterval(async () => {
+  const hour = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'America/Sao_Paulo' }).format(new Date()), 10);
+  if (hour !== 3) return; // Só roda às 3h da manhã
+
+  console.log('[BehavioralProfile] Atualizando perfis...');
+  try {
+    const sessions = await buildReminderSessions();
+    for (const [, session] of Object.entries(sessions)) {
+      if (session.authenticated && session.userId) {
+        await analyzeAndUpdateProfile(session.userId);
+      }
+    }
+    console.log('[BehavioralProfile] Perfis atualizados com sucesso');
+  } catch (err) {
+    console.error('[BehavioralProfile] Erro ao atualizar perfis:', err.message);
+  }
+}, 60 * 60 * 1000); // Verifica a cada 1h
 
 setInterval(() => {
   dispatchOutboundMessageJobs().catch((error) => {

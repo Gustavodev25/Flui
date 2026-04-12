@@ -3,6 +3,9 @@ dotenv.config();
 
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
+import { trackEvent } from './behavioralProfile.js';
+import { saveMemory, recallMemories, recallByEntity, getEntities } from './memoryEngine.js';
+import { saveKnowledge, searchKnowledge, listIdeas, getPersonContext } from './secondBrain.js';
 
 // Usa service_role no backend (agente) para bypassar RLS.
 // O agente já filtra por user_id em todas as queries.
@@ -356,6 +359,154 @@ export const TOOLS = [
       },
     },
   },
+  // ── Ferramentas de Memória e Segundo Cérebro ─────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'MemorySave',
+      description: 'Salva uma informação na memória de longo prazo do usuário. Use quando o usuário compartilhar um fato pessoal, preferência, evento importante, ou qualquer informação que seria útil lembrar no futuro. Também use automaticamente quando detectar informações importantes na conversa.',
+      parameters: {
+        type: 'object',
+        properties: {
+          memory_type: {
+            type: 'string',
+            enum: ['episodic', 'semantic', 'entity'],
+            description: 'Tipo: "episodic" para eventos/conversas, "semantic" para fatos/preferências, "entity" para pessoas/projetos.',
+          },
+          content: {
+            type: 'string',
+            description: 'Conteúdo completo da memória. Seja específico e detalhado.',
+          },
+          summary: {
+            type: 'string',
+            description: 'Resumo curto (1 frase) para busca rápida.',
+          },
+          entities: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Nome da entidade (pessoa, projeto, lugar).' },
+                type: { type: 'string', enum: ['person', 'project', 'place', 'company', 'topic'], description: 'Tipo da entidade.' },
+                description: { type: 'string', description: 'Descrição breve.' },
+              },
+              required: ['name', 'type'],
+            },
+            description: 'Pessoas, projetos ou entidades mencionadas.',
+          },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Tags para categorização (ex: ["trabalho", "saúde", "pessoal"]).',
+          },
+          importance: {
+            type: 'number',
+            description: 'Importância de 0.0 a 1.0. Padrão: 0.5. Use 0.8+ para fatos cruciais.',
+          },
+        },
+        required: ['memory_type', 'content', 'summary'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'MemoryRecall',
+      description: 'Busca na memória de longo prazo do usuário. Use quando o usuário perguntar "o que eu te disse sobre...", "você lembra...", "o que o [pessoa] falou...", ou quando precisar de contexto histórico para responder melhor.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Termo de busca (palavra-chave, nome de pessoa, assunto).',
+          },
+          memory_type: {
+            type: 'string',
+            enum: ['episodic', 'semantic', 'entity'],
+            description: 'Filtrar por tipo específico (opcional).',
+          },
+          entity_name: {
+            type: 'string',
+            description: 'Buscar memórias sobre uma pessoa/projeto específico.',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'KnowledgeSave',
+      description: 'Salva uma informação no "segundo cérebro" do usuário. Use para anotações, ideias, decisões, informações de referência, dados sobre pessoas, ou qualquer conhecimento que o usuário queira guardar. Diferente de tarefas — isso é INFORMAÇÃO, não ação.',
+      parameters: {
+        type: 'object',
+        properties: {
+          category: {
+            type: 'string',
+            enum: ['note', 'idea', 'reference', 'decision', 'contact', 'routine'],
+            description: 'Categoria: "note" (anotação), "idea" (ideia futura), "reference" (consulta/senha/dado), "decision" (decisão tomada), "contact" (info sobre pessoa), "routine" (processo recorrente).',
+          },
+          title: {
+            type: 'string',
+            description: 'Título curto e descritivo.',
+          },
+          content: {
+            type: 'string',
+            description: 'Conteúdo completo da informação. Estruture bem: quem, o quê, quando, contexto.',
+          },
+          entities: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                type: { type: 'string', enum: ['person', 'project', 'place', 'company', 'topic'] },
+              },
+              required: ['name', 'type'],
+            },
+            description: 'Pessoas/projetos mencionados.',
+          },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Tags para organização.',
+          },
+          pinned: {
+            type: 'boolean',
+            description: 'Se true, essa informação aparece SEMPRE no contexto. Use para dados muito importantes.',
+          },
+        },
+        required: ['category', 'title', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'KnowledgeSearch',
+      description: 'Busca no segundo cérebro do usuário. Use quando perguntar "o que eu anotei sobre...", "tenho alguma nota sobre...", "quais são minhas ideias", "o que eu sei sobre [pessoa]", ou qualquer consulta ao banco de conhecimento.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Termo de busca.',
+          },
+          category: {
+            type: 'string',
+            enum: ['note', 'idea', 'reference', 'decision', 'contact', 'routine'],
+            description: 'Filtrar por categoria (opcional).',
+          },
+          entity: {
+            type: 'string',
+            description: 'Buscar por pessoa/projeto específico (opcional).',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
 ];
 
 function relaxToolNumericMinimums() {
@@ -543,6 +694,15 @@ async function executeTaskCreate(args, userId) {
 
   if (error) throw new Error(`Falha ao criar tarefa: ${error.message}`);
 
+  // Track behavioral event
+  trackEvent(userId, 'task_created', {
+    task_id: data.id,
+    priority: data.priority,
+    has_due_date: !!data.due_date,
+    has_timer: !!data.timer_at,
+    subtask_count: data.subtasks?.length || 0,
+  }).catch(() => {});
+
   const priorityLabel = PRIORITY_LABEL[data.priority] || 'média';
   const dateLabel = humanizeDate(data.due_date);
   const subtaskCount = data.subtasks?.length || 0;
@@ -721,6 +881,27 @@ async function executeTaskUpdate(args, userId) {
     : rest.timer_at
       ? ` Timer configurado — vou avisar no WhatsApp quando chegar a hora.`
       : '';
+
+  // Track behavioral events for status changes
+  if (rest.status === 'done') {
+    trackEvent(userId, 'task_completed', {
+      task_id: data.id,
+      task_title: data.title,
+      priority: data.priority,
+      was_overdue: data.due_date ? data.due_date < getTodayISO() : false,
+      days_until_due: data.due_date ? Math.ceil((new Date(data.due_date) - new Date(getTodayISO())) / (1000 * 60 * 60 * 24)) : null,
+    }).catch(() => {});
+  } else if (rest.due_date && rest.due_date !== data.due_date) {
+    trackEvent(userId, 'task_rescheduled', {
+      task_id: data.id,
+      task_title: data.title,
+      old_due_date: data.due_date,
+      new_due_date: rest.due_date,
+      postpone_days: data.due_date && rest.due_date
+        ? Math.ceil((new Date(rest.due_date) - new Date(data.due_date)) / (1000 * 60 * 60 * 24))
+        : 0,
+    }).catch(() => {});
+  }
 
   return {
     success: true,
@@ -1062,6 +1243,180 @@ async function executeSubtaskToggle(args, userId) {
   };
 }
 
+// ── Memória de Longo Prazo & Segundo Cérebro ────────────────────────────────
+
+async function executeMemorySave(args, userId) {
+  const { memory_type, content, summary, entities, tags, importance } = args;
+
+  if (!content) {
+    return { success: false, _hint: 'Conteúdo da memória é obrigatório. Pergunte o que o usuário quer guardar.' };
+  }
+
+  const result = await saveMemory(userId, {
+    memoryType: memory_type || 'semantic',
+    content,
+    summary: summary || content.substring(0, 100),
+    entities: entities || [],
+    tags: tags || [],
+    importance: importance || 0.5,
+    sourceMessage: content,
+  });
+
+  if (!result) {
+    return { success: false, _hint: 'Erro ao salvar memória. Diga ao usuário para tentar novamente.' };
+  }
+
+  return {
+    success: true,
+    _hint: `Memória salva: "${summary || content.substring(0, 50)}". Confirme ao usuário de forma natural que você vai lembrar disso. Ex: "Anotado, vou lembrar disso!" ou "Guardei essa informação, ${args._userName || 'pode contar comigo'}!"`,
+  };
+}
+
+async function executeMemoryRecall(args, userId) {
+  const { query, memory_type, entity_name } = args;
+
+  let results = [];
+
+  if (entity_name) {
+    results = await recallByEntity(userId, entity_name, 5);
+  } else {
+    results = await recallMemories(userId, {
+      query: query || '',
+      memoryType: memory_type || null,
+      limit: 5,
+    });
+  }
+
+  // Se não encontrou, tenta buscar por entidade com o query
+  if (results.length === 0 && query) {
+    results = await recallByEntity(userId, query, 3);
+  }
+
+  // Também busca entidades relevantes
+  let entityInfo = [];
+  if (entity_name || query) {
+    entityInfo = await getEntities(userId, { query: entity_name || query, limit: 3 });
+  }
+
+  if (results.length === 0 && entityInfo.length === 0) {
+    return {
+      success: true,
+      found: false,
+      _hint: `Não encontrei nenhuma memória sobre "${query || entity_name}". Diga ao usuário de forma natural: "Não me lembro de nada sobre isso. Quer me contar pra eu guardar?"`,
+    };
+  }
+
+  const memoriesFormatted = results.map(m => ({
+    type: m.memory_type,
+    content: m.content,
+    date: m.created_at,
+    entities: m.entities,
+  }));
+
+  const entitiesFormatted = entityInfo.map(e => ({
+    name: e.name,
+    type: e.entity_type,
+    description: e.description,
+    mentions: e.mention_count,
+  }));
+
+  return {
+    success: true,
+    found: true,
+    memories: memoriesFormatted,
+    entities: entitiesFormatted,
+    _hint: `Encontrei ${results.length} memória(s) e ${entityInfo.length} entidade(s) sobre "${query || entity_name}". Use essas informações para responder ao usuário de forma NATURAL — como se você realmente lembrasse. Ex: "Sim, lembro! Você me contou que..." NUNCA liste memórias como itens técnicos. Integre na conversa.`,
+  };
+}
+
+async function executeKnowledgeSave(args, userId) {
+  const { category, title, content, entities, tags, pinned } = args;
+
+  if (!title || !content) {
+    return { success: false, _hint: 'Título e conteúdo são obrigatórios. Pergunte o que o usuário quer anotar.' };
+  }
+
+  const result = await saveKnowledge(userId, {
+    category: category || 'note',
+    title,
+    content,
+    entities: entities || [],
+    tags: tags || [],
+    pinned: pinned || false,
+    source: 'whatsapp',
+  });
+
+  if (!result) {
+    return { success: false, _hint: 'Erro ao salvar no segundo cérebro. Tente novamente.' };
+  }
+
+  const categoryLabels = {
+    note: 'Anotação',
+    idea: 'Ideia',
+    reference: 'Referência',
+    decision: 'Decisão',
+    contact: 'Contato',
+    routine: 'Rotina',
+  };
+
+  return {
+    success: true,
+    entry_title: title,
+    category_label: categoryLabels[category] || 'Nota',
+    pinned: pinned || false,
+    _hint: `Salvo no segundo cérebro como ${categoryLabels[category] || 'nota'}: "${title}"${pinned ? ' (fixado — sempre visível)' : ''}. Confirme ao usuário de forma natural. Ex: "Guardei! Quando precisar, é só perguntar." NUNCA use emojis ou jargão técnico.`,
+  };
+}
+
+async function executeKnowledgeSearch(args, userId) {
+  const { query, category, entity } = args;
+
+  const results = await searchKnowledge(userId, {
+    query: query || '',
+    category: category || null,
+    entity: entity || null,
+    limit: 5,
+  });
+
+  if (results.length === 0) {
+    // Se buscou por pessoa, tenta contexto da pessoa
+    if (entity) {
+      const personCtx = await getPersonContext(userId, entity);
+      if (personCtx.entity || personCtx.knowledge.length > 0 || personCtx.memories.length > 0) {
+        return {
+          success: true,
+          found: true,
+          person_context: personCtx,
+          _hint: `Encontrei informações sobre "${entity}". Use o person_context para montar uma resposta natural sobre essa pessoa/projeto. Integre as informações como se você conhecesse esse contexto.`,
+        };
+      }
+    }
+
+    return {
+      success: true,
+      found: false,
+      _hint: `Não encontrei nada sobre "${query || entity}" no segundo cérebro. Diga ao usuário: "Não tenho nada anotado sobre isso. Quer que eu guarde alguma informação?"`,
+    };
+  }
+
+  const formatted = results.map(entry => ({
+    title: entry.title,
+    category: entry.category,
+    content: entry.content,
+    tags: entry.tags,
+    date: entry.created_at,
+    pinned: entry.pinned,
+  }));
+
+  return {
+    success: true,
+    found: true,
+    entries: formatted,
+    count: results.length,
+    _hint: `Encontrei ${results.length} entrada(s) no segundo cérebro sobre "${query || entity}". Apresente as informações de forma NATURAL e organizada. Se for uma consulta específica, dê a resposta direta. Se listar, use formato legível. NUNCA mostre JSON ou IDs.`,
+  };
+}
+
 // ── Dispatcher central ────────────────────────────────────────────────────────
 
 /**
@@ -1134,6 +1489,10 @@ export async function executeTool(name, args, context) {
       case 'TaskDashboard': return await executeTaskDashboard(normalizedArgs, context.userId);
       case 'TaskBatchCreate': return await executeTaskBatchCreate(normalizedArgs, context.userId);
       case 'SubtaskToggle': return await executeSubtaskToggle(normalizedArgs, context.userId);
+      case 'MemorySave': return await executeMemorySave(normalizedArgs, context.userId);
+      case 'MemoryRecall': return await executeMemoryRecall(normalizedArgs, context.userId);
+      case 'KnowledgeSave': return await executeKnowledgeSave(normalizedArgs, context.userId);
+      case 'KnowledgeSearch': return await executeKnowledgeSearch(normalizedArgs, context.userId);
       default: return { success: false, _hint: `Ferramenta "${name}" não existe. Informe ao usuário que não entendeu o pedido.` };
     }
   } catch (err) {
