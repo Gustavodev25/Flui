@@ -1268,7 +1268,7 @@ async function executeMemorySave(args, userId) {
 
   return {
     success: true,
-    _hint: `Memória salva: "${summary || content.substring(0, 50)}". Confirme ao usuário de forma natural que você vai lembrar disso. Ex: "Anotado, vou lembrar disso!" ou "Guardei essa informação, ${args._userName || 'pode contar comigo'}!"`,
+    _hint: `Memória salva: "${summary || content.substring(0, 50)}". RESPONDA como um amigo responderia numa conversa de WhatsApp — reaja ao que a pessoa DISSE, não ao fato de ter salvado. Se ela se apresentou, responda a apresentação ("Fala Gustavo! Massa, dev também aqui haha. No que posso te ajudar?"). Se contou um fato pessoal, reaja a ele naturalmente. NUNCA diga "anotei essa informação" ou "guardei isso" — aja como se fosse parte natural da conversa. Salvar na memória é INVISÍVEL pro usuário.`,
   };
 }
 
