@@ -460,19 +460,44 @@ const CREATION_TRIGGERS = [
   /\bme\s+lembr/i,           // me lembra, me lembrar
   /\bme\s+avis/i,            // me avisa
   /\bnão\s+deixa\s+(eu\s+)?esquecer/i,
-  /\banota\s+(aí|isso|pra mim)?/i,
-  /\bregistr/i,
-  /\bpreciso\s+(fazer|de|comprar|ligar|ir|mais\s+tarde|criar|mandar|enviar|resolver|terminar|come[cç]ar|preparar)/i,
+  /\banota\s+(aí|isso|pra mim)\b/i,   // "anota aí", "anota isso" (precisa do complemento)
+  /\bregistra\b/i,            // "registra" (verbo imperativo, não "registrar" em contexto genérico)
+  /\bpreciso\s+(fazer|de|comprar|ligar|ir|criar|mandar|enviar|resolver|terminar|come[cç]ar|preparar)/i,
   /\btenho\s+que/i,
   /\btenho\s+uma\s+tarefa/i,
   /\bcri(a|ar|ei)\s+(uma\s+)?tarefa/i,
-  /\badiciona(r|i)?/i,
+  /\badiciona(r)?\s+(uma\s+)?tarefa/i,  // "adiciona tarefa" (precisa de "tarefa" junto)
   /\blembr(ar|e)\s+(de|que)/i,
-  /\bsalva(\s+isso|\s+a[ií])?/i,
+  /\bsalva\s+(isso|a[ií])\b/i,  // Só "salva isso" ou "salva aí" (não "salvar" genérico)
   /\bnão\s+(me\s+)?esquecer/i,
 ];
 
+// Padrões que indicam conversa casual / NÃO é pedido de criação de tarefa
+const CONVERSATIONAL_PATTERNS = [
+  /\b(você|voce|vc)\s+(sabe|pode|consegue|é|eh)\b/i,  // "você sabe...", "você pode..."
+  /\b(fala|oi|eai|e\s+a[ií]|opa|salve|bom\s+dia|boa\s+tarde|boa\s+noite)\b/i,  // saudações
+  /\b(como\s+vai|tudo\s+(bem|certo|joia|tranquilo))\b/i,
+  /\b(acabei\s+de|eu\s+fiz|eu\s+subi|fiz\s+uma)\b/i,  // relatando algo que JÁ fez
+  /\b(o\s+que\s+(você|vc)\s+(acha|pensa))\b/i,
+  /\b(estou\s+(falando|dizendo|contando|explicando))\b/i,
+  /\b(não\s+estou\s+falando|não\s+estou\s+pedindo)\b/i,
+  /\b(corrige|corrija)\b/i,  // pedindo correção, não tarefa
+];
+
+function isConversationalMessage(message) {
+  // Mensagens longas (>200 chars) com tom de conversa são provavelmente papo, não comando
+  const isLong = message.length > 200;
+  const matchesConversational = CONVERSATIONAL_PATTERNS.some(re => re.test(message));
+
+  if (matchesConversational) return true;
+  // Mensagem muito longa sem verbos imperativos claros = provavelmente conversa
+  if (isLong && !/(^|\.\s*)(cria|anota|registra|salva|adiciona|me\s+lembra)\b/i.test(message)) return true;
+  return false;
+}
+
 function isCreationIntent(message) {
+  // Se é claramente conversa casual, NÃO é intenção de criação
+  if (isConversationalMessage(message)) return false;
   return CREATION_TRIGGERS.some(re => re.test(message));
 }
 
