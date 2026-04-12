@@ -149,7 +149,7 @@ export async function analyzeAndUpdateProfile(userId) {
       common_postpone_days: calculateCommonPostponeDays(rescheduleEvents),
     };
 
-    // ── Estilo de comunicação ───────────────────────────────────────────
+    // ── Estilo de comunicação + Perfil de tom ────────────────────────────
     const messageEvents = events.filter(e => e.event_type === 'message_sent');
     const avgMessageLength = messageEvents.length > 0
       ? messageEvents.reduce((sum, e) => sum + (e.event_data?.message_length || 0), 0) / messageEvents.length
@@ -158,6 +158,9 @@ export async function analyzeAndUpdateProfile(userId) {
     let communicationStyle = 'balanced';
     if (avgMessageLength < 30) communicationStyle = 'concise';
     else if (avgMessageLength > 80) communicationStyle = 'detailed';
+
+    // Analisa tom real das mensagens do usuário
+    const toneProfile = analyzeTone(messageEvents);
 
     // ── Tempo médio de resposta ─────────────────────────────────────────
     const responseEvents = events.filter(e => e.event_type === 'message_response');
@@ -185,6 +188,7 @@ export async function analyzeAndUpdateProfile(userId) {
       peak_hours: peakHours,
       energy_patterns: energyPatterns,
       communication_style: communicationStyle,
+      tone_profile: toneProfile,
       ideal_cadence_minutes: idealCadence,
       avg_daily_completions: Math.round(avgDailyCompletions * 10) / 10,
       productive_days: productiveDays,
@@ -278,10 +282,6 @@ export async function getProfileContext(userId) {
     lines.push(`Dias mais produtivos: ${top2.map(d => dayNames[d.day]).join(', ')}`);
   }
 
-  // Estilo de comunicação
-  const styleMap = { concise: 'direto e breve', detailed: 'detalhado', balanced: 'equilibrado' };
-  lines.push(`Estilo de comunicacao: ${styleMap[profile.communication_style] || 'equilibrado'}`);
-
   // Procrastinação
   if (profile.procrastination_patterns?.avg_reschedules > 0.5) {
     lines.push(`Tendencia a adiar: ${Math.round(profile.procrastination_patterns.avg_reschedules * 100)}% das tarefas sao reagendadas`);
@@ -307,9 +307,72 @@ export async function getProfileContext(userId) {
     lines.push(`Recorde de streak: ${profile.max_streak} dias consecutivos`);
   }
 
+  // ── Perfil de tom (ESPELHAMENTO DE COMUNICAÇÃO) ──────────────────────
+  const tone = profile.tone_profile;
+  if (tone && typeof tone === 'object') {
+    lines.push('');
+    lines.push('═══ TOM DE VOZ DESTE USUARIO (ESPELHE!) ═══');
+
+    // Formalidade
+    if (tone.formality <= 0.2) {
+      lines.push('FORMALIDADE: Este usuario fala de forma MUITO INFORMAL. Use girias, abreviacoes, tom de conversa entre amigos intimos. Nada de "por favor", "gostaria" — fale como parceiro.');
+    } else if (tone.formality <= 0.4) {
+      lines.push('FORMALIDADE: Este usuario e INFORMAL. Tom descontraido, linguagem de WhatsApp. Pode usar girias leves e abreviacoes.');
+    } else if (tone.formality >= 0.7) {
+      lines.push('FORMALIDADE: Este usuario e FORMAL. Use linguagem educada, evite girias. Mantenha tom profissional mas nao robotico.');
+    } else {
+      lines.push('FORMALIDADE: Este usuario e equilibrado — nem muito formal, nem muito informal. Mantenha tom natural e amigavel.');
+    }
+
+    // Nível de gíria
+    if (tone.slang_level >= 0.6 && tone.vocab_samples?.length > 0) {
+      lines.push(`GIRIAS QUE ELE USA (use as mesmas!): ${tone.vocab_samples.join(', ')}`);
+      lines.push('REGRA: Use essas girias naturalmente nas respostas. Se ele diz "massa", voce diz "massa". Se ele diz "bora", voce diz "bora".');
+    } else if (tone.slang_level >= 0.3 && tone.vocab_samples?.length > 0) {
+      lines.push(`GIRIAS LEVES DO USUARIO: ${tone.vocab_samples.join(', ')} — use algumas dessas de vez em quando pra soar natural.`);
+    }
+
+    // Humor
+    if (tone.humor >= 0.6) {
+      lines.push('HUMOR: Este usuario usa MUITO humor, risadas (kk, haha). Seja leve, faca piadas, responda risadas com risadas quando couber.');
+    } else if (tone.humor >= 0.3) {
+      lines.push('HUMOR: Este usuario tem senso de humor moderado. Pode ser leve e bem-humorado quando o contexto permitir.');
+    } else {
+      lines.push('HUMOR: Este usuario e mais direto, pouco humor nas mensagens. Seja objetivo, sem forcar piadas.');
+    }
+
+    // Verbosidade / tamanho das respostas
+    if (tone.verbosity <= 0.25) {
+      lines.push('TAMANHO: Este usuario manda mensagens MUITO CURTAS. Responda com no maximo 1-2 frases. Direto ao ponto.');
+    } else if (tone.verbosity <= 0.5) {
+      lines.push('TAMANHO: Este usuario e conciso. Responda de forma breve, 1-3 frases no maximo.');
+    } else if (tone.verbosity >= 0.7) {
+      lines.push('TAMANHO: Este usuario escreve bastante. Pode elaborar um pouco mais nas respostas, mas ainda assim seja objetivo.');
+    }
+
+    // Pontuação
+    if (tone.punctuation_style === 'relaxed') {
+      lines.push('PONTUACAO: Este usuario quase nao usa pontuacao. Nao force pontos finais e exclamacoes em toda frase — seja relaxado tambem.');
+    } else if (tone.punctuation_style === 'emphatic') {
+      lines.push('PONTUACAO: Este usuario usa bastante exclamacao! Pode ser mais enfatico e energetico nas respostas.');
+    }
+
+    // Saudação
+    if (tone.greeting_style === 'casual') {
+      lines.push('SAUDACAO: Quando cumprimentar, use "E ai", "Fala", "Opa" — nada de "Bom dia, como posso ajudar?".');
+    } else if (tone.greeting_style === 'polite') {
+      lines.push('SAUDACAO: Este usuario prefere saudacoes educadas. Use "Bom dia!", "Boa tarde!", "Ola!" quando apropriado.');
+    } else if (tone.greeting_style === 'minimal') {
+      lines.push('SAUDACAO: Este usuario vai direto ao assunto. Nao precisa de saudacao elaborada — pode ir direto tambem.');
+    }
+
+    lines.push('');
+    lines.push('REGRA SUPREMA DE TOM: Voce DEVE soar como se fosse a MESMA PESSOA falando de volta. Se ele e informal, voce e informal. Se ele e formal, voce e formal. NUNCA quebre o espelhamento.');
+  }
+
   lines.push('');
   lines.push('COMO USAR ESSE PERFIL:');
-  lines.push('- Adapte seu tom ao estilo de comunicacao do usuario');
+  lines.push('- ESPELHE o tom de voz do usuario em todas as respostas');
   lines.push('- Mencione progresso/streak se "streak" ou "progress" sao gatilhos');
   lines.push('- Sugira tarefas nos horarios de pico quando relevante');
   lines.push('- Se o usuario tende a adiar, seja gentilmente proativo sobre prazos');
@@ -434,6 +497,125 @@ function calculateIdealCadence(events) {
   gaps.sort((a, b) => a - b);
   const median = gaps[Math.floor(gaps.length / 2)];
   return Math.max(30, Math.min(360, Math.round(median)));
+}
+
+// ── Análise de tom do usuário ─────────────────────────────────────────────────
+
+const INFORMAL_MARKERS = [
+  'fala', 'falou', 'eai', 'e aí', 'e ai', 'opa', 'salve', 'tamo junto',
+  'tmj', 'vlw', 'blz', 'beleza', 'massa', 'show', 'dahora', 'top',
+  'bora', 'po', 'pô', 'mano', 'cara', 'véi', 'vei', 'brother',
+  'suave', 'tranquilo', 'de boa', 'firmeza', 'pode crer', 'haha',
+  'kkk', 'kk', 'rs', 'rsrs', 'huahua', 'kkkk', 'lol',
+  'tá', 'ta', 'to', 'tô', 'pq', 'tb', 'tbm', 'né', 'ne',
+  'vc', 'ce', 'cê', 'aí', 'ai', 'ae', 'aham', 'uhum',
+  'ata', 'saquei', 'boto fé', 'partiu', 'foda', 'irado',
+];
+
+const FORMAL_MARKERS = [
+  'senhor', 'senhora', 'por favor', 'por gentileza', 'prezado',
+  'cordialmente', 'atenciosamente', 'gostaria', 'poderia',
+  'seria possível', 'agradeço', 'informo', 'solicito',
+];
+
+const HUMOR_MARKERS = [
+  'haha', 'kkk', 'kk', 'kkkk', 'rs', 'rsrs', 'huahua', 'lol',
+  'zueira', 'zoeira', 'brincadeira', 'piada', 'engraçado',
+  'rir', 'morri', 'rachei', 'hehe', 'ksks',
+];
+
+function analyzeTone(messageEvents) {
+  const defaultTone = {
+    formality: 0.5,
+    slang_level: 0.5,
+    humor: 0.3,
+    verbosity: 0.5,
+    punctuation_style: 'standard',
+    greeting_style: 'casual',
+    vocab_samples: [],
+    avg_msg_words: 10,
+  };
+
+  if (!messageEvents?.length || messageEvents.length < 3) return defaultTone;
+
+  // Coleta textos das mensagens
+  const texts = messageEvents
+    .map(e => e.event_data?.message_text || '')
+    .filter(t => t.length > 2);
+
+  if (texts.length < 3) return defaultTone;
+
+  const allText = texts.join(' ').toLowerCase();
+  const allWords = allText.split(/\s+/).filter(w => w.length > 0);
+  const totalMessages = texts.length;
+
+  // ── Formalidade (0 = super informal, 1 = formal) ──────────────────────
+  let informalCount = 0;
+  let formalCount = 0;
+  for (const marker of INFORMAL_MARKERS) {
+    const regex = new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+    const matches = allText.match(regex);
+    if (matches) informalCount += matches.length;
+  }
+  for (const marker of FORMAL_MARKERS) {
+    const regex = new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+    const matches = allText.match(regex);
+    if (matches) formalCount += matches.length;
+  }
+  const totalMarkers = informalCount + formalCount || 1;
+  const formality = Math.max(0, Math.min(1, formalCount / totalMarkers));
+
+  // ── Nível de gíria (0-1) ──────────────────────────────────────────────
+  const slangLevel = Math.min(1, informalCount / (totalMessages * 2));
+
+  // ── Humor (0-1) ───────────────────────────────────────────────────────
+  let humorCount = 0;
+  for (const marker of HUMOR_MARKERS) {
+    const regex = new RegExp(`${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
+    const matches = allText.match(regex);
+    if (matches) humorCount += matches.length;
+  }
+  const humor = Math.min(1, humorCount / (totalMessages * 0.5));
+
+  // ── Verbosidade (0-1) ─────────────────────────────────────────────────
+  const avgWords = allWords.length / totalMessages;
+  const verbosity = Math.min(1, avgWords / 40); // 40 palavras = 1.0
+
+  // ── Estilo de pontuação ───────────────────────────────────────────────
+  const exclamations = (allText.match(/!/g) || []).length;
+  const periods = (allText.match(/\./g) || []).length;
+  const noPunctuation = texts.filter(t => !/[.!?]$/.test(t.trim())).length;
+  let punctuationStyle = 'standard';
+  if (noPunctuation / totalMessages > 0.6) punctuationStyle = 'relaxed';
+  else if (exclamations / totalMessages > 1.5) punctuationStyle = 'emphatic';
+
+  // ── Estilo de saudação ────────────────────────────────────────────────
+  const casualGreetings = (allText.match(/\b(fala|eai|e aí|opa|salve|oi)\b/g) || []).length;
+  const politeGreetings = (allText.match(/\b(bom dia|boa tarde|boa noite|olá|ola)\b/g) || []).length;
+  const minimalGreetings = texts.filter(t => t.trim().split(/\s+/).length <= 2).length;
+  let greetingStyle = 'casual';
+  if (politeGreetings > casualGreetings) greetingStyle = 'polite';
+  else if (minimalGreetings / totalMessages > 0.5) greetingStyle = 'minimal';
+
+  // ── Vocabulário amostral (gírias reais que o usuário usa) ─────────────
+  const vocabSamples = [];
+  for (const marker of INFORMAL_MARKERS) {
+    const regex = new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+    if (regex.test(allText) && vocabSamples.length < 10) {
+      vocabSamples.push(marker);
+    }
+  }
+
+  return {
+    formality: Math.round(formality * 100) / 100,
+    slang_level: Math.round(slangLevel * 100) / 100,
+    humor: Math.round(humor * 100) / 100,
+    verbosity: Math.round(verbosity * 100) / 100,
+    punctuation_style: punctuationStyle,
+    greeting_style: greetingStyle,
+    vocab_samples: vocabSamples,
+    avg_msg_words: Math.round(avgWords),
+  };
 }
 
 // ── Limpeza de eventos antigos ───────────────────────────────────────────────

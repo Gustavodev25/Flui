@@ -724,6 +724,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     const turnDuration = Date.now() - turnStart;
     trackEvent(session.userId, 'message_sent', {
       message_length: cleanMessage.length,
+      message_text: cleanMessage.substring(0, 200),
       from_audio: fromAudio,
     }).catch(() => {});
     trackEvent(session.userId, 'message_response', {
