@@ -1099,7 +1099,10 @@ export async function queryEngineLoop(
   userName = 'Usuário',
   { onAck, fromAudio = false, returnTelemetry = false, sourceChannel = 'whatsapp' } = {}
 ) {
-  const shouldAck = (fromAudio || hasMultipleTasks(userMessage)) && typeof onAck === 'function';
+  // Só envia ack para mensagens que envolvem ação (criação de tarefas, múltiplos itens)
+  // Saudações, apresentações e conversa geral NÃO precisam de ack
+  const isActionMessage = isCreationIntent(userMessage) || hasMultipleTasks(userMessage);
+  const shouldAck = isActionMessage && (fromAudio || hasMultipleTasks(userMessage)) && typeof onAck === 'function';
   const llmOptions = fromAudio
     ? {
         turnBudgetMs: Number(process.env.AUDIO_LLM_TURN_BUDGET_MS || 90000),
