@@ -633,7 +633,7 @@ const Tasks: React.FC = () => {
   const { user } = useAuth()
   const { isWorkspaceMember, workspaceMembership, hasPulse } = useSubscription()
   const isAdmin = hasPulse && !isWorkspaceMember
-  const isGuest = isWorkspaceMember && !hasPulse
+  const isGuest = isWorkspaceMember
   const [viewMode, setViewMode] = useState<'board' | 'table'>('board')
   const [taskView, setTaskView] = useState<'personal' | 'workspace'>(isGuest ? 'workspace' : 'personal')
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -719,6 +719,11 @@ const Tasks: React.FC = () => {
     }
   }, [mapDbTask, user, taskView])
 
+  // Garante que convidados fiquem sempre na view workspace (dados de contexto são assíncronos)
+  useEffect(() => {
+    if (isWorkspaceMember) setTaskView('workspace')
+  }, [isWorkspaceMember])
+
   // Recarrega quando muda de view
   useEffect(() => {
     fetchTasks(taskView)
@@ -789,6 +794,10 @@ const Tasks: React.FC = () => {
 
   const handleAddTask = async (newTask: any) => {
     try {
+      // Convidados só podem criar tarefas de workspace
+      if (isWorkspaceMember) {
+        newTask = { ...newTask, visibility: 'workspace' }
+      }
       const isWorkspaceTask = newTask.visibility === 'workspace'
 
       if (editingTask) {
@@ -1378,7 +1387,7 @@ const Tasks: React.FC = () => {
           onCancel={() => { setIsModalOpen(false); setEditingTask(null); }}
           isEditing={!!editingTask}
           hasWorkspaceAccess={isAdmin ? hasWorkspaceAccess : false}
-          defaultVisibility={isGuest ? 'workspace' : (taskView === 'workspace' ? 'workspace' : 'personal')}
+          defaultVisibility={isWorkspaceMember ? 'workspace' : (taskView === 'workspace' ? 'workspace' : 'personal')}
           workspaceName={isWorkspaceMember ? (workspaceMembership?.ownerName || 'Workspace') : undefined}
         />
       </Modal>

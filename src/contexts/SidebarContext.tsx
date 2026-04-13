@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import type { ReactNode } from 'react'
 
 interface SidebarContextType {
@@ -24,9 +24,9 @@ export const SidebarProvider: React.FC<{ children: ReactNode }> = ({ children })
     localStorage.setItem(STORAGE_KEY, JSON.stringify(isCollapsed))
   }, [isCollapsed])
 
-  const toggleCollapse = () => setIsCollapsed((prev: boolean) => !prev)
-  const toggleMobileMenu = () => setIsMobileOpen((prev: boolean) => !prev)
-  const closeMobileMenu = () => setIsMobileOpen(false)
+  const toggleCollapse = useCallback(() => setIsCollapsed((prev: boolean) => !prev), [])
+  const toggleMobileMenu = useCallback(() => setIsMobileOpen((prev: boolean) => !prev), [])
+  const closeMobileMenu = useCallback(() => setIsMobileOpen(false), [])
 
   return (
     <SidebarContext.Provider value={{ 
