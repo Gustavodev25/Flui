@@ -72,4 +72,4 @@ export const DropdownItem: React.FC<DropdownItemProps> = ({ icon, label, onClick
   )
 }
 
-export const DropdownDivider = () => <div className="h-[1px] bg-[#f1f1f0] my-1 mx-1" />
+export const DropdownDivider = () => <div className="h-[1px] bg-[#f1f1f0] my-1" />
