@@ -584,9 +584,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                         <div className="flex border-b border-[#f1f1f0] pb-6 gap-8">
                           <div className="space-y-1">
                             <p className="text-[11px] font-bold text-[#37352f]/50">Próxima renovação</p>
-                            <p className="text-sm font-semibold text-[#37352f]/80">
-                              {subscription.current_period_end ? new Date(subscription.current_period_end).toLocaleDateString('pt-BR') : 'Renovação automática'}
-                            </p>
+                            {subscription.current_period_end ? (() => {
+                              const renewDate = new Date(subscription.current_period_end)
+                              const today = new Date()
+                              today.setHours(0, 0, 0, 0)
+                              renewDate.setHours(0, 0, 0, 0)
+                              const daysLeft = Math.ceil((renewDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+                              const badgeColor = daysLeft <= 3
+                                ? 'bg-red-100 text-red-600'
+                                : daysLeft <= 7
+                                  ? 'bg-amber-100 text-amber-600'
+                                  : 'bg-emerald-100 text-emerald-600'
+                              return (
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-semibold text-[#37352f]/80">
+                                    {new Date(subscription.current_period_end).toLocaleDateString('pt-BR')}
+                                  </p>
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${badgeColor}`}>
+                                    <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+                                    {daysLeft <= 0 ? 'Hoje' : `${daysLeft}d`}
+                                  </span>
+                                </div>
+                              )
+                            })() : (
+                              <p className="text-sm font-semibold text-[#37352f]/80">Renovação automática</p>
+                            )}
                           </div>
                           <div className="space-y-1">
                             <p className="text-[11px] font-bold text-[#37352f]/50">Bandeira do Cartão</p>
