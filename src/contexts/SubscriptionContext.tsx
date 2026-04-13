@@ -19,6 +19,12 @@ interface SubscriptionContextValue {
   isWorkspaceMember: boolean
   /** Dados do workspace ao qual pertence (se for membro) */
   workspaceMembership: WorkspaceMembership | null
+  /** True se o usuário tem plano próprio ativo (independente do workspace) */
+  hasOwnPlan: boolean
+  /** True quando o usuário optou por usar seu próprio plano em vez do workspace */
+  useOwnPlan: boolean
+  /** Alterna entre plano próprio e workspace */
+  togglePlanMode: () => void
   /** Raw da tabela subscriptions (pode ser null se ainda não assinou) */
   subscription: any
   /** True enquanto os dados ainda estão sendo buscados */
@@ -33,6 +39,9 @@ const SubscriptionContext = createContext<SubscriptionContextValue>({
   planId: null,
   isWorkspaceMember: false,
   workspaceMembership: null,
+  hasOwnPlan: false,
+  useOwnPlan: false,
+  togglePlanMode: () => {},
   subscription: null,
   loading: true,
   refresh: () => {},
@@ -46,8 +55,10 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const [workspaceMembership, setWorkspaceMembership] = useState<WorkspaceMembership | null>(null)
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
+  const [useOwnPlan, setUseOwnPlan] = useState(false)
 
   const refresh = () => setTick(t => t + 1)
+  const togglePlanMode = () => setUseOwnPlan(v => !v)
 
   useEffect(() => {
     if (!user) {
@@ -78,10 +89,20 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     })
   }, [user, tick])
 
-  // Plano efetivo: se for membro de workspace, usa o plano do dono
   const isWorkspaceMember = !!workspaceMembership
-  const effectivePlanId = isWorkspaceMember ? workspaceMembership!.planId : subscription?.plan_id
-  const effectiveStatus = isWorkspaceMember ? 'active' : subscription?.status
+
+  // Verifica se o usuário tem plano próprio ativo (independente do workspace)
+  const hasOwnPlan = subscription?.status === 'active' &&
+    ['flow', 'pulse'].includes(subscription?.plan_id ?? '')
+
+  // Plano efetivo: se for membro com plano próprio e optou por usar o próprio, usa o dele
+  const shouldUseOwn = isWorkspaceMember && useOwnPlan && hasOwnPlan
+  const effectivePlanId = (!isWorkspaceMember || shouldUseOwn)
+    ? subscription?.plan_id
+    : workspaceMembership!.planId
+  const effectiveStatus = (!isWorkspaceMember || shouldUseOwn)
+    ? subscription?.status
+    : 'active'
 
   const hasFlow = effectiveStatus === 'active' && ['flow', 'pulse'].includes(effectivePlanId ?? '')
   const hasPulse = effectiveStatus === 'active' && effectivePlanId === 'pulse'
@@ -92,8 +113,11 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       hasFlow,
       hasPulse,
       planId,
-      isWorkspaceMember,
+      isWorkspaceMember: isWorkspaceMember && !shouldUseOwn,
       workspaceMembership,
+      hasOwnPlan,
+      useOwnPlan,
+      togglePlanMode,
       subscription,
       loading,
       refresh,

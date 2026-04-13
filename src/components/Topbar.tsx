@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import Avvvatars from 'avvvatars-react'
-import { Menu, User, CreditCard, LifeBuoy, LogOut, Star, ChevronRight } from 'lucide-react'
+import { Menu, User, CreditCard, LifeBuoy, LogOut, Star, ChevronRight, Repeat2 } from 'lucide-react'
 import { Dropdown, DropdownItem, DropdownDivider } from './ui/Dropdown'
 import { SettingsModal } from './SettingsModal'
 import { useSubscription } from '../contexts/SubscriptionContext'
@@ -19,7 +19,7 @@ export const Topbar: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'profile' | 'subscription'>('profile')
   const profileRef = useRef<HTMLDivElement>(null)
-  const { hasFlow, planId, isWorkspaceMember, workspaceMembership } = useSubscription()
+  const { hasFlow, planId, isWorkspaceMember, workspaceMembership, hasOwnPlan, useOwnPlan, togglePlanMode } = useSubscription()
   const [avatarError, setAvatarError] = useState(false)
 
   useEffect(() => {
@@ -158,11 +158,40 @@ export const Topbar: React.FC = () => {
               </div>
             </div>
             
+            {/* Switch de modo: próprio plano vs workspace */}
+            {isWorkspaceMember && hasOwnPlan && (
+              <>
+                <DropdownDivider />
+                <div
+                  onClick={togglePlanMode}
+                  className="flex items-center justify-between px-3 py-2.5 cursor-pointer hover:bg-[#f7f7f5] rounded-lg mx-1 transition-colors group"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Repeat2 size={14} className="text-[#37352f]/40 group-hover:text-[#37352f]/70 transition-colors" />
+                    <div className="flex flex-col">
+                      <span className="text-[12px] font-semibold text-[#37352f] leading-tight">
+                        {useOwnPlan ? 'Usar workspace' : 'Usar meu plano'}
+                      </span>
+                      <span className="text-[10px] text-[#37352f]/40 leading-tight">
+                        {useOwnPlan
+                          ? `Voltar para workspace de ${workspaceMembership?.ownerName}`
+                          : `Ativar seu plano ${planId === 'pulse' ? 'Pulse' : 'Flow'} pessoal`}
+                      </span>
+                    </div>
+                  </div>
+                  {/* Toggle pill */}
+                  <div className={`relative w-9 h-5 rounded-full transition-colors duration-200 flex-shrink-0 ${useOwnPlan ? 'bg-[#37352f]' : 'bg-[#e9e9e7]'}`}>
+                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${useOwnPlan ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                  </div>
+                </div>
+              </>
+            )}
+
             <DropdownDivider />
-            
-            <DropdownItem 
+
+            <DropdownItem
               icon={<User size={14} />}
-              label="Meu Perfil" 
+              label="Meu Perfil"
               onClick={() => { setIsDropdownOpen(false); setSettingsTab('profile'); setIsSettingsModalOpen(true) }} 
             />
             <DropdownItem 

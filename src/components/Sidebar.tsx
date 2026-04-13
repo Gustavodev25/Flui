@@ -9,9 +9,9 @@ import flowLogo from '../assets/logo/flow.svg'
 import { useAuth } from '../contexts/AuthContext'
 import Avvvatars from 'avvvatars-react'
 import { WorkspaceModal } from './WorkspaceModal'
-import { supabase } from '../lib/supabase'
 import { apiFetch } from '../lib/api'
 import { useState, useEffect, useRef } from 'react'
+import { useSubscription } from '../contexts/SubscriptionContext'
 
 const WHATSAPP_NUMBER = '5511925870754'
 const WHATSAPP_LINK = `https://wa.me/${WHATSAPP_NUMBER}`
@@ -107,13 +107,14 @@ const CollapseEdge: React.FC<CollapseEdgeProps> = ({ isCollapsed, onToggle }) =>
 export const Sidebar: React.FC = () => {
   const { user } = useAuth()
   const { isCollapsed, toggleCollapse, isMobileOpen, closeMobileMenu } = useSidebar()
+  const { hasFlow, hasPulse, isWorkspaceMember, workspaceMembership: ctxMembership, loading: subLoading } = useSubscription()
   const navigate = useNavigate()
   const location = useLocation()
-  const [subscription, setSubscription] = useState<any>(null)
-  const [workspaceMembership, setWorkspaceMembership] = useState<{ ownerName: string; ownerEmail: string; planId: string; workspaceName?: string } | null>(null)
   const [dataLoaded, setDataLoaded] = useState(false)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [ownerWorkspaceName, setOwnerWorkspaceName] = useState<string | null>(null)
+  // membership enriquecida com workspaceName (não está no contexto)
+  const [workspaceMembership, setWorkspaceMembership] = useState<{ ownerName: string; ownerEmail: string; planId: string; workspaceName?: string } | null>(null)
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const isMobile = !isDesktop
 
@@ -121,13 +122,7 @@ export const Sidebar: React.FC = () => {
     const fetchData = async () => {
       if (!user) return
 
-      // Carrega assinatura e membership em paralelo
-      const [subResult, membershipResult, wsNameResult] = await Promise.allSettled([
-        supabase
-          .from('subscriptions')
-          .select('status, plan_id')
-          .eq('user_id', user.id)
-          .maybeSingle(),
+      const [membershipResult, wsNameResult] = await Promise.allSettled([
         apiFetch<{ membership: { ownerName: string; ownerEmail: string; planId: string; workspaceName?: string } | null }>(
           '/api/workspace/my-membership',
           undefined,
@@ -136,7 +131,6 @@ export const Sidebar: React.FC = () => {
         apiFetch<{ name: string | null }>('/api/workspace/name', undefined, { userId: user.id })
       ])
 
-      if (subResult.status === 'fulfilled') setSubscription(subResult.value.data)
       if (membershipResult.status === 'fulfilled') setWorkspaceMembership(membershipResult.value.membership)
       if (wsNameResult.status === 'fulfilled') setOwnerWorkspaceName(wsNameResult.value.name || null)
       setDataLoaded(true)
@@ -144,13 +138,8 @@ export const Sidebar: React.FC = () => {
     fetchData()
   }, [user])
 
-  // Se for membro convidado, o plano vem do workspace — não da tabela subscriptions
-  const isWorkspaceMember = !!workspaceMembership
-  const effectivePlanId = isWorkspaceMember ? workspaceMembership!.planId : subscription?.plan_id
-  const effectiveStatus = isWorkspaceMember ? 'active' : subscription?.status
-
-  const hasFlow = effectiveStatus === 'active'
-  const hasPulse = effectiveStatus === 'active' && effectivePlanId === 'pulse'
+  // dataLoaded sincronizado com o contexto também
+  const isReady = dataLoaded && !subLoading
 
   // Fecha o menu mobile quando muda de rota
   useEffect(() => {
@@ -279,7 +268,7 @@ export const Sidebar: React.FC = () => {
       {/* Card inferior */}
       <div className="mt-auto mb-1 flex flex-col gap-2">
         <AnimatePresence mode="wait">
-          {location.pathname !== '/dashboard' && dataLoaded && (
+          {location.pathname !== '/dashboard' && isReady && (
             hasFlow ? (
               /* ── Usuário Flow: card do Lui ── */
               (isCollapsed && !isMobile) ? (
