@@ -659,13 +659,31 @@ async function resolveAssignedTo(userId, assignedToName, visibility) {
 async function executeTaskCreate(args, userId) {
   const parsed = taskCreateSchema.parse(args);
   const dueDateFixed = fixDueDate(parsed.due_date);
-  const visibility = parsed.visibility || 'personal';
+  let visibility = parsed.visibility || 'personal';
+  let isGuest = false;
+
+  // Verifica proativamente se é membro convidado
+  const { data: membership } = await supabase
+    .from('workspace_members')
+    .select('workspace_owner_id')
+    .eq('member_user_id', userId)
+    .maybeSingle();
+
+  if (membership) {
+    visibility = 'workspace';
+    isGuest = true;
+  }
 
   // Resolve workspace_owner_id se necessário
   const workspaceOwnerId = await resolveWorkspaceOwnerId(userId, visibility);
 
   // Resolve responsável por nome (se informado)
-  const assignedToId = await resolveAssignedTo(userId, parsed.assigned_to_name, visibility);
+  let assignedToId = await resolveAssignedTo(userId, parsed.assigned_to_name, visibility);
+
+  // Auto-atribui para o convidado caso não tenha atribuição explícita
+  if (isGuest && !assignedToId) {
+    assignedToId = userId;
+  }
 
   // Monta array de subtarefas no formato do banco (suporta timer por subtarefa)
   const now = Date.now();
@@ -1151,8 +1169,17 @@ async function executeTaskDashboard(args, userId) {
 async function executeTaskBatchCreate(args, userId) {
   const parsed = taskBatchCreateSchema.parse(args);
 
+  // Verifica proativamente se é membro convidado
+  const { data: membership } = await supabase
+    .from('workspace_members')
+    .select('workspace_owner_id')
+    .eq('member_user_id', userId)
+    .maybeSingle();
+
+  const isGuest = !!membership;
+
   // Resolve workspace_owner_id uma vez se alguma tarefa é workspace
-  const hasWorkspaceTask = parsed.tasks.some(t => t.visibility === 'workspace');
+  const hasWorkspaceTask = isGuest || parsed.tasks.some(t => t.visibility === 'workspace');
   const workspaceOwnerId = hasWorkspaceTask ? await resolveWorkspaceOwnerId(userId, 'workspace') : null;
 
   const insertData = parsed.tasks.map(t => {
@@ -1170,7 +1197,14 @@ async function executeTaskBatchCreate(args, userId) {
       ? new Date(Date.now() + t.timer_minutes * 60 * 1000).toISOString()
       : null;
 
-    const taskVisibility = t.visibility || 'personal';
+    let taskVisibility = t.visibility || 'personal';
+    let assignedToId = null;
+
+    if (isGuest) {
+      taskVisibility = 'workspace';
+      // Como não tem assigned_to_name em batch, auto-atribui todas ao guest
+      assignedToId = userId;
+    }
 
     return {
       user_id: userId,
@@ -1188,6 +1222,8 @@ async function executeTaskBatchCreate(args, userId) {
       whatsapp_message: parsed.whatsapp_message || null,
       visibility: taskVisibility,
       workspace_owner_id: taskVisibility === 'workspace' ? workspaceOwnerId : null,
+      assigned_to: assignedToId,
+      assigned_by: assignedToId ? userId : null,
     };
   });
 
