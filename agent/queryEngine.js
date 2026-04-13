@@ -484,6 +484,8 @@ const CREATION_TRIGGERS = [
   /\blembr(ar|e)\s+(de|que)/i,
   /\bsalva\s+(isso|a[ií])\b/i,  // Só "salva isso" ou "salva aí" (não "salvar" genérico)
   /\bnão\s+(me\s+)?esquecer/i,
+  /\b(quero|queria|gostaria\s+de)\s+(uma\s+)?tarefa\b/i,   // "queria uma tarefa pro Fernando"
+  /\btarefa\s+(pro|pra|para)\s+/i,                          // "tarefa pro Fernando", "tarefa pra equipe"
 ];
 
 // Padrões que indicam conversa casual / NÃO é pedido de criação de tarefa
@@ -509,12 +511,20 @@ function isConversationalMessage(message) {
   return false;
 }
 
+// Padrões fortes de criação que SEMPRE vencem a detecção conversacional,
+// mesmo com "Bom dia" ou "tudo bem?" no mesmo texto
+const STRONG_CREATION_OVERRIDES = [
+  /\bcri(a|ar|ei)\s+(uma\s+)?tarefa/i,           // "cria uma tarefa"
+  /\badiciona(r)?\s+(uma\s+)?tarefa/i,           // "adiciona tarefa"
+  /\b(quero|queria|gostaria\s+de)\s+(uma\s+)?tarefa\b/i,  // "queria uma tarefa pro Fernando"
+  /\btarefa\s+(pro|pra|para)\s+/i,                // "tarefa pro Fernando"
+  /\bme\s+lembr/i,                                // "me lembra de..."
+  /\bme\s+avis/i,                                 // "me avisa..."
+];
+
 function isCreationIntent(message) {
-  // Comandos explícitos de criação de tarefa sempre têm prioridade,
-  // mesmo quando acompanhados de saudação ("Bom dia, cria uma tarefa pra X")
-  if (/\bcri(a|ar|ei)\s+(uma\s+)?tarefa/i.test(message)) return true;
-  if (/\badiciona(r)?\s+(uma\s+)?tarefa/i.test(message)) return true;
-  if (/\bme\s+lembr/i.test(message) && /\bcri(a|ar)\b/i.test(message)) return true;
+  // Comandos explícitos sempre têm prioridade sobre saudações/conversa
+  if (STRONG_CREATION_OVERRIDES.some(re => re.test(message))) return true;
   // Se é claramente conversa casual SEM comando de criação, NÃO é intenção de criação
   if (isConversationalMessage(message)) return false;
   return CREATION_TRIGGERS.some(re => re.test(message));
@@ -551,11 +561,13 @@ function getSimpleTaskListRequest(message) {
   const hasQuestion = /\b(quais?|qual|listar?|lista|mostra|mostrar|ver|cad[eê]|cade|o\s+que\s+tenho)\b/.test(lower);
   const asksTasks = /\b(tarefas?|pendencias?|pendentes|afazeres?|coisas?\s+pra\s+fazer|tenho\s+pra\s+fazer|tenho\s+para\s+fazer)\b/.test(lower);
 
-  // Se tem "?" no final ou perto do final, já reforça que é uma pergunta se falar de tarefas
-  const hasQuestionMark = /\?/.test(lower);
+  // "?" só conta se estiver PERTO da menção de tarefas (ex: "quais tarefas?")
+  // NÃO conta "tudo bem?" seguido de "queria uma tarefa" — o "?" é da saudação
+  const hasQuestionMark = /tarefa[s]?\s*\?|pendente[s]?\s*\?|\?\s*$/.test(lower);
 
-  if (!((hasQuestion && asksTasks) || (hasQuestionMark && asksTasks))) return null;
+  // Intenção de criação SEMPRE tem prioridade sobre listagem
   if (isCreationIntent(message)) return null;
+  if (!((hasQuestion && asksTasks) || (hasQuestionMark && asksTasks))) return null;
 
   return {
     due_date: /\b(hoje|pra\s+hoje|para\s+hoje)\b/.test(lower) ? getTodayISO() : undefined,
