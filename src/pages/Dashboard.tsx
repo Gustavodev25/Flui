@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom'
 import luiLogo from '../assets/logo/lui.svg'
 import { apiFetch } from '../lib/api'
 import { supabase } from '../lib/supabase'
+import Avvvatars from 'avvvatars-react'
 
 // Componente que usa lottie-web diretamente via ref
 const LottieHand: React.FC = () => {
@@ -89,7 +90,13 @@ const Dashboard: React.FC = () => {
     const today = new Date().toISOString().split('T')[0]
     const cachedDate = localStorage.getItem('dailyQuoteDate')
     if (cachedDate === today) {
-      return localStorage.getItem('dailyQuote') || ""
+      const cached = localStorage.getItem('dailyQuote') || ""
+      // Invalida cache se parece um prompt/prefácio corrompido
+      if (cached.length > 120 || cached.includes('?') && cached.length > 60) {
+        localStorage.removeItem('dailyQuoteDate')
+        return ""
+      }
+      return cached
     }
     return ""
   })
@@ -105,23 +112,67 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
-        const { data: tasks, error } = await supabase
+        const { data: personalTasks, error } = await supabase
           .from('tasks')
-          .select('status, priority, created_at, title, due_date')
+          .select('*')
           .eq('user_id', user?.id)
+          .eq('visibility', 'personal')
           .order('created_at', { ascending: false })
 
         if (error) throw error
 
-        if (tasks) {
-          const newStats = {
-            todo: tasks.filter(t => t.status === 'todo').length,
-            doing: tasks.filter(t => t.status === 'doing').length,
-            done: tasks.filter(t => t.status === 'done').length,
+        let sharedTasks: any[] = []
+        try {
+          const result = await apiFetch<any>('/api/workspace/shared-tasks', undefined, { userId: user?.id })
+          if (result && result.tasks) {
+            sharedTasks = result.tasks
           }
-          setStats(newStats)
-          setRecentTasks(tasks.slice(0, 4))
+        } catch (e) {
+          console.error('Erro ao buscar tarefas do workspace', e)
         }
+
+        const allRawTasks = [...(personalTasks || []), ...sharedTasks]
+        const uniqueMap = new Map()
+        allRawTasks.forEach(t => uniqueMap.set(t.id, t))
+        const allTasks = Array.from(uniqueMap.values())
+
+        const mappedTasks = allTasks.map(dbTask => {
+          const isAssignedToMe = (dbTask.assigned_to === user?.id) || (dbTask.assignee?.id === user?.id)
+          return {
+            id: dbTask.id,
+            title: dbTask.title,
+            status: dbTask.status,
+            priority: dbTask.priority,
+            created_at: dbTask.created_at,
+            visibility: dbTask.visibility || 'personal',
+            assignedToId: isAssignedToMe ? user?.id : (dbTask.assigned_to || dbTask.assignee?.id || undefined),
+            assignedToName: isAssignedToMe ? (user?.user_metadata?.name || 'Eu') : (dbTask.assignee?.name || undefined),
+            assignedToAvatar: isAssignedToMe ? user?.user_metadata?.avatar_url : (dbTask.assignee?.avatar || undefined),
+            assignedToEmail: isAssignedToMe ? user?.email : (dbTask.assignee?.email || undefined),
+            authorName: dbTask.author?.name || undefined,
+            userId: dbTask.user_id
+          }
+        })
+
+        const newStats = {
+          todo: mappedTasks.filter(t => t.status === 'todo').length,
+          doing: mappedTasks.filter(t => t.status === 'doing').length,
+          done: mappedTasks.filter(t => t.status === 'done').length,
+        }
+        setStats(newStats)
+
+        mappedTasks.sort((a, b) => {
+          const aIsAssignedToMe = a.assignedToId === user?.id
+          const bIsAssignedToMe = b.assignedToId === user?.id
+          if (aIsAssignedToMe && !bIsAssignedToMe) return -1
+          if (!aIsAssignedToMe && bIsAssignedToMe) return 1
+
+          const dateA = new Date(a.created_at).getTime()
+          const dateB = new Date(b.created_at).getTime()
+          return dateB - dateA
+        })
+
+        setRecentTasks(mappedTasks.slice(0, 4))
       } catch (err) {
         console.error('Erro no Dashboard:', err)
       } finally {
@@ -130,7 +181,7 @@ const Dashboard: React.FC = () => {
     }
 
     fetchDashboardData()
-  }, [])
+  }, [user])
 
   useEffect(() => {
     const fetchAIGeneratedQuote = async () => {
@@ -146,15 +197,35 @@ const Dashboard: React.FC = () => {
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            messages: [{ role: 'user', content: 'Crie uma frase motivacional super curta (máximo 12 palavras) sobre foco, disciplina ou sucesso diário. Retorne EXATAMENTE APENAS a frase, sem aspas, sem introdução, sem nada extra.' }],
-            temperature: 0.9,
-            max_tokens: 50
+            messages: [
+              {
+                role: 'system',
+                content: 'Você responde APENAS com a frase solicitada. Sem introdução, sem aspas, sem explicação, sem pontuação extra. Somente a frase.'
+              },
+              {
+                role: 'user',
+                content: 'Crie uma frase motivacional curta (máximo 10 palavras) em português sobre foco, disciplina ou sucesso. Responda só com a frase.'
+              }
+            ],
+            temperature: 0.85,
+            max_tokens: 80
           })
         })
         if (data.choices && data.choices[0]) {
-          const generatedQuote = data.choices[0].message.content.replace(/^["']|["']$/g, '').trim()
-          setDailyQuote(generatedQuote)
-          localStorage.setItem('dailyQuote', generatedQuote)
+          let raw: string = data.choices[0].message.content || ''
+          // Remove prefácios como "Aqui está:", "Claro:", "Minha resposta:", etc.
+          raw = raw.replace(/^[^:：]+[:：]\s*/u, '').trim()
+          // Remove aspas ao redor
+          raw = raw.replace(/^["'"'«»]|["'"'«»]$/g, '').trim()
+          // Pega apenas a primeira linha/frase
+          raw = raw.split('\n')[0].split('. ')[0].trim()
+          // Se ficou muito longo ou vazio, descarta
+          if (!raw || raw.length > 120) {
+            setIsLoadingQuote(false)
+            return
+          }
+          setDailyQuote(raw)
+          localStorage.setItem('dailyQuote', raw)
           localStorage.setItem('dailyQuoteDate', today)
         }
       } catch (error) {
@@ -475,16 +546,33 @@ const Dashboard: React.FC = () => {
               ) : (
                 recentTasks.map((task, i) => (
                   <div key={task.id || i} className="flex gap-4 items-center group cursor-pointer" onClick={() => navigate('/tasks')}>
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${task.status === 'done' ? 'bg-[#25D366]' :
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1 self-start ${task.status === 'done' ? 'bg-[#25D366]' :
                         task.status === 'doing' ? 'bg-[#2383e2]' : 'bg-slate-300'
                       }`} />
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold text-[#37352f] line-clamp-1 group-hover:underline">
                         {task.title}
                       </p>
-                      <p className="text-[11px] font-semibold text-[#37352f]/30 tracking-tight">
-                        {task.priority === 'high' ? 'Crítica' : 'Normal'}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                        <span className="text-[10px] font-semibold text-[#37352f]/40 tracking-tight uppercase">
+                          {task.visibility === 'workspace' ? 'Workspace' : 'Pessoal'}
+                        </span>
+                        
+                        {task.assignedToId && (
+                          <div className="flex items-center gap-1.5 pl-1.5 border-l border-[#e9e9e7]">
+                            <div className="w-3.5 h-3.5 rounded-full overflow-hidden flex-shrink-0 border border-[#e9e9e7]/50">
+                              {task.assignedToAvatar ? (
+                                <img src={task.assignedToAvatar} className="w-full h-full object-cover" alt="" onError={(e) => { (e.target as HTMLImageElement).style.display='none' }} />
+                              ) : (
+                                <Avvvatars value={task.assignedToEmail || task.assignedToId} size={14} style="character" />
+                              )}
+                            </div>
+                            <span className="text-[10px] font-semibold text-[#37352f]/60 truncate max-w-[80px]">
+                              {task.assignedToName?.split(' ')[0] || 'Membro'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))

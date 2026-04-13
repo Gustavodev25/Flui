@@ -1,13 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react'
 import NumberFlow from '@number-flow/react'
-import { motion } from 'framer-motion'
-import { CheckCircle2, Circle, Edit2 } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { CheckCircle2, Circle, Edit2, UserCheck, ChevronDown, Check } from 'lucide-react'
 import Modal from './ui/Modal'
+import Avvvatars from 'avvvatars-react'
 
 interface Subtask {
   id: string
   title: string
   completed: boolean
+}
+
+interface WorkspaceMember {
+  id: string
+  member_user_id: string
+  member_email: string
+  member_name: string | null
+  member_avatar: string | null
+  role: string
 }
 
 interface Task {
@@ -25,6 +35,11 @@ interface Task {
   whatsappMessage?: string
   reminderDaysBefore?: number
   reminderFired?: boolean
+  visibility?: 'personal' | 'workspace'
+  assignedToId?: string
+  assignedToName?: string
+  assignedToAvatar?: string
+  assignedToEmail?: string
 }
 
 const statusMap: Record<Task['status'], string> = {
@@ -78,6 +93,9 @@ interface TaskDetailModalProps {
   onToggleSubtask: (taskId: string, subtaskId: string) => void
   onStopTimer: (taskId: string) => void
   onEdit: (task: Task) => void
+  workspaceMembers?: WorkspaceMember[]
+  currentUserId?: string
+  onAssign?: (taskId: string, assignedTo: string | null) => void
 }
 
 const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
@@ -87,12 +105,24 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onToggleSubtask,
   onStopTimer,
   onEdit,
+  workspaceMembers = [],
+  currentUserId,
+  onAssign,
 }) => {
+  const [transferOpen, setTransferOpen] = useState(false)
+
   if (!task) return null
 
   const hasTimer = task.timerAt && !task.timerFired
   const hasSubtasks = task.subtasks && task.subtasks.length > 0
   const hasDescription = task.description && task.description.trim().length > 0
+  const isWorkspace = task.visibility === 'workspace'
+  const activeMembers = workspaceMembers.filter(m => m.member_user_id && m.role !== 'pending')
+
+  const handleTransfer = (memberId: string | null) => {
+    onAssign?.(task.id, memberId)
+    setTransferOpen(false)
+  }
 
   return (
     <Modal
@@ -132,6 +162,69 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           {hasTimer && (
             <DetailRow label="Timer">
               <TimerInline task={task} onStopTimer={onStopTimer} />
+            </DetailRow>
+          )}
+
+          {/* Responsável (só para tarefas workspace) */}
+          {isWorkspace && (
+            <DetailRow label="Responsável">
+              <div className="relative">
+                <button
+                  onClick={() => activeMembers.length > 0 && setTransferOpen(v => !v)}
+                  className={`flex items-center gap-1.5 text-[13px] text-[#37352f] ${activeMembers.length > 0 ? 'hover:opacity-70 cursor-pointer' : 'cursor-default'} transition-opacity`}
+                >
+                  {task.assignedToId ? (
+                    <>
+                      <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 border border-[#e9e9e7]">
+                        {task.assignedToAvatar
+                          ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" />
+                          : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={20} style="character" />
+                        }
+                      </div>
+                      <span>{task.assignedToName?.split(' ')[0] || 'Membro'}</span>
+                    </>
+                  ) : (
+                    <span className="text-[#37352f]/35">Ninguém</span>
+                  )}
+                  {activeMembers.length > 0 && <ChevronDown size={11} className="text-[#37352f]/30" />}
+                </button>
+
+                <AnimatePresence>
+                  {transferOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 top-7 z-50 bg-white rounded-xl border border-[#e9e9e7] shadow-lg py-1 min-w-[160px]"
+                    >
+                      <button
+                        onClick={() => handleTransfer(null)}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f7f7f5] text-[12px] text-left transition-colors"
+                      >
+                        <span className="text-[#37352f]/40">Ninguém</span>
+                        {!task.assignedToId && <Check size={11} className="ml-auto text-[#37352f]/40" />}
+                      </button>
+                      {activeMembers.map(m => (
+                        <button
+                          key={m.id}
+                          onClick={() => handleTransfer(m.member_user_id)}
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f7f7f5] text-[12px] text-left transition-colors"
+                        >
+                          <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0">
+                            {m.member_avatar
+                              ? <img src={m.member_avatar} alt="" className="w-full h-full object-cover" />
+                              : <Avvvatars value={m.member_email} size={20} style="character" />
+                            }
+                          </div>
+                          <span className="text-[#37352f]">{m.member_name?.split(' ')[0] || m.member_email.split('@')[0]}</span>
+                          {task.assignedToId === m.member_user_id && <Check size={11} className="ml-auto text-[#37352f]/60" />}
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </DetailRow>
           )}
         </div>

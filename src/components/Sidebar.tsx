@@ -110,9 +110,10 @@ export const Sidebar: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const [subscription, setSubscription] = useState<any>(null)
-  const [workspaceMembership, setWorkspaceMembership] = useState<{ ownerName: string; ownerEmail: string; planId: string } | null>(null)
+  const [workspaceMembership, setWorkspaceMembership] = useState<{ ownerName: string; ownerEmail: string; planId: string; workspaceName?: string } | null>(null)
   const [dataLoaded, setDataLoaded] = useState(false)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
+  const [ownerWorkspaceName, setOwnerWorkspaceName] = useState<string | null>(null)
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const isMobile = !isDesktop
 
@@ -121,21 +122,23 @@ export const Sidebar: React.FC = () => {
       if (!user) return
 
       // Carrega assinatura e membership em paralelo
-      const [subResult, membershipResult] = await Promise.allSettled([
+      const [subResult, membershipResult, wsNameResult] = await Promise.allSettled([
         supabase
           .from('subscriptions')
           .select('status, plan_id')
           .eq('user_id', user.id)
           .maybeSingle(),
-        apiFetch<{ membership: { ownerName: string; ownerEmail: string; planId: string } | null }>(
+        apiFetch<{ membership: { ownerName: string; ownerEmail: string; planId: string; workspaceName?: string } | null }>(
           '/api/workspace/my-membership',
           undefined,
           { userId: user.id }
-        )
+        ),
+        apiFetch<{ name: string | null }>('/api/workspace/name', undefined, { userId: user.id })
       ])
 
       if (subResult.status === 'fulfilled') setSubscription(subResult.value.data)
       if (membershipResult.status === 'fulfilled') setWorkspaceMembership(membershipResult.value.membership)
+      if (wsNameResult.status === 'fulfilled') setOwnerWorkspaceName(wsNameResult.value.name || null)
       setDataLoaded(true)
     }
     fetchData()
@@ -392,13 +395,14 @@ export const Sidebar: React.FC = () => {
         {isWorkspaceMember && (() => {
           const planLabel = workspaceMembership!.planId === 'pulse' ? 'Pulse' : 'Flow'
           const ownerName = workspaceMembership!.ownerName
+          const displayName = workspaceMembership!.workspaceName || ownerName
           const avatarValue = workspaceMembership!.ownerEmail || ownerName
 
           return (
             <AnimatePresence mode="wait">
               {(isCollapsed && !isMobile) ? (
                 <motion.div key="wsm-collapsed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex justify-center py-1">
-                  <div title={`Workspace de ${ownerName} · ${planLabel}`}>
+                  <div title={`${displayName} · ${planLabel}`}>
                     <Avvvatars value={avatarValue} style="shape" size={32} radius={8} />
                   </div>
                 </motion.div>
@@ -409,7 +413,7 @@ export const Sidebar: React.FC = () => {
                     <p className="text-[9px] text-[#37352f]/35 font-medium uppercase tracking-wider leading-tight">
                       Workspace · {planLabel}
                     </p>
-                    <p className="text-[11px] font-semibold text-[#37352f] truncate leading-tight">{ownerName}</p>
+                    <p className="text-[11px] font-semibold text-[#37352f] truncate leading-tight">{displayName}</p>
                   </div>
                 </motion.div>
               )}
@@ -417,10 +421,11 @@ export const Sidebar: React.FC = () => {
           )
         })()}
 
-        {/* Workspace Card - Only for Pulse owners (localhost only) */}
+        {/* Workspace Card - Only for Pulse owners */}
         {hasPulse && !isWorkspaceMember && (() => {
-          const wsName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Usuário'
-          const avatarValue = user?.email || wsName
+          const defaultName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Usuário'
+          const wsName = ownerWorkspaceName || defaultName
+          const avatarValue = user?.email || defaultName
 
           return (
             <AnimatePresence mode="wait">
@@ -449,6 +454,7 @@ export const Sidebar: React.FC = () => {
       <WorkspaceModal
         isOpen={isWorkspaceOpen}
         onClose={() => setIsWorkspaceOpen(false)}
+        onWorkspaceNameChange={name => setOwnerWorkspaceName(name)}
       />
     </motion.aside>
   )

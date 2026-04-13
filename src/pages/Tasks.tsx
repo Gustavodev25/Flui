@@ -65,6 +65,19 @@ interface Task {
   authorName?: string
   authorAvatar?: string
   authorEmail?: string
+  assignedToId?: string
+  assignedToName?: string
+  assignedToAvatar?: string
+  assignedToEmail?: string
+}
+
+interface WorkspaceMember {
+  id: string
+  member_user_id: string
+  member_email: string
+  member_name: string | null
+  member_avatar: string | null
+  role: string
 }
 
 const formatDate = (dateStr: string) => {
@@ -302,8 +315,21 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
             )}
             {task.visibility === 'personal' && <div />}
 
-            {/* Fonte/Avatar (Direita) */}
-            <div className="flex-shrink-0">
+            {/* Avatares: responsável + autor (Direita) */}
+            <div className="flex items-center gap-[-4px] flex-shrink-0">
+              {/* Assignee badge (se diferente do autor) */}
+              {task.assignedToId && (
+                <div
+                  className="border-2 border-white rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white z-10"
+                  title={`Responsável: ${task.assignedToName || 'Membro'}`}
+                  style={{ width: 20, height: 20 }}
+                >
+                  {task.assignedToAvatar
+                    ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display='none' }} />
+                    : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={20} style="character" />
+                  }
+                </div>
+              )}
               {task.source === 'whatsapp' ? (
                 <div className="flex items-center gap-1.5 opacity-30 grayscale hover:grayscale-0 transition-all cursor-help" title="Lui">
                   <img src={finlozLogo} alt="Finloz" className="w-3 h-3 object-contain" />
@@ -645,6 +671,7 @@ const Tasks: React.FC = () => {
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null)
   const [pendingStatusTask, setPendingStatusTask] = useState<{ id: string; originalStatus: Task['status']; targetStatus: Task['status'] } | null>(null)
   const [detailTask, setDetailTask] = useState<Task | null>(null)
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([])
   const dragOriginalStatus = useRef<{ id: string; status: Task['status'] } | null>(null)
   const justDraggedRef = useRef(false)
 
@@ -682,6 +709,10 @@ const Tasks: React.FC = () => {
     authorName: dbTask.author?.name || undefined,
     authorAvatar: dbTask.author?.avatar || undefined,
     authorEmail: dbTask.author?.email || undefined,
+    assignedToId: dbTask.assigned_to || dbTask.assignee?.id || undefined,
+    assignedToName: dbTask.assignee?.name || undefined,
+    assignedToAvatar: dbTask.assignee?.avatar || undefined,
+    assignedToEmail: dbTask.assignee?.email || undefined,
   }), [])
 
   const fetchTasks = useCallback(async (view?: 'personal' | 'workspace') => {
@@ -729,6 +760,14 @@ const Tasks: React.FC = () => {
     fetchTasks(taskView)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskView])
+
+  // Busca membros do workspace (só para donos Pulse)
+  useEffect(() => {
+    if (!isAdmin || !user) return
+    apiFetch<{ members: WorkspaceMember[] }>('/api/workspace/members', undefined, { userId: user.id })
+      .then(r => setWorkspaceMembers((r.members || []).filter(m => !m.is_invite)))
+      .catch(() => {})
+  }, [isAdmin, user])
 
   useEffect(() => {
     fetchTasks()
@@ -884,6 +923,34 @@ const Tasks: React.FC = () => {
   const openCreateModal = () => {
     setEditingTask(null)
     setIsModalOpen(true)
+  }
+
+  const handleAssignTask = async (taskId: string, assignedTo: string | null) => {
+    try {
+      await apiFetch(`/api/workspace/tasks/${taskId}/assign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignedTo, assignedBy: user?.id }),
+      })
+      // Encontra informações do membro atribuído
+      const member = assignedTo ? workspaceMembers.find(m => m.member_user_id === assignedTo) : null
+      setTasks(prev => prev.map(t => t.id === taskId ? {
+        ...t,
+        assignedToId: assignedTo || undefined,
+        assignedToName: member?.member_name || member?.member_email?.split('@')[0] || undefined,
+        assignedToAvatar: member?.member_avatar || undefined,
+        assignedToEmail: member?.member_email || undefined,
+      } : t))
+      setDetailTask(prev => prev?.id === taskId ? {
+        ...prev,
+        assignedToId: assignedTo || undefined,
+        assignedToName: member?.member_name || member?.member_email?.split('@')[0] || undefined,
+        assignedToAvatar: member?.member_avatar || undefined,
+        assignedToEmail: member?.member_email || undefined,
+      } : prev)
+    } catch (err) {
+      console.error('Erro ao atribuir tarefa:', err)
+    }
   }
 
   const handleCardClick = (task: Task) => {
@@ -1389,6 +1456,8 @@ const Tasks: React.FC = () => {
           hasWorkspaceAccess={isAdmin ? hasWorkspaceAccess : false}
           defaultVisibility={isWorkspaceMember ? 'workspace' : (taskView === 'workspace' ? 'workspace' : 'personal')}
           workspaceName={isWorkspaceMember ? (workspaceMembership?.ownerName || 'Workspace') : undefined}
+          workspaceMembers={workspaceMembers}
+          currentUserId={user?.id}
         />
       </Modal>
 
@@ -1401,6 +1470,9 @@ const Tasks: React.FC = () => {
         onToggleSubtask={handleToggleSubtask}
         onStopTimer={handleStopTimer}
         onEdit={(task) => { setDetailTask(null); setTimeout(() => openEditModal(task), 250) }}
+        workspaceMembers={workspaceMembers}
+        currentUserId={user?.id}
+        onAssign={handleAssignTask}
       />
     </>
   )

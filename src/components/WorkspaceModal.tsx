@@ -1,9 +1,9 @@
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, UserPlus, Copy, Check, Loader2, AlertCircle, Trash2 } from 'lucide-react'
+import { X, UserPlus, Copy, Check, Loader2, AlertCircle, Trash2, Pencil } from 'lucide-react'
 import Avvvatars from 'avvvatars-react'
 import { useAuth } from '../contexts/AuthContext'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { apiFetch } from '../lib/api'
 
 interface Member {
@@ -19,9 +19,10 @@ interface Member {
 interface WorkspaceModalProps {
   isOpen: boolean
   onClose: () => void
+  onWorkspaceNameChange?: (name: string) => void
 }
 
-export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ isOpen, onClose }) => {
+export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ isOpen, onClose, onWorkspaceNameChange }) => {
   const { user } = useAuth()
   const [members, setMembers] = useState<Member[]>([])
   const [loadingMembers, setLoadingMembers] = useState(false)
@@ -31,18 +32,61 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ isOpen, onClose 
   const [inviteSuccess, setInviteSuccess] = useState(false)
   const [copied, setCopied] = useState(false)
   const [removingId, setRemovingId] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState(false)
+  const [wsNameInput, setWsNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [wsName, setWsName] = useState('')
+  const nameInputRef = useRef<HTMLInputElement>(null)
 
-  const wsName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Workspace'
-  const avatarValue = user?.email || wsName
-  const userDisplayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Você'
+  const defaultName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Workspace'
+  const avatarValue = user?.email || defaultName
+  const userDisplayName = defaultName
 
   useEffect(() => {
     if (!isOpen || !user) return
     setInviteEmail('')
     setInviteError('')
     setInviteSuccess(false)
+    setEditingName(false)
     fetchMembers()
+    fetchWorkspaceName()
   }, [isOpen, user])
+
+  useEffect(() => {
+    if (editingName && nameInputRef.current) {
+      nameInputRef.current.focus()
+      nameInputRef.current.select()
+    }
+  }, [editingName])
+
+  const fetchWorkspaceName = async () => {
+    if (!user) return
+    try {
+      const { name } = await apiFetch<{ name: string | null }>('/api/workspace/name', undefined, { userId: user.id })
+      setWsName(name || defaultName)
+    } catch {
+      setWsName(defaultName)
+    }
+  }
+
+  const handleSaveName = async () => {
+    if (!user || !wsNameInput.trim()) return
+    setSavingName(true)
+    try {
+      await apiFetch('/api/workspace/name', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerUserId: user.id, name: wsNameInput.trim() }),
+      })
+      setWsName(wsNameInput.trim())
+      onWorkspaceNameChange?.(wsNameInput.trim())
+      setEditingName(false)
+    } catch {
+      // silently fail
+    } finally {
+      setSavingName(false)
+    }
+  }
 
   const fetchMembers = async () => {
     if (!user) return
@@ -127,16 +171,56 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ isOpen, onClose 
           >
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#e9e9e7]">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
                 <Avvvatars value={avatarValue} style="shape" size={34} radius={9} />
-                <div>
-                  <p className="text-[13px] font-bold text-[#37352f] leading-tight">{wsName}</p>
+                <div className="min-w-0 flex-1">
+                  {editingName ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        ref={nameInputRef}
+                        value={wsNameInput}
+                        onChange={e => setWsNameInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') handleSaveName()
+                          if (e.key === 'Escape') setEditingName(false)
+                        }}
+                        className="text-[13px] font-bold text-[#37352f] bg-transparent border-b border-[#37352f]/20 px-0.5 py-0 outline-none focus:border-[#37352f]/50 w-full max-w-[150px] transition-colors"
+                        maxLength={40}
+                      />
+                      <button
+                        onClick={handleSaveName}
+                        disabled={savingName || !wsNameInput.trim()}
+                        className="flex-shrink-0 cursor-pointer disabled:opacity-30 hover:opacity-70 transition-opacity"
+                      >
+                        {savingName
+                          ? <Loader2 size={11} className="animate-spin text-[#37352f]/40" />
+                          : <Check size={11} className="text-[#37352f]/50" />}
+                      </button>
+                      <button
+                        onClick={() => setEditingName(false)}
+                        className="flex-shrink-0 cursor-pointer hover:opacity-70 transition-opacity"
+                      >
+                        <X size={11} className="text-[#37352f]/30" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 group/name">
+                      <p className="text-[13px] font-bold text-[#37352f] leading-tight truncate">{wsName}</p>
+                      <button
+                        onClick={() => { setWsNameInput(wsName); setEditingName(true) }}
+                        className="opacity-0 group-hover/name:opacity-100 p-0.5 rounded hover:bg-[#e9e9e7] transition-all cursor-pointer flex-shrink-0"
+                        title="Renomear workspace"
+                      >
+                        <Pencil size={11} className="text-[#37352f]/40" />
+                      </button>
+                    </div>
+                  )}
                   <p className="text-[10px] text-[#37352f]/40 leading-tight">Workspace</p>
                 </div>
               </div>
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-lg hover:bg-[#f7f7f5] transition-colors cursor-pointer"
+                className="p-1.5 rounded-lg hover:bg-[#f7f7f5] transition-colors cursor-pointer flex-shrink-0"
               >
                 <X size={14} className="text-[#37352f]/40" />
               </button>

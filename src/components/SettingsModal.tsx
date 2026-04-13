@@ -174,6 +174,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
       })
 
       if (authError) throw authError
+
+      // Sincroniza avatar no workspace_members via server (bypassa RLS)
+      await apiFetch('/api/workspace/sync-profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, avatar: publicUrl }),
+      }).catch(() => {})
+
       setAvatarUrl(publicUrl)
       setIsAvatarModalOpen(false)
     } catch (err: any) {
@@ -187,17 +195,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
   const handleUpdateName = async () => {
     if (!user || !editName.trim() || editName === (user.user_metadata.full_name || user.user_metadata.name)) return
     setIsSavingName(true)
+    const oldName = user.user_metadata?.full_name || user.user_metadata?.name || ''
+    const newName = editName.trim()
     try {
+      // Sincroniza nome do workspace ANTES de atualizar auth (evita race condition no Sidebar)
+      // Se não havia nome customizado ou o nome do workspace era igual ao nome antigo, atualiza automaticamente
+      await apiFetch<{ name: string | null }>('/api/workspace/name', undefined, { userId: user.id })
+        .then(({ name: currentWsName }) => {
+          if (!currentWsName || currentWsName === oldName) {
+            return apiFetch('/api/workspace/name', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ownerUserId: user.id, name: newName }),
+            })
+          }
+        })
+        .catch(() => {})
+
       const { error } = await supabase.auth.updateUser({
-        data: { full_name: editName.trim(), name: editName.trim() }
+        data: { full_name: newName, name: newName }
       })
       if (error) throw error
 
       // Também atualizar a tabela profiles se existir
       await supabase
         .from('profiles')
-        .update({ name: editName.trim() })
+        .update({ name: newName })
         .eq('id', user.id)
+
+      // Sincroniza nome no workspace_members via server (bypassa RLS)
+      await apiFetch('/api/workspace/sync-profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, name: newName }),
+      }).catch(() => {})
 
     } catch (err: any) {
       console.error('Erro ao atualizar nome:', err)

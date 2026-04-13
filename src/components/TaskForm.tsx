@@ -1,11 +1,20 @@
 import React, { useState, useEffect } from 'react'
-import { Loader2, Plus, Trash2, CheckCircle2, Circle, Lock, Users } from 'lucide-react'
+import { Loader2, Plus, Trash2, CheckCircle2, Circle, Lock, Users, UserCheck } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Select from './ui/Select'
 import DatePicker from './ui/DatePicker'
 import { useAuth } from '../contexts/AuthContext'
 import Avvvatars from 'avvvatars-react'
 import { apiFetch } from '../lib/api'
+
+interface WorkspaceMember {
+  id: string
+  member_user_id: string
+  member_email: string
+  member_name: string | null
+  member_avatar: string | null
+  role: string
+}
 
 interface TaskFormProps {
   initialData?: any
@@ -15,9 +24,11 @@ interface TaskFormProps {
   hasWorkspaceAccess?: boolean
   defaultVisibility?: 'personal' | 'workspace'
   workspaceName?: string
+  workspaceMembers?: WorkspaceMember[]
+  currentUserId?: string
 }
 
-const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, isEditing, hasWorkspaceAccess, defaultVisibility, workspaceName }) => {
+const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, isEditing, hasWorkspaceAccess, defaultVisibility, workspaceName, workspaceMembers = [], currentUserId }) => {
   const { user } = useAuth()
   const [avatarError, setAvatarError] = useState(false)
   const [typingDone, setTypingDone] = useState(false)
@@ -33,6 +44,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, is
   const [visibility, setVisibility] = useState<'personal' | 'workspace'>(
     initialData?.visibility || defaultVisibility || 'personal'
   )
+  const [assignedTo, setAssignedTo] = useState<string>(initialData?.assignedToId || '')
   const [subtasks, setSubtasks] = useState<{ id: string, title: string, completed: boolean }[]>(initialData?.subtasks || [])
   const [newSubtask, setNewSubtask] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -161,6 +173,7 @@ REGRAS:
       progress,
       subtasks,
       visibility,
+      assignedTo: visibility === 'workspace' && assignedTo ? assignedTo : undefined,
     })
   }
 
@@ -490,6 +503,54 @@ REGRAS:
                 </span>
               )}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Assignee Selector (workspace only, when members exist) */}
+      {hasWorkspaceAccess && visibility === 'workspace' && workspaceMembers.filter(m => m.member_user_id).length > 0 && (
+        <div className="space-y-1.5">
+          <label className="text-[11px] font-medium text-[#37352f]/70 flex items-center gap-1.5 h-5">
+            <UserCheck size={11} strokeWidth={2.5} />
+            Atribuir a
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {/* Opção: ninguém (eu mesmo) */}
+            <button
+              type="button"
+              onClick={() => setAssignedTo('')}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
+                assignedTo === ''
+                  ? 'bg-[#37352f] text-white border-[#37352f]'
+                  : 'bg-white text-[#37352f]/60 border-[#e9e9e7] hover:border-[#37352f]/20'
+              }`}
+            >
+              <div className="w-4 h-4 rounded-full overflow-hidden flex-shrink-0">
+                <Avvvatars value={user?.email || 'me'} size={16} style="character" />
+              </div>
+              Eu
+            </button>
+            {/* Membros */}
+            {workspaceMembers.filter(m => m.member_user_id && m.role !== 'pending').map(m => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setAssignedTo(m.member_user_id)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
+                  assignedTo === m.member_user_id
+                    ? 'bg-[#37352f] text-white border-[#37352f]'
+                    : 'bg-white text-[#37352f]/60 border-[#e9e9e7] hover:border-[#37352f]/20'
+                }`}
+              >
+                <div className="w-4 h-4 rounded-full overflow-hidden flex-shrink-0">
+                  {m.member_avatar
+                    ? <img src={m.member_avatar} alt="" className="w-full h-full object-cover" />
+                    : <Avvvatars value={m.member_email} size={16} style="character" />
+                  }
+                </div>
+                {m.member_name?.split(' ')[0] || m.member_email.split('@')[0]}
+              </button>
+            ))}
           </div>
         </div>
       )}
