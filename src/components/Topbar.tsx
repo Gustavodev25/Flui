@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import Avvvatars from 'avvvatars-react'
-import { Menu, User, CreditCard, LifeBuoy, LogOut, Star, ChevronRight, Repeat2 } from 'lucide-react'
+import { Menu, User, CreditCard, LifeBuoy, LogOut, Star, ChevronRight } from 'lucide-react'
 import { Dropdown, DropdownItem, DropdownDivider } from './ui/Dropdown'
 import { SettingsModal } from './SettingsModal'
 import { useSubscription } from '../contexts/SubscriptionContext'
@@ -164,25 +164,24 @@ export const Topbar: React.FC = () => {
                 <DropdownDivider />
                 <div
                   onClick={togglePlanMode}
-                  className="flex items-center justify-between px-3 py-2.5 cursor-pointer hover:bg-[#f7f7f5] rounded-lg mx-1 transition-colors group"
+                  className="flex items-center justify-between px-3 py-2 cursor-pointer group"
                 >
-                  <div className="flex items-center gap-2.5">
-                    <Repeat2 size={14} className="text-[#37352f]/40 group-hover:text-[#37352f]/70 transition-colors" />
-                    <div className="flex flex-col">
-                      <span className="text-[12px] font-semibold text-[#37352f] leading-tight">
-                        {useOwnPlan ? 'Usar workspace' : 'Usar meu plano'}
-                      </span>
-                      <span className="text-[10px] text-[#37352f]/40 leading-tight">
-                        {useOwnPlan
-                          ? `Voltar para workspace de ${workspaceMembership?.ownerName}`
-                          : `Ativar seu plano ${subscription?.plan_id === 'pulse' ? 'Pulse' : 'Flow'} pessoal`}
-                      </span>
-                    </div>
-                  </div>
-                  {/* Toggle pill */}
-                  <div className={`relative w-9 h-5 rounded-full transition-colors duration-200 flex-shrink-0 ${useOwnPlan ? 'bg-[#37352f]' : 'bg-[#e9e9e7]'}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${useOwnPlan ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                  </div>
+                  <span className="text-[11px] font-medium text-[#37352f]/50 group-hover:text-[#37352f]/80 transition-colors duration-150 select-none">
+                    {useOwnPlan ? 'Workspace' : 'Meu plano'}
+                  </span>
+                  {/* Toggle pill minimalista */}
+                  <motion.div
+                    onClick={togglePlanMode}
+                    className={`relative w-7 h-[14px] rounded-full cursor-pointer flex-shrink-0 ${useOwnPlan ? 'bg-[#37352f]' : 'bg-[#d4d4d0]'}`}
+                    animate={{ backgroundColor: useOwnPlan ? '#37352f' : '#d4d4d0' }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <motion.span
+                      className="absolute top-[2px] w-[10px] h-[10px] bg-white rounded-full shadow-sm"
+                      animate={{ x: useOwnPlan ? 13 : 2 }}
+                      transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                    />
+                  </motion.div>
                 </div>
               </>
             )}
