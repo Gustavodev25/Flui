@@ -135,10 +135,15 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
       const status = session.status;
       const subId = session.id;
 
+      const periodEnd = session.current_period_end
+        ? new Date(session.current_period_end * 1000).toISOString()
+        : null;
+
       const { error: updateError } = await supabaseAdmin
         .from('subscriptions')
         .update({
           status: status,
+          ...(periodEnd && { current_period_end: periodEnd }),
           updated_at: new Date().toISOString(),
         })
         .eq('stripe_subscription_id', subId);
@@ -1323,6 +1328,9 @@ app.post('/api/admin/users/grant', async (req, res) => {
   const resolvedPlan = plan === 'pulse' ? 'pulse' : 'flow';
 
   try {
+    const grantPeriodEnd = new Date();
+    grantPeriodEnd.setFullYear(grantPeriodEnd.getFullYear() + 1);
+
     const { data: existing } = await supabaseAdmin
       .from('subscriptions')
       .select('id')
@@ -1334,6 +1342,7 @@ app.post('/api/admin/users/grant', async (req, res) => {
       await supabaseAdmin.from('subscriptions').update({
         status: 'active',
         plan_id: resolvedPlan,
+        current_period_end: grantPeriodEnd.toISOString(),
         updated_at: new Date().toISOString()
       }).eq('user_id', userId);
     } else {
@@ -1341,6 +1350,7 @@ app.post('/api/admin/users/grant', async (req, res) => {
         user_id: userId,
         status: 'active',
         plan_id: resolvedPlan,
+        current_period_end: grantPeriodEnd.toISOString(),
         updated_at: new Date().toISOString()
       });
     }
