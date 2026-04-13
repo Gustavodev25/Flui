@@ -1740,6 +1740,34 @@ app.get('/api/workspace/members', async (req, res) => {
 
     if (error) throw error;
     
+    // Atualiza nome e avatar dos membros com os dados mais recentes do Auth
+    if (members && members.length > 0) {
+      await Promise.all(members.map(async (m) => {
+        if (m.member_user_id) {
+          try {
+            const { data: { user: authUser }, error: getUserErr } = await supabaseAdmin.auth.admin.getUserById(m.member_user_id);
+            if (!getUserErr && authUser) {
+              const freshName = authUser.user_metadata?.full_name || authUser.user_metadata?.name || null;
+              const freshAvatar = authUser.user_metadata?.avatar_url || null;
+              
+              if (m.member_name !== freshName || m.member_avatar !== freshAvatar) {
+                m.member_name = freshName;
+                m.member_avatar = freshAvatar;
+                
+                // Atualiza em background para cache
+                supabaseAdmin.from('workspace_members').update({
+                  member_name: freshName,
+                  member_avatar: freshAvatar
+                }).eq('id', m.id).then();
+              }
+            }
+          } catch (e) {
+            console.error(`Erro ao atualizar perfil do membro ${m.member_user_id}:`, e);
+          }
+        }
+      }));
+    }
+
     // Buscar também convites pendentes
     const { data: invites, error: invitesError } = await supabaseAdmin
       .from('workspace_invites')

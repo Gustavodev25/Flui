@@ -14,18 +14,18 @@ export const TURN_BUDGET_MS = Math.max(Number(process.env.LLM_TURN_BUDGET_MS || 
 
 const primaryClient = process.env.NVIDIA_API_KEY
   ? new OpenAI({
-      apiKey: process.env.NVIDIA_API_KEY,
-      baseURL: 'https://integrate.api.nvidia.com/v1',
-    })
+    apiKey: process.env.NVIDIA_API_KEY,
+    baseURL: 'https://integrate.api.nvidia.com/v1',
+  })
   : null;
 
 const useGroqChatFallback = process.env.ENABLE_GROQ_CHAT_FALLBACK !== 'false';
 
 const fallbackClient = useGroqChatFallback && process.env.GROQ_API_KEY
   ? new OpenAI({
-      apiKey: process.env.GROQ_API_KEY,
-      baseURL: 'https://api.groq.com/openai/v1',
-    })
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: 'https://api.groq.com/openai/v1',
+  })
   : null;
 
 function isAbortLikeError(err) {

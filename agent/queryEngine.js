@@ -138,7 +138,7 @@ async function getSystemContext(userId, userName = 'Usuário') {
       .from('pending_followups')
       .update({ resolved_at: new Date().toISOString() })
       .in('id', pendingFollowups.map(f => f.id))
-      .then(() => {})
+      .then(() => { })
       .catch(err => console.error('[FollowUp] Erro ao marcar resolvido:', err.message));
   }
 
@@ -208,10 +208,10 @@ ${pendingFollowups.length > 0 ? `
 ═══ FOLLOW-UPS PENDENTES ═══
 Esses lembretes não foram entregues porque a janela de conversa estava fechada:
 ${pendingFollowups.map(f => {
-  const dt = new Date(f.missed_at);
-  const dtStr = dt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  return `- "${f.task_title}" (lembrete perdido em ${dtStr})`;
-}).join('\n')}
+    const dt = new Date(f.missed_at);
+    const dtStr = dt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return `- "${f.task_title}" (lembrete perdido em ${dtStr})`;
+  }).join('\n')}
 
 → Mencione naturalmente 1 desses itens no começo da resposta, com algo como "Ei, aquela tarefa '...' de ontem — você conseguiu fazer?". Seja breve e natural. NÃO liste todos de uma vez.` : ''}
 
@@ -453,7 +453,7 @@ REGRAS DE USO:
 
       // Marca como entregues (serão vistos pela IA nessa resposta)
       for (const ins of insights) {
-        markInsightDelivered(ins.id).catch(() => {});
+        markInsightDelivered(ins.id).catch(() => { });
       }
     }
   } catch { /* silently skip */ }
@@ -759,7 +759,7 @@ function extractDateFromMessage(message) {
   const diaMatch = lower.match(/\bdia\s+(\d{1,2})(?:\s+de\s+(\w+))?\b/);
   if (diaMatch) {
     const day = parseInt(diaMatch[1], 10);
-    const monthNames = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+    const monthNames = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
     let month = spNow.getMonth();
     if (diaMatch[2]) {
       const idx = monthNames.findIndex(m => diaMatch[2].startsWith(m.substring(0, 3)));
@@ -1142,15 +1142,15 @@ function generateQuickAck(userMessage, userName) {
   const topicPart = topic ? `essa de ${topic}` : 'isso';
   const templates = hasMultipleTasks(userMessage)
     ? [
-        `Certo, ${shortName}! Vou separar ${topicPart} por partes.`,
-        `Recebi tudo, ${shortName}. Organizando ${topicPart} agora.`,
-        `Perfeito, ${shortName}. Montando ${topicPart} direitinho.`,
-      ]
+      `Certo, ${shortName}! Vou separar ${topicPart} por partes.`,
+      `Recebi tudo, ${shortName}. Organizando ${topicPart} agora.`,
+      `Perfeito, ${shortName}. Montando ${topicPart} direitinho.`,
+    ]
     : [
-        `Certo, ${shortName}. Peguei ${topicPart}, vou organizar.`,
-        `Entendi ${topicPart}, ${shortName}. Um instante.`,
-        `Recebi ${topicPart}, ${shortName}. Ja vou anotar.`,
-      ];
+      `Certo, ${shortName}. Peguei ${topicPart}, vou organizar.`,
+      `Entendi ${topicPart}, ${shortName}. Um instante.`,
+      `Recebi ${topicPart}, ${shortName}. Ja vou anotar.`,
+    ];
 
   const indexBase = `${userMessage}:${shortName}`.length;
   return templates[indexBase % templates.length];
@@ -1169,15 +1169,15 @@ export async function queryEngineLoop(
   const shouldAck = isActionMessage && (fromAudio || hasMultipleTasks(userMessage)) && typeof onAck === 'function';
   const llmOptions = fromAudio
     ? {
-        turnBudgetMs: Number(process.env.AUDIO_LLM_TURN_BUDGET_MS || 90000),
-        primaryTimeoutMs: Number(process.env.AUDIO_PRIMARY_LLM_TIMEOUT_MS || 45000),
-        fallbackTimeoutMs: Number(process.env.AUDIO_FALLBACK_LLM_TIMEOUT_MS || 25000),
-      }
+      turnBudgetMs: Number(process.env.AUDIO_LLM_TURN_BUDGET_MS || 90000),
+      primaryTimeoutMs: Number(process.env.AUDIO_PRIMARY_LLM_TIMEOUT_MS || 45000),
+      fallbackTimeoutMs: Number(process.env.AUDIO_FALLBACK_LLM_TIMEOUT_MS || 25000),
+    }
     : {
-        turnBudgetMs: Number(process.env.TEXT_LLM_TURN_BUDGET_MS || 90000),
-        primaryTimeoutMs: Number(process.env.TEXT_PRIMARY_LLM_TIMEOUT_MS || 45000),
-        fallbackTimeoutMs: Number(process.env.TEXT_FALLBACK_LLM_TIMEOUT_MS || 25000),
-      };
+      turnBudgetMs: Number(process.env.TEXT_LLM_TURN_BUDGET_MS || 90000),
+      primaryTimeoutMs: Number(process.env.TEXT_PRIMARY_LLM_TIMEOUT_MS || 45000),
+      fallbackTimeoutMs: Number(process.env.TEXT_FALLBACK_LLM_TIMEOUT_MS || 25000),
+    };
   const trace = {
     provider: null,
     model: null,
@@ -1290,7 +1290,7 @@ export async function queryEngineLoop(
     const sendAckOnce = (text) => {
       if (ackSent || !text) return;
       ackSent = true;
-      Promise.resolve(onAck(text)).catch(() => {});
+      Promise.resolve(onAck(text)).catch(() => { });
     };
 
     const ackTimeoutMs = 2500;
