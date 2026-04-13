@@ -107,7 +107,7 @@ const CollapseEdge: React.FC<CollapseEdgeProps> = ({ isCollapsed, onToggle }) =>
 export const Sidebar: React.FC = () => {
   const { user } = useAuth()
   const { isCollapsed, toggleCollapse, isMobileOpen, closeMobileMenu } = useSidebar()
-  const { hasFlow, hasPulse, isWorkspaceMember, workspaceMembership: ctxMembership, loading: subLoading } = useSubscription()
+  const { hasFlow, hasPulse, isWorkspaceMember, workspaceModeActive, workspaceMembership: ctxMembership, loading: subLoading } = useSubscription()
   const navigate = useNavigate()
   const location = useLocation()
   const [dataLoaded, setDataLoaded] = useState(false)
@@ -381,7 +381,7 @@ export const Sidebar: React.FC = () => {
         <div className="-mx-3 h-px bg-[#e9e9e7]" />
 
         {/* Card de Membro Convidado do Workspace */}
-        {isWorkspaceMember && (workspaceMembership || ctxMembership) && (() => {
+        {workspaceModeActive && (workspaceMembership || ctxMembership) && (() => {
           const membership = workspaceMembership || ctxMembership!
           const planLabel = membership.planId === 'pulse' ? 'Pulse' : 'Flow'
           const ownerName = membership.ownerName

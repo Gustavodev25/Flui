@@ -15,8 +15,10 @@ interface SubscriptionContextValue {
   hasPulse: boolean
   /** ID efetivo do plano: 'flow' | 'pulse' | null */
   planId: string | null
-  /** True quando o usuário é membro convidado (não dono) */
+  /** True quando o usuário É membro de workspace (independente do modo ativo) */
   isWorkspaceMember: boolean
+  /** True quando o modo workspace está ativo (isWorkspaceMember && !useOwnPlan) */
+  workspaceModeActive: boolean
   /** Dados do workspace ao qual pertence (se for membro) */
   workspaceMembership: WorkspaceMembership | null
   /** True se o usuário tem plano próprio ativo (independente do workspace) */
@@ -38,6 +40,7 @@ const SubscriptionContext = createContext<SubscriptionContextValue>({
   hasPulse: false,
   planId: null,
   isWorkspaceMember: false,
+  workspaceModeActive: false,
   workspaceMembership: null,
   hasOwnPlan: false,
   useOwnPlan: false,
@@ -113,7 +116,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       hasFlow,
       hasPulse,
       planId,
-      isWorkspaceMember: isWorkspaceMember && !shouldUseOwn,
+      isWorkspaceMember,           // sempre: o usuário É membro
+      workspaceModeActive: isWorkspaceMember && !shouldUseOwn,  // modo ativo
       workspaceMembership,
       hasOwnPlan,
       useOwnPlan,

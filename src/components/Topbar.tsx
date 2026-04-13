@@ -19,7 +19,7 @@ export const Topbar: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'profile' | 'subscription'>('profile')
   const profileRef = useRef<HTMLDivElement>(null)
-  const { hasFlow, planId, isWorkspaceMember, workspaceMembership, hasOwnPlan, useOwnPlan, togglePlanMode } = useSubscription()
+  const { hasFlow, planId, isWorkspaceMember, workspaceModeActive, workspaceMembership, hasOwnPlan, useOwnPlan, togglePlanMode, subscription } = useSubscription()
   const [avatarError, setAvatarError] = useState(false)
 
   useEffect(() => {
@@ -114,7 +114,7 @@ export const Topbar: React.FC = () => {
                 </span>
                 <div className="flex items-center gap-1">
                 <span className="text-[10px] text-[#37352f]/40 font-bold tracking-wider group-hover:text-[#37352f] transition-colors leading-none">
-                  {isWorkspaceMember
+                  {workspaceModeActive
                     ? `Workspace · ${planId === 'pulse' ? 'Pulse' : 'Flow'}`
                     : hasFlow
                       ? (planId === 'pulse' ? 'Pulse' : 'Flow')
@@ -146,7 +146,7 @@ export const Topbar: React.FC = () => {
           >
             <div className="px-3 py-2.5 mb-1 flex flex-col gap-0.5">
               <span className="text-[10px] font-bold text-[#37352f]/30 tracking-widest px-0.5">
-                {isWorkspaceMember
+                {workspaceModeActive
                   ? `Workspace de ${workspaceMembership?.ownerName}`
                   : hasFlow
                     ? 'Assinatura Ativa'
@@ -175,7 +175,7 @@ export const Topbar: React.FC = () => {
                       <span className="text-[10px] text-[#37352f]/40 leading-tight">
                         {useOwnPlan
                           ? `Voltar para workspace de ${workspaceMembership?.ownerName}`
-                          : `Ativar seu plano ${planId === 'pulse' ? 'Pulse' : 'Flow'} pessoal`}
+                          : `Ativar seu plano ${subscription?.plan_id === 'pulse' ? 'Pulse' : 'Flow'} pessoal`}
                       </span>
                     </div>
                   </div>
