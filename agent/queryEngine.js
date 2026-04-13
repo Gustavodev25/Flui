@@ -946,7 +946,7 @@ function extractTimerMinutesFromMessage(message) {
       hour: '2-digit', minute: '2-digit', hour12: false,
       timeZone: 'America/Sao_Paulo',
     }).format(new Date());
-    const [curH, curM] = spTimeStr.split(':').map(Number);
+    const [curH, curM] = spTimeStr.match(/\d+/g).map(Number);
     const curTotalMins = curH * 60 + curM;
 
     // AM/PM disambiguation
@@ -995,7 +995,7 @@ function extractAbsoluteTimerAt(message) {
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
     timeZone: 'America/Sao_Paulo',
   }).format(now);
-  const [curH, curM, curS] = spFull.split(':').map(Number);
+  const [curH, curM, curS = 0] = spFull.match(/\d+/g).map(Number);
 
   // AM/PM disambiguation (mesma lógica de extractTimerMinutesFromMessage)
   if (period === 'manha') {
