@@ -171,7 +171,7 @@ export const Sidebar: React.FC = () => {
         x: isMobile ? (isMobileOpen ? 0 : -280) : 0
       }}
       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      className={`bg-[#f7f7f5] h-screen flex flex-col p-3 fixed left-0 top-0 z-50 group border-r border-[#e9e9e7] lg:border-none shadow-2xl lg:shadow-none ${!isMobile && 'hidden lg:flex'} ${isMobile && 'flex'}`}
+      className={`bg-[#f7f7f5] h-screen flex flex-col p-3 fixed left-0 top-0 z-50 group border-r border-[#e9e9e7] lg:border-none shadow-2xl lg:shadow-none ${isMobile ? 'flex' : 'hidden lg:flex'}`}
     >
       {/* Linha de Toggle (Desktop) */}
       <CollapseEdge isCollapsed={isCollapsed} onToggle={toggleCollapse} />
