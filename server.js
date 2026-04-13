@@ -902,7 +902,6 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
     console.log(`[Stripe] Plano resolvido: ${resolvedPlan} → priceId: ${priceId}`);
 
     const sessionParams = {
-      payment_method_types: ['card'],
       customer_email: userEmail,
       line_items: [
         {
