@@ -178,7 +178,7 @@ export const Topbar: React.FC = () => {
                   >
                     <motion.span
                       className="absolute top-[2px] w-[10px] h-[10px] bg-white rounded-full shadow-sm"
-                      animate={{ x: useOwnPlan ? 13 : 2 }}
+                      animate={{ x: useOwnPlan ? 16 : 2 }}
                       transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                     />
                   </motion.div>
