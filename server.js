@@ -1043,43 +1043,58 @@ app.get('/api/subscription/sync', async (req, res) => {
       return res.status(404).json({ error: 'Assinatura não encontrada' });
     }
 
-    // Se tem stripe_subscription_id, buscar dados reais do Stripe
+    // Tenta obter a assinatura ativa diretamente do Stripe
+    let stripeSub = null;
+
+    // 1ª tentativa: pelo stripe_subscription_id
     if (sub.stripe_subscription_id) {
       try {
-        const stripeSub = await stripe.subscriptions.retrieve(sub.stripe_subscription_id);
-
-        const periodEnd = stripeSub.current_period_end
-          ? new Date(stripeSub.current_period_end * 1000).toISOString()
-          : null;
-
-        // Atualizar no Supabase com dados reais do Stripe
-        const { error: updateError } = await supabaseAdmin
-          .from('subscriptions')
-          .update({
-            status: stripeSub.status,
-            current_period_end: periodEnd,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', userId);
-
-        if (updateError) {
-          console.error('[Sync] Erro ao atualizar:', updateError);
-        } else {
-          console.log(`[Sync] Assinatura sincronizada para userId=${userId}, periodEnd=${periodEnd}`);
-        }
-
-        return res.json({
-          subscription: {
-            ...sub,
-            status: stripeSub.status,
-            current_period_end: periodEnd,
-          },
-          synced: true,
-        });
-      } catch (stripeErr) {
-        console.error('[Sync] Erro ao buscar do Stripe:', stripeErr.message);
-        return res.json({ subscription: sub, synced: false, error: stripeErr.message });
+        stripeSub = await stripe.subscriptions.retrieve(sub.stripe_subscription_id);
+      } catch (e) {
+        console.warn('[Sync] stripe_subscription_id inválido, tentando pelo customer:', e.message);
       }
+    }
+
+    // 2ª tentativa: pelo stripe_customer_id (busca a assinatura ativa do customer)
+    if (!stripeSub && sub.stripe_customer_id) {
+      try {
+        const list = await stripe.subscriptions.list({
+          customer: sub.stripe_customer_id,
+          status: 'active',
+          limit: 1,
+        });
+        if (list.data.length > 0) stripeSub = list.data[0];
+      } catch (e) {
+        console.warn('[Sync] Falha ao buscar por customer_id:', e.message);
+      }
+    }
+
+    if (stripeSub) {
+      const periodEnd = stripeSub.current_period_end
+        ? new Date(stripeSub.current_period_end * 1000).toISOString()
+        : null;
+
+      await supabaseAdmin
+        .from('subscriptions')
+        .update({
+          stripe_subscription_id: stripeSub.id,
+          status: stripeSub.status,
+          current_period_end: periodEnd,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId);
+
+      console.log(`[Sync] Sincronizado userId=${userId}, periodEnd=${periodEnd}`);
+
+      return res.json({
+        subscription: {
+          ...sub,
+          stripe_subscription_id: stripeSub.id,
+          status: stripeSub.status,
+          current_period_end: periodEnd,
+        },
+        synced: true,
+      });
     }
 
     res.json({ subscription: sub, synced: false });

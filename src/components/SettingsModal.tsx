@@ -61,7 +61,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
           const data = subResult.value.data
           setSubscription(data)
 
-          if (data?.stripe_subscription_id) {
+          if (data?.stripe_subscription_id || data?.stripe_customer_id) {
             try {
               const { subscription: synced } = await apiFetch<{ subscription?: any }>('/api/subscription/sync', undefined, {
                 userId: user.id,
