@@ -885,8 +885,8 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
 // Price IDs por plano
 const PLAN_PRICE_IDS = {
-  flow:  'price_1TJFEGJBeIyj93UbSOp5yZuY',
-  pulse: 'price_1TJxgVJBeIyj93UbvhaindFh',
+  flow:  'price_1TLaplCJClQAQ7Cji2whsLHw',
+  pulse: 'price_1TLaq9CJClQAQ7CjKHUjDoXi',
 };
 
 // 1. Criar Sessão de Checkout

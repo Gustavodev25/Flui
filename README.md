@@ -322,8 +322,8 @@ Acessível em `/admin` no frontend. Protegido por senha.
 
 | Plano | Price ID |
 |---|---|
-| Flow | `price_1TJFEGJBeIyj93UbSOp5yZuY` |
-| Pulse | `price_1TJxgVJBeIyj93UbvhaindFh` |
+| Flow | `price_1TLaplCJClQAQ7Cji2whsLHw` |
+| Pulse | `price_1TLaq9CJClQAQ7CjKHUjDoXi` |
 
 - **Modo:** Live (produção)
 - **Redirects após pagamento:**
