@@ -166,19 +166,27 @@ export const Topbar: React.FC = () => {
                   onClick={togglePlanMode}
                   className="flex items-center justify-between px-3 py-2 cursor-pointer group"
                 >
-                  <span className="text-[11px] font-medium text-[#37352f]/50 group-hover:text-[#37352f]/80 transition-colors duration-150 select-none">
-                    {useOwnPlan ? 'Workspace' : 'Meu plano'}
-                  </span>
-                  {/* Toggle pill minimalista */}
+                  <div className="flex flex-col gap-0.5 min-w-0 mr-3">
+                    <span className="text-[11px] font-semibold text-[#37352f]/70 group-hover:text-[#37352f] transition-colors duration-150 select-none leading-tight">
+                      {useOwnPlan ? 'Workspace' : 'Meu plano'}
+                    </span>
+                    <span className="text-[10px] text-[#37352f]/35 select-none leading-tight truncate">
+                      {useOwnPlan
+                        ? (workspaceMembership?.ownerName ?? 'Workspace')
+                        : `Plano ${subscription?.plan_id === 'pulse' ? 'Pulse' : 'Flow'} pessoal`}
+                    </span>
+                  </div>
+                  {/* Toggle pill — sem onClick aqui para evitar duplo disparo */}
                   <motion.div
-                    onClick={togglePlanMode}
-                    className={`relative w-7 h-[14px] rounded-full cursor-pointer flex-shrink-0 ${useOwnPlan ? 'bg-[#37352f]' : 'bg-[#d4d4d0]'}`}
+                    className="relative w-7 h-[14px] rounded-full flex-shrink-0"
                     animate={{ backgroundColor: useOwnPlan ? '#37352f' : '#d4d4d0' }}
-                    transition={{ duration: 0.2 }}
+                    initial={false}
+                    transition={{ duration: 0.15 }}
                   >
                     <motion.span
                       className="absolute top-[2px] w-[10px] h-[10px] bg-white rounded-full shadow-sm"
                       animate={{ x: useOwnPlan ? 16 : 2 }}
+                      initial={false}
                       transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                     />
                   </motion.div>
