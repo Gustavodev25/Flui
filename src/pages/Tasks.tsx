@@ -833,9 +833,9 @@ const Tasks: React.FC = () => {
 
   const handleAddTask = async (newTask: any) => {
     try {
-      // Convidados só podem criar tarefas de workspace
+      // Convidados só podem criar tarefas de workspace e são auto-atribuídos
       if (isWorkspaceMember) {
-        newTask = { ...newTask, visibility: 'workspace' }
+        newTask = { ...newTask, visibility: 'workspace', assignedTo: newTask.assignedTo || user?.id }
       }
       const isWorkspaceTask = newTask.visibility === 'workspace'
 
