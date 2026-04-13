@@ -1509,13 +1509,79 @@ app.get('/api/workspace/my-membership', async (req, res) => {
       .eq('user_id', membership.workspace_owner_id)
       .maybeSingle();
 
+    // Busca nome customizado do workspace
+    const { data: wsData } = await supabaseAdmin
+      .from('workspaces')
+      .select('name')
+      .eq('created_by', membership.workspace_owner_id)
+      .maybeSingle();
+
+    const defaultName = owner.user_metadata?.full_name || owner.user_metadata?.name || owner.email?.split('@')[0] || 'Workspace';
+
     res.json({
       membership: {
-        ownerName: owner.user_metadata?.full_name || owner.user_metadata?.name || owner.email?.split('@')[0] || 'Workspace',
+        ownerName: defaultName,
         ownerEmail: owner.email,
         planId: ownerSub?.plan_id || null,
+        workspaceName: wsData?.name || defaultName,
       }
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Retorna nome do workspace do owner
+app.get('/api/workspace/name', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
+
+  try {
+    const { data } = await supabaseAdmin
+      .from('workspaces')
+      .select('name')
+      .eq('created_by', userId)
+      .maybeSingle();
+    res.json({ name: data?.name || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Atualiza nome do workspace (só o dono pode)
+app.patch('/api/workspace/name', async (req, res) => {
+  const { ownerUserId, name } = req.body;
+  if (!ownerUserId || !name?.trim()) return res.status(400).json({ error: 'ownerUserId e name obrigatórios' });
+
+  try {
+    const { error } = await supabaseAdmin
+      .from('workspaces')
+      .upsert({ created_by: ownerUserId, name: name.trim() }, { onConflict: 'created_by' });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, name: name.trim() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Sincroniza nome e avatar do membro no workspace_members (bypassa RLS via supabaseAdmin)
+app.patch('/api/workspace/sync-profile', async (req, res) => {
+  const { userId, name, avatar } = req.body;
+  if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
+
+  try {
+    const updates = {};
+    if (name !== undefined) updates.member_name = name;
+    if (avatar !== undefined) updates.member_avatar = avatar;
+
+    if (Object.keys(updates).length === 0) return res.json({ success: true });
+
+    await supabaseAdmin
+      .from('workspace_members')
+      .update(updates)
+      .eq('member_user_id', userId);
+
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1561,16 +1627,19 @@ app.get('/api/workspace/shared-tasks', async (req, res) => {
 
     if (ownerErr) throw ownerErr;
 
-    // Busca info dos autores para exibição no card
-    const authorIds = [...new Set((ownerTasks || []).map(t => t.user_id).filter(Boolean))];
-    let authorsMap = {};
+    // Busca info dos autores e responsáveis para exibição no card
+    const allUserIds = [...new Set([
+      ...(ownerTasks || []).map(t => t.user_id),
+      ...(ownerTasks || []).map(t => t.assigned_to),
+    ].filter(Boolean))];
+    let usersMap = {};
 
-    if (authorIds.length > 0) {
+    if (allUserIds.length > 0) {
       const { data: { users }, error: usersErr } = await supabaseAdmin.auth.admin.listUsers();
       if (!usersErr && users) {
         for (const u of users) {
-          if (authorIds.includes(u.id)) {
-            authorsMap[u.id] = {
+          if (allUserIds.includes(u.id)) {
+            usersMap[u.id] = {
               name: u.user_metadata?.full_name || u.user_metadata?.name || u.email?.split('@')[0] || 'Membro',
               avatar: u.user_metadata?.avatar_url || null,
               email: u.email,
@@ -1582,7 +1651,8 @@ app.get('/api/workspace/shared-tasks', async (req, res) => {
 
     const tasks = (ownerTasks || []).map(t => ({
       ...t,
-      author: authorsMap[t.user_id] || null,
+      author: usersMap[t.user_id] || null,
+      assignee: t.assigned_to ? (usersMap[t.assigned_to] || null) : null,
     }));
 
     res.json({ tasks, workspaceOwnerId: ownerId });
@@ -1620,12 +1690,38 @@ app.post('/api/workspace/shared-tasks', async (req, res) => {
         progress: task.progress || 0,
         description: task.description || '',
         subtasks: task.subtasks || [],
+        assigned_to: task.assignedTo || null,
+        assigned_by: task.assignedTo ? userId : null,
       }])
       .select()
       .single();
 
     if (error) throw error;
     res.json({ task: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Atribui ou transfere tarefa workspace para um membro
+app.patch('/api/workspace/tasks/:taskId/assign', async (req, res) => {
+  const { taskId } = req.params;
+  const { assignedTo, assignedBy } = req.body;
+  if (!taskId || !assignedBy) return res.status(400).json({ error: 'taskId e assignedBy obrigatórios' });
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('tasks')
+      .update({
+        assigned_to: assignedTo || null,
+        assigned_by: assignedTo ? assignedBy : null,
+      })
+      .eq('id', taskId)
+      .select('id, assigned_to, assigned_by')
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, task: data });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -82,7 +82,7 @@ async function getSystemContext(userId, userName = 'Usuário') {
   const dates = precomputeDates(todayISO);
 
   // Busca tarefas com mais detalhes para dar contexto à IA (incluindo subtarefas)
-  const [taskResult, doneResult, followupsResult, membershipResult, ownerMembersResult] = await Promise.all([
+  const [taskResult, doneResult, followupsResult, membershipResult, ownerMembersResult, workspaceMembersResult] = await Promise.all([
     supabase
       .from('tasks')
       .select('id, title, status, priority, due_date, tags, subtasks')
@@ -113,6 +113,11 @@ async function getSystemContext(userId, userName = 'Usuário') {
       .from('workspace_members')
       .select('id', { count: 'exact', head: true })
       .eq('workspace_owner_id', userId),
+    // Busca membros do workspace (para detecção de nomes nas tarefas)
+    supabase
+      .from('workspace_members')
+      .select('member_user_id, member_name, member_email')
+      .eq('workspace_owner_id', userId),
   ]);
 
   const pendingTasks = taskResult.data || [];
@@ -125,6 +130,7 @@ async function getSystemContext(userId, userName = 'Usuário') {
   const isOwner = !isMember && (ownerMembersResult.count || 0) > 0;
   const hasWorkspace = isMember || isOwner;
   const workspaceRole = isMember ? 'membro' : (isOwner ? 'dono' : null);
+  const workspaceMembers = (workspaceMembersResult.data || []).filter(m => m.member_user_id);
 
   // Marcar follow-ups como resolvidos de forma otimista (IA vai mencioná-los nessa resposta)
   if (pendingFollowups.length > 0) {
@@ -211,7 +217,7 @@ ${pendingFollowups.map(f => {
 
 ═══ PERSONALIDADE (MUITO IMPORTANTE) ═══
 - VOCE E UMA PESSOA: Responda EXATAMENTE como um amigo inteligente responderia no WhatsApp. Nada de frases prontas de assistente virtual. Nada de "como posso te ajudar?", "estou aqui pra te ser útil", "em que posso te auxiliar?". Essas frases são PROIBIDAS — soam robóticas.
-- ESPELHAMENTO: Se o cara diz "Fala, tranquilo?", responde "E aí, tudo certo!". Se diz "Bom dia", responde "Bom dia! Tudo joia?". REAJA ao que a pessoa falou, não mude de assunto pra "como posso ajudar".
+- ESPELHAMENTO: Se o cara diz "Fala, tranquilo?", responde "E aí, tudo certo!". Se diz só "Bom dia" sem mais nada, responde "Bom dia! Tudo joia?". REAJA ao que a pessoa falou. MAS: se junto com a saudação veio um COMANDO ("Bom dia, cria uma tarefa pra João"), EXECUTE o comando primeiro e apenas inclua a saudação na resposta — não ignore o pedido.
 - TOM DE VOZ: Conversa de WhatsApp entre amigos. Leve, direto, esperto. Não é atendimento ao cliente. Não é SAC.
 - LINGUAGEM: Português brasileiro real. "Massa", "show", "beleza", "tranquilo", "bora", "tá", "pra", "deixa comigo", "pode crer". Fale como gente, não como manual.
 - CONCISÃO: Mensagens CURTAS. 1-2 frases na maioria das vezes. Só elabora mais quando realmente precisa (resumos, listas de tarefas). No WhatsApp ninguém manda parágrafo.
@@ -226,13 +232,21 @@ ${pendingFollowups.map(f => {
 ${hasWorkspace ? `═══ WORKSPACE (EQUIPE) ═══
 Este usuário faz parte de um workspace (é ${workspaceRole} da equipe).
 As tarefas podem ter visibilidade "personal" (só o usuário vê) ou "workspace" (toda a equipe vê).
-
+${isOwner && workspaceMembers.length > 0 ? `
+MEMBROS DA EQUIPE (use para atribuição de tarefas):
+${workspaceMembers.map(m => `- ${m.member_name || m.member_email?.split('@')[0] || 'Membro'} (email: ${m.member_email})`).join('\n')}
+` : ''}
 REGRAS DE VISIBILIDADE:
 - PADRÃO: Sempre crie como "personal" se não houver indicação clara de workspace.
 - Use visibility="workspace" quando o usuário disser: "pra equipe", "pro workspace", "pro time", "compartilha", "compartilhada", "todo mundo vê", "a equipe precisa saber", "anota pra equipe", "coloca no workspace".
 - Use visibility="personal" explicitamente quando disser: "só pra mim", "particular", "pessoal", "não precisa compartilhar".
 - Se a mensagem for AMBÍGUA (não menciona equipe nem pessoal): crie como "personal" e NÃO pergunte — a menos que o contexto seja claramente colaborativo (ex: "pra gente terminar o projeto").
 - NUNCA pergunte "quer criar como pessoal ou workspace?" de forma robótica. Se precisar confirmar, seja natural: "Anotei, ${userName}! Essa é só sua ou quer compartilhar com a equipe?"
+
+ATRIBUIÇÃO DE TAREFAS (assigned_to_name):
+- Se o usuário mencionar o nome de um membro da equipe como responsável pela tarefa (ex: "o Luis precisa fazer X", "atribui ao Carlos", "isso é pra Ana", "tarefa do João"), use assigned_to_name com o nome do membro e visibility="workspace".
+- O assigned_to_name deve ser exatamente o nome como aparece na lista de membros.
+- Se não souber quem é o responsável, não use assigned_to_name.
 
 ` : ''}═══ REGRAS DE AÇÃO ═══
 1. FERRAMENTA OBRIGATÓRIA: Você JAMAIS pode fingir que criou, atualizou ou deletou uma tarefa sem chamar a ferramenta correspondente. Se sua resposta diz "anotei", "criei", "registrei" ou qualquer variação, você DEVE ter chamado TaskCreate ou TaskBatchCreate antes. NUNCA simule uma ação.
@@ -496,7 +510,12 @@ function isConversationalMessage(message) {
 }
 
 function isCreationIntent(message) {
-  // Se é claramente conversa casual, NÃO é intenção de criação
+  // Comandos explícitos de criação de tarefa sempre têm prioridade,
+  // mesmo quando acompanhados de saudação ("Bom dia, cria uma tarefa pra X")
+  if (/\bcri(a|ar|ei)\s+(uma\s+)?tarefa/i.test(message)) return true;
+  if (/\badiciona(r)?\s+(uma\s+)?tarefa/i.test(message)) return true;
+  if (/\bme\s+lembr/i.test(message) && /\bcri(a|ar)\b/i.test(message)) return true;
+  // Se é claramente conversa casual SEM comando de criação, NÃO é intenção de criação
   if (isConversationalMessage(message)) return false;
   return CREATION_TRIGGERS.some(re => re.test(message));
 }

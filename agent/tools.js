@@ -46,6 +46,7 @@ const taskCreateSchema = z.object({
   whatsapp_message: z.string().optional(),
   source: z.enum(['user', 'whatsapp']).optional(),
   visibility: z.enum(['personal', 'workspace']).optional(),
+  assigned_to_name: z.string().optional(), // nome do membro para auto-atribuição
 });
 
 const taskUpdateSchema = z.object({
@@ -636,6 +637,25 @@ async function resolveWorkspaceOwnerId(userId, visibility) {
   return membership ? membership.workspace_owner_id : userId;
 }
 
+async function resolveAssignedTo(userId, assignedToName, visibility) {
+  if (!assignedToName || visibility !== 'workspace') return null;
+  // Busca membros do workspace do owner
+  const ownerIdResult = await resolveWorkspaceOwnerId(userId, 'workspace');
+  if (!ownerIdResult) return null;
+  const { data: members } = await supabase
+    .from('workspace_members')
+    .select('member_user_id, member_name, member_email')
+    .eq('workspace_owner_id', ownerIdResult);
+  if (!members) return null;
+  const nameLower = assignedToName.toLowerCase().trim();
+  const match = members.find(m => {
+    const mName = (m.member_name || '').toLowerCase();
+    const mEmail = (m.member_email || '').toLowerCase();
+    return mName.includes(nameLower) || nameLower.includes(mName.split(' ')[0]) || mEmail.startsWith(nameLower);
+  });
+  return match ? match.member_user_id : null;
+}
+
 async function executeTaskCreate(args, userId) {
   const parsed = taskCreateSchema.parse(args);
   const dueDateFixed = fixDueDate(parsed.due_date);
@@ -643,6 +663,9 @@ async function executeTaskCreate(args, userId) {
 
   // Resolve workspace_owner_id se necessário
   const workspaceOwnerId = await resolveWorkspaceOwnerId(userId, visibility);
+
+  // Resolve responsável por nome (se informado)
+  const assignedToId = await resolveAssignedTo(userId, parsed.assigned_to_name, visibility);
 
   // Monta array de subtarefas no formato do banco (suporta timer por subtarefa)
   const now = Date.now();
@@ -681,6 +704,8 @@ async function executeTaskCreate(args, userId) {
     whatsapp_message: parsed.whatsapp_message || null,
     visibility,
     workspace_owner_id: workspaceOwnerId,
+    assigned_to: assignedToId || null,
+    assigned_by: assignedToId ? userId : null,
   };
 
   // Adiciona descrição (auto-gera se não veio)
@@ -727,7 +752,7 @@ async function executeTaskCreate(args, userId) {
     subtask_count: subtaskCount,
     timer_set: !!data.timer_at,
     timer_minutes: parsed.timer_minutes || null,
-    _hint: `Tarefa "${data.title}" criada com prioridade ${priorityLabel} pra ${dateLabel}${subtaskHint}.${timerHint}${parsed.reminder_days_before ? ` Lembrete configurado para ${parsed.reminder_days_before} dia(s) antes do prazo.` : ''}${visibility === 'workspace' ? ' Tarefa compartilhada com o workspace (equipe).' : ''} Responda de forma natural e curta. NUNCA use emojis, datas ISO, IDs ou JSON.`
+    _hint: `Tarefa "${data.title}" criada com prioridade ${priorityLabel} pra ${dateLabel}${subtaskHint}.${timerHint}${parsed.reminder_days_before ? ` Lembrete configurado para ${parsed.reminder_days_before} dia(s) antes do prazo.` : ''}${visibility === 'workspace' ? ' Tarefa compartilhada com o workspace (equipe).' : ''}${assignedToId ? ` Atribuída a ${parsed.assigned_to_name || 'membro da equipe'}.` : ''} Responda de forma natural e curta. NUNCA use emojis, datas ISO, IDs ou JSON.`
   };
 }
 
