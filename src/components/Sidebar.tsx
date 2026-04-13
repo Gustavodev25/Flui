@@ -381,11 +381,12 @@ export const Sidebar: React.FC = () => {
         <div className="-mx-3 h-px bg-[#e9e9e7]" />
 
         {/* Card de Membro Convidado do Workspace */}
-        {isWorkspaceMember && (() => {
-          const planLabel = workspaceMembership!.planId === 'pulse' ? 'Pulse' : 'Flow'
-          const ownerName = workspaceMembership!.ownerName
-          const displayName = workspaceMembership!.workspaceName || ownerName
-          const avatarValue = workspaceMembership!.ownerEmail || ownerName
+        {isWorkspaceMember && (workspaceMembership || ctxMembership) && (() => {
+          const membership = workspaceMembership || ctxMembership!
+          const planLabel = membership.planId === 'pulse' ? 'Pulse' : 'Flow'
+          const ownerName = membership.ownerName
+          const displayName = (workspaceMembership?.workspaceName) || ownerName
+          const avatarValue = membership.ownerEmail || ownerName
 
           return (
             <AnimatePresence mode="wait">
