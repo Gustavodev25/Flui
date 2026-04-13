@@ -600,8 +600,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                                   <p className="text-sm font-semibold text-[#37352f]/80">
                                     {new Date(subscription.current_period_end).toLocaleDateString('pt-BR')}
                                   </p>
-                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${badgeColor}`}>
-                                    <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${badgeColor}`}>
                                     {daysLeft <= 0 ? 'Hoje' : `${daysLeft}d`}
                                   </span>
                                 </div>
@@ -612,7 +611,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                           </div>
                           <div className="space-y-1">
                             <p className="text-[11px] font-bold text-[#37352f]/50">Bandeira do Cartão</p>
-                            <p className="text-sm font-semibold text-[#37352f]/80">Cartão via Stripe</p>
+                            <p className="text-sm font-semibold text-[#37352f]/80">
+                              {subscription?.card_brand
+                                ? `${({ visa: 'Visa', mastercard: 'Mastercard', amex: 'American Express', elo: 'Elo', hipercard: 'Hipercard', discover: 'Discover', diners: 'Diners', jcb: 'JCB', unionpay: 'UnionPay' } as Record<string, string>)[subscription.card_brand] ?? subscription.card_brand.charAt(0).toUpperCase() + subscription.card_brand.slice(1)}${subscription?.card_last4 ? ` •••• ${subscription.card_last4}` : ''}`
+                                : 'Cartão via Stripe'}
+                            </p>
                           </div>
                         </div>
 

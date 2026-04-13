@@ -476,7 +476,7 @@ const CREATION_TRIGGERS = [
   /\bnão\s+deixa\s+(eu\s+)?esquecer/i,
   /\banota\s+(aí|isso|pra mim)\b/i,   // "anota aí", "anota isso" (precisa do complemento)
   /\bregistra\b/i,            // "registra" (verbo imperativo, não "registrar" em contexto genérico)
-  /\bpreciso\s+(fazer|de|comprar|ligar|ir|criar|mandar|enviar|resolver|terminar|come[cç]ar|preparar)/i,
+  /\bpreciso\s+(fazer|de|comprar|ligar|ir|criar|mandar|enviar|resolver|terminar|come[cç]ar|preparar|ver|falar|conversar|gravar|verificar|estudar|analisar|checar|testar|rever|apresentar)/i,
   /\btenho\s+que/i,
   /\btenho\s+uma\s+tarefa/i,
   /\bcri(a|ar|ei)\s+(uma\s+)?tarefa/i,
@@ -505,6 +505,15 @@ function isConversationalMessage(message) {
   const isLong = message.length > 200;
   const matchesConversational = CONVERSATIONAL_PATTERNS.some(re => re.test(message));
 
+  // Se tem múltiplos "preciso" (≥2), é lista de tarefas mesmo com saudação
+  const lower = message.toLowerCase();
+  const hasMultiplePreciso = (lower.match(/\bpreciso\b/g) || []).length >= 2;
+  if (hasMultiplePreciso) return false;
+
+  // Se tem ação clara de tarefa junto com saudação, não é conversa pura
+  const hasTaskAction = CREATION_TRIGGERS.some(re => re.test(message));
+  if (matchesConversational && hasTaskAction) return false;
+
   if (matchesConversational) return true;
   // Mensagem muito longa sem verbos imperativos claros = provavelmente conversa
   if (isLong && !/(^|\.\s*)(cria|anota|registra|salva|adiciona|me\s+lembra)\b/i.test(message)) return true;
@@ -514,12 +523,14 @@ function isConversationalMessage(message) {
 // Padrões fortes de criação que SEMPRE vencem a detecção conversacional,
 // mesmo com "Bom dia" ou "tudo bem?" no mesmo texto
 const STRONG_CREATION_OVERRIDES = [
-  /\bcri(a|ar|ei)\s+(uma\s+)?tarefa/i,           // "cria uma tarefa"
+  /\bcri(a|ou|ar|ei)\s+(uma[s]?\s+)?tarefa[s]?/i,  // "cria uma tarefa", "criou umas tarefas"
   /\badiciona(r)?\s+(uma\s+)?tarefa/i,           // "adiciona tarefa"
   /\b(quero|queria|gostaria\s+de)\s+(uma\s+)?tarefa\b/i,  // "queria uma tarefa pro Fernando"
   /\btarefa\s+(pro|pra|para)\s+/i,                // "tarefa pro Fernando"
   /\bme\s+lembr/i,                                // "me lembra de..."
   /\bme\s+avis/i,                                 // "me avisa..."
+  /\bdeixa\s+(marcad[ao]|anotat[ao]|registrad[ao])\b/i,  // "deixa marcado", "deixa anotado"
+  /\bpreciso\s+(ver|falar|conversar|gravar|verificar|estudar|analisar|checar|testar|rever|apresentar)\b/i,
 ];
 
 function isCreationIntent(message) {
@@ -538,6 +549,8 @@ export function hasMultipleTasks(message) {
   if (weekdays.filter(d => lower.includes(d)).length >= 2) return true;
   // Múltiplos "também" indicam lista de itens distintos
   if ((lower.match(/\btambém\b/g) || []).length >= 2) return true;
+  // Múltiplos "preciso" indicam múltiplas tarefas distintas
+  if ((lower.match(/\bpreciso\b/g) || []).length >= 2) return true;
   // Número explícito de coisas/tarefas: "três coisas", "2 tarefas", "quatro pontos"
   if (/\b(duas?|tr[eê]s|quatro|cinco|[2-9])\s+(coisas?|tarefas?|itens?|pontos?|assuntos?|t[oó]picos?)\b/.test(lower)) return true;
   // Sequência com "primeiro" + outro marcador

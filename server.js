@@ -1046,10 +1046,12 @@ app.get('/api/subscription/sync', async (req, res) => {
     // Tenta obter a assinatura ativa diretamente do Stripe
     let stripeSub = null;
 
-    // 1ª tentativa: pelo stripe_subscription_id
+    // 1ª tentativa: pelo stripe_subscription_id (com payment method expandido)
     if (sub.stripe_subscription_id) {
       try {
-        stripeSub = await stripe.subscriptions.retrieve(sub.stripe_subscription_id);
+        stripeSub = await stripe.subscriptions.retrieve(sub.stripe_subscription_id, {
+          expand: ['default_payment_method'],
+        });
       } catch (e) {
         console.warn('[Sync] stripe_subscription_id inválido, tentando pelo customer:', e.message);
       }
@@ -1062,6 +1064,7 @@ app.get('/api/subscription/sync', async (req, res) => {
           customer: sub.stripe_customer_id,
           status: 'active',
           limit: 1,
+          expand: ['data.default_payment_method'],
         });
         if (list.data.length > 0) stripeSub = list.data[0];
       } catch (e) {
@@ -1070,9 +1073,39 @@ app.get('/api/subscription/sync', async (req, res) => {
     }
 
     if (stripeSub) {
-      const periodEnd = stripeSub.current_period_end
-        ? new Date(stripeSub.current_period_end * 1000).toISOString()
+      // Na API Stripe 2025-01-27.acacia, current_period_end foi movido para subscription.items.data[0]
+      const rawPeriodEnd = stripeSub.current_period_end
+        || stripeSub.items?.data?.[0]?.current_period_end
+        || null;
+      const periodEnd = rawPeriodEnd
+        ? new Date(rawPeriodEnd * 1000).toISOString()
         : null;
+
+      // Extrair dados do cartão
+      let cardBrand = null;
+      let cardLast4 = null;
+
+      const pm = stripeSub.default_payment_method;
+      if (pm && pm.card) {
+        cardBrand = pm.card.brand;
+        cardLast4 = pm.card.last4;
+      }
+
+      // Fallback: buscar payment method padrão do customer
+      if (!cardBrand && sub.stripe_customer_id) {
+        try {
+          const customer = await stripe.customers.retrieve(sub.stripe_customer_id, {
+            expand: ['invoice_settings.default_payment_method'],
+          });
+          const defaultPm = customer.invoice_settings?.default_payment_method;
+          if (defaultPm && defaultPm.card) {
+            cardBrand = defaultPm.card.brand;
+            cardLast4 = defaultPm.card.last4;
+          }
+        } catch (e) {
+          console.warn('[Sync] Falha ao buscar payment method do customer:', e.message);
+        }
+      }
 
       await supabaseAdmin
         .from('subscriptions')
@@ -1084,7 +1117,7 @@ app.get('/api/subscription/sync', async (req, res) => {
         })
         .eq('user_id', userId);
 
-      console.log(`[Sync] Sincronizado userId=${userId}, periodEnd=${periodEnd}`);
+      console.log(`[Sync] Sincronizado userId=${userId}, periodEnd=${periodEnd}, cardBrand=${cardBrand}`);
 
       return res.json({
         subscription: {
@@ -1092,6 +1125,8 @@ app.get('/api/subscription/sync', async (req, res) => {
           stripe_subscription_id: stripeSub.id,
           status: stripeSub.status,
           current_period_end: periodEnd,
+          card_brand: cardBrand,
+          card_last4: cardLast4,
         },
         synced: true,
       });

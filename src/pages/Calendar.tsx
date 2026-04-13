@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Circle, CheckCircle2, X, Plus, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Circle, CheckCircle2, X, Plus, Clock, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useSubscription } from '../contexts/SubscriptionContext'
 import { supabase } from '../lib/supabase'
+import { apiFetch } from '../lib/api'
+import Avvvatars from 'avvvatars-react'
 import Modal from '../components/ui/Modal'
 import TaskForm from '../components/TaskForm'
+import finlozLogo from '../assets/logo/lui.svg'
 
 interface Subtask {
   id: string
@@ -27,6 +31,15 @@ interface Task {
   whatsappMessage?: string
   reminderDaysBefore?: number
   reminderFired?: boolean
+  visibility?: 'personal' | 'workspace'
+  workspaceOwnerId?: string
+  authorName?: string
+  authorAvatar?: string
+  authorEmail?: string
+  assignedToId?: string
+  assignedToName?: string
+  assignedToAvatar?: string
+  assignedToEmail?: string
 }
 
 const MONTHS_PT = [
@@ -54,6 +67,10 @@ function todayKey() {
 
 export default function CalendarPage() {
   const { user } = useAuth()
+  const { workspaceModeActive, hasPulse, isWorkspaceMember } = useSubscription()
+  const hasWorkspaceAccess = hasPulse || isWorkspaceMember
+  const isWorkspaceView = workspaceModeActive || hasPulse
+  const userEmail = user?.email
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -77,25 +94,60 @@ export default function CalendarPage() {
     whatsappMessage: dbTask.whatsapp_message || undefined,
     reminderDaysBefore: dbTask.reminder_days_before ?? undefined,
     reminderFired: dbTask.reminder_fired || false,
+    visibility: dbTask.visibility || 'personal',
+    workspaceOwnerId: dbTask.workspace_owner_id || undefined,
+    authorName: dbTask.author?.name || undefined,
+    authorAvatar: dbTask.author?.avatar || undefined,
+    authorEmail: dbTask.author?.email || undefined,
+    assignedToId: dbTask.assigned_to || dbTask.assignee?.id || undefined,
+    assignedToName: dbTask.assignee?.name || undefined,
+    assignedToAvatar: dbTask.assignee?.avatar || undefined,
+    assignedToEmail: dbTask.assignee?.email || undefined,
   }), [])
 
   const fetchTasks = useCallback(async () => {
     if (!user) return
     try {
       setLoading(true)
-      const { data, error } = await supabase
+
+      // Busca tarefas pessoais sempre
+      const { data: personalData, error: personalError } = await supabase
         .from('tasks')
         .select('*')
         .eq('user_id', user.id)
+        .eq('visibility', 'personal')
         .order('created_at', { ascending: false })
-      if (error) throw error
-      setTasks((data || []).map(mapDbTask))
+      if (personalError) throw personalError
+      const personalTasks = (personalData || []).map(mapDbTask)
+
+      // Se tem acesso ao workspace, busca também as tarefas compartilhadas
+      if (hasWorkspaceAccess) {
+        try {
+          const result = await apiFetch<{ tasks: any[]; workspaceOwnerId: string | null }>(
+            `/api/workspace/shared-tasks`,
+            undefined,
+            { userId: user.id }
+          )
+          const workspaceTasks = (result.tasks || []).map(mapDbTask)
+          // Combina sem duplicatas (workspace tasks sobrepõe pela id)
+          const seen = new Set<string>()
+          const combined: Task[] = []
+          for (const t of [...workspaceTasks, ...personalTasks]) {
+            if (!seen.has(t.id)) { seen.add(t.id); combined.push(t) }
+          }
+          setTasks(combined)
+        } catch {
+          setTasks(personalTasks)
+        }
+      } else {
+        setTasks(personalTasks)
+      }
     } catch (err) {
       console.error('Erro ao buscar tarefas:', err)
     } finally {
       setLoading(false)
     }
-  }, [user, mapDbTask])
+  }, [user, mapDbTask, hasWorkspaceAccess])
 
   useEffect(() => {
     fetchTasks()
@@ -550,35 +602,63 @@ export default function CalendarPage() {
                                 </p>
                               )}
 
-                              <div className="flex items-center gap-2 mt-1.5 opacity-50">
-                                {task.priority === 'high' && (
-                                  <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">Urgente</span>
-                                )}
-                                {task.priority === 'medium' && (
-                                  <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tighter">Média</span>
-                                )}
-                                
-                                {(task.priority === 'high' || task.priority === 'medium') && ((task.subtasks?.length ?? 0) > 0 || task.source === 'whatsapp') && (
-                                  <span className="text-[9px]">•</span>
-                                )}
+                              <div className="flex items-center justify-between mt-1.5">
+                                {/* Workspace badge + info */}
+                                <div className="flex items-center gap-1.5 opacity-50">
+                                  {isWorkspaceView && task.visibility === 'workspace' && (
+                                    <div className="flex items-center gap-1">
+                                      <Users size={9} className="text-[#37352f]" />
+                                      {task.authorName && task.authorEmail !== userEmail && (
+                                        <span className="text-[9px] font-semibold text-[#37352f]/60 truncate max-w-[60px]">{task.authorName}</span>
+                                      )}
+                                    </div>
+                                  )}
+                                  {!isWorkspaceView && task.visibility === 'workspace' && (
+                                    <Users size={9} className="text-[#37352f] opacity-40" />
+                                  )}
+                                  {task.priority === 'high' && (
+                                    <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">Crítica</span>
+                                  )}
+                                  {task.priority === 'medium' && (
+                                    <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tighter">Média</span>
+                                  )}
+                                  {task.subtasks && task.subtasks.length > 0 && (
+                                    <span className="text-[9px] font-bold tracking-tight">
+                                      {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
+                                    </span>
+                                  )}
+                                  {task.source === 'whatsapp' && (
+                                    <div className="flex items-center gap-0.5 opacity-30 grayscale">
+                                      <img src={finlozLogo} alt="Lui" className="w-2.5 h-2.5 object-contain" />
+                                      <span className="text-[8px] font-bold text-[#37352f] tracking-wider uppercase">Lui</span>
+                                    </div>
+                                  )}
+                                </div>
 
-                                {task.subtasks && task.subtasks.length > 0 && (
-                                  <span className="text-[9px] font-bold tracking-tight">
-                                    {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
-                                  </span>
-                                )}
-
-                                {(task.subtasks && task.subtasks.length > 0) && task.source === 'whatsapp' && (
-                                  <span className="text-[9px]">•</span>
-                                )}
-
-                                {task.source === 'whatsapp' && (
-                                  <div className="flex items-center gap-0.5">
-                                    <svg viewBox="0 0 24 24" width="10" height="10" fill="#25D366">
-                                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-                                    </svg>
-                                  </div>
-                                )}
+                                {/* Avatares: assignee + author */}
+                                <div className="flex items-center gap-[-4px] flex-shrink-0">
+                                  {task.assignedToId && (
+                                    <div
+                                      className="border-2 border-white rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white z-10"
+                                      title={`Responsável: ${task.assignedToName || 'Membro'}`}
+                                      style={{ width: 18, height: 18 }}
+                                    >
+                                      {task.assignedToAvatar
+                                        ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display='none' }} />
+                                        : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={18} style="character" />
+                                      }
+                                    </div>
+                                  )}
+                                  {task.source === 'whatsapp' ? null : isWorkspaceView && task.authorAvatar ? (
+                                    <div className="border border-[#e9e9e7]/60 rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white" title={task.authorName} style={{ width: 18, height: 18 }}>
+                                      <img src={task.authorAvatar} alt={task.authorName} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                    </div>
+                                  ) : (
+                                    <div className="border border-[#e9e9e7]/60 rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white" style={{ width: 18, height: 18 }}>
+                                      <Avvvatars value={isWorkspaceView && task.authorEmail ? task.authorEmail : (userEmail || 'guest')} size={18} style="character" />
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -714,18 +794,61 @@ export default function CalendarPage() {
                                 </p>
                               )}
 
-                              <div className="flex items-center gap-2 mt-1.5 opacity-50">
-                                {task.priority === 'high' && (
-                                  <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">Urgente</span>
-                                )}
-                                {task.priority === 'medium' && (
-                                  <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tighter">Média</span>
-                                )}
-                                {task.subtasks && task.subtasks.length > 0 && (
-                                  <span className="text-[9px] font-bold tracking-tight">
-                                    {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
-                                  </span>
-                                )}
+                              <div className="flex items-center justify-between mt-1.5">
+                                <div className="flex items-center gap-1.5 opacity-50">
+                                  {isWorkspaceView && task.visibility === 'workspace' && (
+                                    <div className="flex items-center gap-1">
+                                      <Users size={9} className="text-[#37352f]" />
+                                      {task.authorName && task.authorEmail !== userEmail && (
+                                        <span className="text-[9px] font-semibold text-[#37352f]/60 truncate max-w-[60px]">{task.authorName}</span>
+                                      )}
+                                    </div>
+                                  )}
+                                  {!isWorkspaceView && task.visibility === 'workspace' && (
+                                    <Users size={9} className="text-[#37352f] opacity-40" />
+                                  )}
+                                  {task.priority === 'high' && (
+                                    <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">Crítica</span>
+                                  )}
+                                  {task.priority === 'medium' && (
+                                    <span className="text-[9px] font-bold text-amber-500 uppercase tracking-tighter">Média</span>
+                                  )}
+                                  {task.subtasks && task.subtasks.length > 0 && (
+                                    <span className="text-[9px] font-bold tracking-tight">
+                                      {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
+                                    </span>
+                                  )}
+                                  {task.source === 'whatsapp' && (
+                                    <div className="flex items-center gap-0.5 opacity-30 grayscale">
+                                      <img src={finlozLogo} alt="Lui" className="w-2.5 h-2.5 object-contain" />
+                                      <span className="text-[8px] font-bold text-[#37352f] tracking-wider uppercase">Lui</span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-[-4px] flex-shrink-0">
+                                  {task.assignedToId && (
+                                    <div
+                                      className="border-2 border-white rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white z-10"
+                                      title={`Responsável: ${task.assignedToName || 'Membro'}`}
+                                      style={{ width: 18, height: 18 }}
+                                    >
+                                      {task.assignedToAvatar
+                                        ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display='none' }} />
+                                        : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={18} style="character" />
+                                      }
+                                    </div>
+                                  )}
+                                  {task.source === 'whatsapp' ? null : isWorkspaceView && task.authorAvatar ? (
+                                    <div className="border border-[#e9e9e7]/60 rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white" title={task.authorName} style={{ width: 18, height: 18 }}>
+                                      <img src={task.authorAvatar} alt={task.authorName} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                    </div>
+                                  ) : (
+                                    <div className="border border-[#e9e9e7]/60 rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white" style={{ width: 18, height: 18 }}>
+                                      <Avvvatars value={isWorkspaceView && task.authorEmail ? task.authorEmail : (userEmail || 'guest')} size={18} style="character" />
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>
