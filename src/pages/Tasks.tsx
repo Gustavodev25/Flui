@@ -657,11 +657,11 @@ const DroppableContainer: React.FC<{
 
 const Tasks: React.FC = () => {
   const { user } = useAuth()
-  const { isWorkspaceMember, workspaceMembership, hasPulse } = useSubscription()
-  const isAdmin = hasPulse && !isWorkspaceMember
-  const isGuest = isWorkspaceMember
+  const { isWorkspaceMember, workspaceModeActive, workspaceMembership, hasPulse } = useSubscription()
+  const isAdmin = hasPulse && !workspaceModeActive
+  const isGuest = workspaceModeActive
   const [viewMode, setViewMode] = useState<'board' | 'table'>('board')
-  const [taskView, setTaskView] = useState<'personal' | 'workspace'>(isGuest ? 'workspace' : 'personal')
+  const [taskView, setTaskView] = useState<'personal' | 'workspace'>(workspaceModeActive ? 'workspace' : 'personal')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [tasks, setTasks] = useState<Task[]>([])
@@ -750,10 +750,10 @@ const Tasks: React.FC = () => {
     }
   }, [mapDbTask, user, taskView])
 
-  // Garante que convidados fiquem sempre na view workspace (dados de contexto são assíncronos)
+  // Sincroniza a view de tarefas com o modo ativo (workspace ou plano próprio)
   useEffect(() => {
-    if (isWorkspaceMember) setTaskView('workspace')
-  }, [isWorkspaceMember])
+    setTaskView(workspaceModeActive ? 'workspace' : 'personal')
+  }, [workspaceModeActive])
 
   // Recarrega quando muda de view
   useEffect(() => {
@@ -834,7 +834,7 @@ const Tasks: React.FC = () => {
   const handleAddTask = async (newTask: any) => {
     try {
       // Convidados só podem criar tarefas de workspace e são auto-atribuídos
-      if (isWorkspaceMember) {
+      if (isGuest) {
         newTask = { ...newTask, visibility: 'workspace', assignedTo: newTask.assignedTo || user?.id }
       }
       const isWorkspaceTask = newTask.visibility === 'workspace'
@@ -1166,7 +1166,7 @@ const Tasks: React.FC = () => {
               <h1 className="text-lg sm:text-2xl font-bold tracking-tight mb-0.5 sm:mb-1">Tarefas</h1>
               <p className="text-xs sm:text-sm text-[#37352f]/50 font-medium truncate">
                 {taskView === 'workspace'
-                  ? (isWorkspaceMember ? `Workspace de ${workspaceMembership?.ownerName || 'Equipe'}` : 'Tarefas do seu workspace')
+                  ? (isGuest ? `Workspace de ${workspaceMembership?.ownerName || 'Equipe'}` : 'Tarefas do seu workspace')
                   : 'Veja e organize seu fluxo de trabalho.'}
               </p>
             </div>
@@ -1454,8 +1454,8 @@ const Tasks: React.FC = () => {
           onCancel={() => { setIsModalOpen(false); setEditingTask(null); }}
           isEditing={!!editingTask}
           hasWorkspaceAccess={isAdmin ? hasWorkspaceAccess : false}
-          defaultVisibility={isWorkspaceMember ? 'workspace' : (taskView === 'workspace' ? 'workspace' : 'personal')}
-          workspaceName={isWorkspaceMember ? (workspaceMembership?.ownerName || 'Workspace') : undefined}
+          defaultVisibility={isGuest ? 'workspace' : (taskView === 'workspace' ? 'workspace' : 'personal')}
+          workspaceName={isGuest ? (workspaceMembership?.ownerName || 'Workspace') : undefined}
           workspaceMembers={workspaceMembers}
           currentUserId={user?.id}
         />
