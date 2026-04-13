@@ -632,8 +632,10 @@ const DroppableContainer: React.FC<{
 const Tasks: React.FC = () => {
   const { user } = useAuth()
   const { isWorkspaceMember, workspaceMembership, hasPulse } = useSubscription()
+  const isAdmin = hasPulse && !isWorkspaceMember
+  const isGuest = isWorkspaceMember && !hasPulse
   const [viewMode, setViewMode] = useState<'board' | 'table'>('board')
-  const [taskView, setTaskView] = useState<'personal' | 'workspace'>('personal')
+  const [taskView, setTaskView] = useState<'personal' | 'workspace'>(isGuest ? 'workspace' : 'personal')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [tasks, setTasks] = useState<Task[]>([])
@@ -1136,8 +1138,8 @@ const Tasks: React.FC = () => {
               ))}
             </div>
 
-            {/* Toggle pessoal / workspace */}
-            {hasWorkspaceAccess && (
+            {/* Toggle pessoal / workspace — somente para admin (dono), convidados ficam fixos em workspace */}
+            {hasWorkspaceAccess && isAdmin && (
               <div className="flex items-center gap-1 bg-[#f7f7f5] border border-[#e9e9e7] rounded-lg p-0.5 mb-3">
                 <button
                   onClick={() => setTaskView('personal')}
@@ -1375,8 +1377,8 @@ const Tasks: React.FC = () => {
           onSubmit={handleAddTask}
           onCancel={() => { setIsModalOpen(false); setEditingTask(null); }}
           isEditing={!!editingTask}
-          hasWorkspaceAccess={hasWorkspaceAccess}
-          defaultVisibility={taskView === 'workspace' ? 'workspace' : 'personal'}
+          hasWorkspaceAccess={isAdmin ? hasWorkspaceAccess : false}
+          defaultVisibility={isGuest ? 'workspace' : (taskView === 'workspace' ? 'workspace' : 'personal')}
           workspaceName={isWorkspaceMember ? (workspaceMembership?.ownerName || 'Workspace') : undefined}
         />
       </Modal>
