@@ -933,7 +933,7 @@ function extractTimerMinutesFromMessage(message) {
   ) || lower.match(
     /\b(\d{1,2})[h:](\d{2})\s*(?:da\s+(manh[aã]|tarde|noite))?/
   ) || lower.match(
-    /\b(\d{1,2})\s*h(?:oras?)?\s*(?:da\s+(manh[aã]|tarde|noite))\b/
+    /\b(\d{1,2})()\s*h(?:oras?)?\s*(?:da\s+(manh[aã]|tarde|noite))\b/
   );
 
   if (absMatch) {
@@ -981,7 +981,7 @@ function extractAbsoluteTimerAt(message) {
   ) || lower.match(
     /\b(\d{1,2})[h:](\d{2})\s*(?:da\s+(manh[aã]|tarde|noite))?/
   ) || lower.match(
-    /\b(\d{1,2})\s*h(?:oras?)?\s*(?:da\s+(manh[aã]|tarde|noite))\b/
+    /\b(\d{1,2})()\s*h(?:oras?)?\s*(?:da\s+(manh[aã]|tarde|noite))\b/
   );
 
   if (!absMatch) return null;
