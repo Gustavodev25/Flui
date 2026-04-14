@@ -670,17 +670,7 @@ const LandingPage: React.FC = () => {
 
             {/* Card Flow */}
             <div className="relative flex flex-col">
-              <motion.div 
-                initial={{ opacity: 0, y: 10, x: '-50%' }}
-                whileInView={{ opacity: 1, y: 0, x: '-50%' }}
-                viewport={{ once: true }}
-                transition={{ delay: 0.5, duration: 0.5 }}
-                className="absolute -top-3 left-1/2 z-20 bg-white border border-[#e9e9e7] px-4 py-1.5 rounded-full shadow-sm flex items-center whitespace-nowrap"
-              >
-                <span className="text-[10px] font-bold text-[#37352f]/60 tracking-tight">Garantia de reembolso em até 7 dias</span>
-              </motion.div>
-
-              {/* Card Flow - Destacado */}
+{/* Card Flow - Destacado */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 30 }}
                 whileInView={{ opacity: 1, scale: 1, y: 0 }}
@@ -719,19 +709,15 @@ const LandingPage: React.FC = () => {
                     'Sem limites ou amarras',
                     'Suporte Prioritário'
                   ].map((benefit, i) => (
-                    <motion.div
+                    <div
                       key={i}
-                      initial={{ opacity: 0, x: -10 }}
-                      whileInView={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.5, delay: i * 0.1 }}
-                      viewport={{ once: true }}
                       className="flex items-center gap-3 text-sm font-medium text-[#37352f]/70"
                     >
                       <div className="w-4 h-4 rounded-full bg-[#f1f1f0] border border-[#e9e9e7] flex items-center justify-center shrink-0">
                         <svg className="w-2.5 h-2.5 text-[#37352f]/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                       </div>
                       {benefit}
-                    </motion.div>
+                    </div>
                   ))}
                 </div>
 

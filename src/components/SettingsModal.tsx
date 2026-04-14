@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, User, CreditCard, Check, Loader2, ArrowRight, ExternalLink, Camera, Lock, Zap } from 'lucide-react'
+import { X, User, CreditCard, Check, Loader2, ArrowRight, ExternalLink, Camera, Smartphone, Zap } from 'lucide-react'
 import flowLogo from '../assets/logo/flow.svg'
 import pulseLogo from '../assets/logo/pulse.svg'
 import gratisLogo from '../assets/logo/gratis.svg'
@@ -32,12 +32,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false)
   const [editName, setEditName] = useState(user?.user_metadata?.full_name || user?.user_metadata?.name || '')
   const [isSavingName, setIsSavingName] = useState(false)
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [isSavingPassword, setIsSavingPassword] = useState(false)
-  const [passwordSuccess, setPasswordSuccess] = useState(false)
-  const [showChangePassword, setShowChangePassword] = useState(false)
-  const hasWhatsappPassword = user?.user_metadata?.has_whatsapp_password === true
+  const [linkedPhone, setLinkedPhone] = useState<string | null>(null)
+  const [phoneInput, setPhoneInput] = useState('')
+  const [isLinkingPhone, setIsLinkingPhone] = useState(false)
+  const [phoneLinkSuccess, setPhoneLinkSuccess] = useState(false)
+  const [isUnlinkingPhone, setIsUnlinkingPhone] = useState(false)
 
 
   const navigate = useNavigate()
@@ -88,6 +87,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
       fetchSubscription()
     }
   }, [isOpen, activeTab, user])
+
+  useEffect(() => {
+    if (!isOpen || !user || !isGoogleUser) return
+    apiFetch<{ phone: string | null }>('/api/whatsapp/linked-phone', undefined, { userId: user.id })
+      .then(({ phone }) => setLinkedPhone(phone))
+      .catch(() => {})
+  }, [isOpen, user, isGoogleUser])
 
 
   const handleSubscribe = async () => {
@@ -238,24 +244,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
     }
   }
 
-  const handleSetPassword = async () => {
-    if (!newPassword || newPassword !== confirmPassword) return
-    setIsSavingPassword(true)
+  const handleLinkPhone = async () => {
+    if (!user || !phoneInput.trim()) return
+    setIsLinkingPhone(true)
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-        data: { has_whatsapp_password: true }
+      const { phone } = await apiFetch<{ ok: boolean; phone: string }>('/api/whatsapp/link-phone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, phone: phoneInput.trim() }),
       })
-      if (error) throw error
-      setPasswordSuccess(true)
-      setNewPassword('')
-      setConfirmPassword('')
-      setShowChangePassword(false)
-      setTimeout(() => setPasswordSuccess(false), 3000)
+      setLinkedPhone(phone)
+      setPhoneInput('')
+      setPhoneLinkSuccess(true)
+      setTimeout(() => setPhoneLinkSuccess(false), 4000)
     } catch (err: any) {
-      alert('Erro ao definir senha: ' + err.message)
+      alert('Erro ao vincular número: ' + (err.message || 'Tente novamente'))
     } finally {
-      setIsSavingPassword(false)
+      setIsLinkingPhone(false)
+    }
+  }
+
+  const handleUnlinkPhone = async () => {
+    if (!user) return
+    setIsUnlinkingPhone(true)
+    try {
+      await apiFetch('/api/whatsapp/link-phone', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      })
+      setLinkedPhone(null)
+      setPhoneInput('')
+    } catch (err: any) {
+      alert('Erro ao desvincular: ' + (err.message || 'Tente novamente'))
+    } finally {
+      setIsUnlinkingPhone(false)
     }
   }
 
@@ -445,59 +468,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                           <div className="space-y-1 px-1">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <Lock size={11} className="text-[#37352f]/40" />
-                                <label className="text-[11px] font-bold text-[#37352f]/50">Senha para o assistente WhatsApp</label>
+                                <Smartphone size={11} className="text-[#37352f]/40" />
+                                <label className="text-[11px] font-bold text-[#37352f]/50">Assistente WhatsApp</label>
                               </div>
-                              {(hasWhatsappPassword || passwordSuccess) && !showChangePassword && (
+                              {linkedPhone && (
                                 <button
-                                  onClick={() => { setShowChangePassword(true); setNewPassword(''); setConfirmPassword('') }}
-                                  className="text-[11px] font-bold text-[#37352f]/40 hover:text-[#37352f] transition-colors"
+                                  onClick={handleUnlinkPhone}
+                                  disabled={isUnlinkingPhone}
+                                  className="text-[11px] font-bold text-[#37352f]/40 hover:text-[#37352f] transition-colors disabled:opacity-40"
                                 >
-                                  Mudar senha
+                                  {isUnlinkingPhone ? <Loader2 size={10} className="animate-spin inline" /> : 'Desconectar'}
                                 </button>
                               )}
                             </div>
                             <p className="text-[11px] text-[#37352f]/40 leading-relaxed">
-                              {(hasWhatsappPassword || passwordSuccess) && !showChangePassword
-                                ? 'Você já possui uma senha definida para o bot do WhatsApp.'
-                                : 'Sua conta usa o Google. Defina uma senha para se autenticar no bot do WhatsApp.'
+                              {linkedPhone
+                                ? `Número conectado: +${linkedPhone}. O bot vai te reconhecer automaticamente.`
+                                : 'Vincule seu número do WhatsApp para usar o assistente sem precisar de senha.'
                               }
                             </p>
                           </div>
 
-                          {(!hasWhatsappPassword && !passwordSuccess || showChangePassword) && (
+                          {phoneLinkSuccess && (
+                            <div className="flex items-center gap-2 px-1">
+                              <Check size={11} className="text-green-500" />
+                              <span className="text-[11px] font-bold text-green-600">Conectado! Você recebeu uma mensagem de confirmação no WhatsApp.</span>
+                            </div>
+                          )}
+
+                          {!linkedPhone && !phoneLinkSuccess && (
                             <>
                               <input
-                                type="password"
-                                placeholder="Nova senha (mín. 6 caracteres)"
-                                value={newPassword}
-                                onChange={(e) => setNewPassword(e.target.value)}
-                                className="w-full px-4 py-3 bg-[#fcfcfa] border border-[#e9e9e7] rounded-xl text-sm font-medium text-[#37352f] placeholder:text-[#37352f]/30 placeholder:font-normal focus:outline-none focus:border-[#37352f]/30 focus:ring-1 focus:ring-black/5 transition-all"
-                              />
-                              <input
-                                type="password"
-                                placeholder="Confirmar senha"
-                                value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                type="tel"
+                                placeholder="Ex: 5511999998888 (com DDD e código do país)"
+                                value={phoneInput}
+                                onChange={(e) => setPhoneInput(e.target.value)}
                                 className="w-full px-4 py-3 bg-[#fcfcfa] border border-[#e9e9e7] rounded-xl text-sm font-medium text-[#37352f] placeholder:text-[#37352f]/30 placeholder:font-normal focus:outline-none focus:border-[#37352f]/30 focus:ring-1 focus:ring-black/5 transition-all"
                               />
                               <div className="flex items-center gap-3 px-1">
                                 <button
-                                  onClick={handleSetPassword}
-                                  disabled={isSavingPassword || newPassword.length < 6 || newPassword !== confirmPassword}
+                                  onClick={handleLinkPhone}
+                                  disabled={isLinkingPhone || phoneInput.replace(/\D/g, '').length < 10}
                                   className="flex items-center gap-1.5 text-[11px] font-bold text-[#37352f]/50 hover:text-[#37352f] transition-colors disabled:opacity-40"
                                 >
-                                  {isSavingPassword ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
-                                  Salvar senha
+                                  {isLinkingPhone ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+                                  Conectar WhatsApp
                                 </button>
-                                {showChangePassword && (
-                                  <button
-                                    onClick={() => { setShowChangePassword(false); setNewPassword(''); setConfirmPassword('') }}
-                                    className="text-[11px] font-bold text-[#37352f]/30 hover:text-[#37352f]/50 transition-colors"
-                                  >
-                                    Cancelar
-                                  </button>
-                                )}
                               </div>
                             </>
                           )}

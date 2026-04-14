@@ -144,17 +144,29 @@ export const Topbar: React.FC = () => {
             anchor={profileRef}
             className="mt-2"
           >
-            <div className="px-3 py-2.5 mb-1 flex flex-col gap-0.5">
-              <span className="text-[10px] font-bold text-[#37352f]/30 tracking-widest px-0.5">
-                {workspaceModeActive
-                  ? `Workspace de ${workspaceMembership?.ownerName}`
-                  : hasFlow
-                    ? 'Assinatura Ativa'
-                    : 'Conta Gratuita'}
-              </span>
-              <div className="flex flex-col mt-0.5 px-0.5">
-                <span className="text-sm font-bold text-[#37352f] leading-none">{fullName}</span>
+            <div className="px-3 py-2.5 mb-1 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0">
+                {user?.user_metadata?.avatar_url && !avatarError ? (
+                  <img
+                    src={user.user_metadata.avatar_url}
+                    alt="Profile"
+                    className="w-full h-full object-cover"
+                    onError={() => setAvatarError(true)}
+                  />
+                ) : (
+                  <Avvvatars value={user?.email || 'guest'} size={36} style="character" />
+                )}
+              </div>
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-sm font-bold text-[#37352f] leading-none truncate">{fullName}</span>
                 <span className="text-[11px] text-[#37352f]/50 truncate mt-0.5">{user?.email}</span>
+                <span className="text-[10px] font-bold text-[#37352f]/30 tracking-widest mt-0.5">
+                  {workspaceModeActive
+                    ? `Workspace de ${workspaceMembership?.ownerName}`
+                    : hasFlow
+                      ? 'Assinatura Ativa'
+                      : 'Conta Gratuita'}
+                </span>
               </div>
             </div>
             

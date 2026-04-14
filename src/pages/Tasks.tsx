@@ -153,7 +153,10 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
   onStopTimer?: (taskId: string) => void
   onCardClick?: (task: Task) => void
   isWorkspaceView?: boolean
-}>(({ task, isDragging, isOverlay, dragHandleProps, style, onEdit, onDelete, activeDropdownId, setActiveDropdownId, userEmail, isPending, pendingTarget, onConfirm, onCancel, onToggleSubtask, onStopTimer, onCardClick, isWorkspaceView }, ref) => {
+  onMoveVisibility?: (taskId: string, newVisibility: 'personal' | 'workspace') => void
+  canMoveVisibility?: boolean
+  isExiting?: boolean
+}>(({ task, isDragging, isOverlay, dragHandleProps, style, onEdit, onDelete, activeDropdownId, setActiveDropdownId, userEmail, isPending, pendingTarget, onConfirm, onCancel, onToggleSubtask, onStopTimer, onCardClick, isWorkspaceView, onMoveVisibility, canMoveVisibility, isExiting }, ref) => {
 
   const [isSubtasksExpanded, setIsSubtasksExpanded] = useState(false)
 
@@ -217,10 +220,20 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
       {...dragHandleProps}
     >
       <motion.div
-        initial={isOverlay ? false : { opacity: 0, y: 15 }}
-        animate={isOverlay ? false : { opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: 'easeOut' }}
-        className={`w-full transition-all duration-200 ${isOverlay ? 'z-50' : ''}`}
+        initial={isOverlay ? false : { opacity: 0, y: 10 }}
+        animate={
+          isExiting
+            ? { opacity: 0, y: -10, scale: 0.96 }
+            : isOverlay
+              ? false
+              : { opacity: 1, y: 0, scale: 1 }
+        }
+        transition={
+          isExiting
+            ? { duration: 0.18, ease: [0.4, 0, 1, 1] }
+            : { duration: 0.28, ease: [0, 0, 0.2, 1] }
+        }
+        className={`w-full transition-shadow duration-200 ${isOverlay ? 'z-50' : ''}`}
       >
         {/* 1. CARD PRINCIPAL */}
         <div
@@ -278,13 +291,27 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
                 <Dropdown
                   isOpen={activeDropdownId === task.id}
                   onClose={() => setActiveDropdownId(null)}
-                  className="w-[110px]"
+                  className="w-[148px]"
                 >
                   <DropdownItem
                     icon={<Edit2 size={12} />}
                     label="Editar"
                     onClick={() => onEdit(task)}
                   />
+                  {canMoveVisibility && task.visibility === 'personal' && (
+                    <DropdownItem
+                      icon={<Users size={12} />}
+                      label="Para Workspace"
+                      onClick={() => onMoveVisibility?.(task.id, 'workspace')}
+                    />
+                  )}
+                  {canMoveVisibility && task.visibility === 'workspace' && (
+                    <DropdownItem
+                      icon={<Lock size={12} />}
+                      label="Para Pessoal"
+                      onClick={() => onMoveVisibility?.(task.id, 'personal')}
+                    />
+                  )}
                   <DropdownDivider />
                   <DropdownItem
                     icon={<Trash2 size={12} />}
@@ -596,6 +623,9 @@ const SortableTaskCard: React.FC<{
   onStopTimer?: (taskId: string) => void
   onCardClick?: (task: Task) => void
   isWorkspaceView?: boolean
+  onMoveVisibility?: (taskId: string, newVisibility: 'personal' | 'workspace') => void
+  canMoveVisibility?: boolean
+  isExiting?: boolean
 }> = (props) => {
   const {
     attributes,
@@ -631,6 +661,9 @@ const SortableTaskCard: React.FC<{
         onStopTimer={props.onStopTimer}
         onCardClick={props.onCardClick}
         isWorkspaceView={props.isWorkspaceView}
+        onMoveVisibility={props.onMoveVisibility}
+        canMoveVisibility={props.canMoveVisibility}
+        isExiting={props.isExiting}
       />
     </div>
   )
@@ -672,6 +705,7 @@ const Tasks: React.FC = () => {
   const [pendingStatusTask, setPendingStatusTask] = useState<{ id: string; originalStatus: Task['status']; targetStatus: Task['status'] } | null>(null)
   const [detailTask, setDetailTask] = useState<Task | null>(null)
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([])
+  const [exitingTaskIds, setExitingTaskIds] = useState<Set<string>>(new Set())
   const dragOriginalStatus = useRef<{ id: string; status: Task['status'] } | null>(null)
   const justDraggedRef = useRef(false)
 
@@ -757,6 +791,7 @@ const Tasks: React.FC = () => {
 
   // Recarrega quando muda de view
   useEffect(() => {
+    setExitingTaskIds(new Set()) // garante que nenhum card fique invisível ao trocar de view
     fetchTasks(taskView)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskView])
@@ -830,6 +865,45 @@ const Tasks: React.FC = () => {
     { id: 'board', label: 'Quadro', icon: Layout },
     { id: 'table', label: 'Tabela', icon: TableIcon, disabled: true },
   ]
+
+  const handleMoveVisibility = async (taskId: string, newVisibility: 'personal' | 'workspace') => {
+    // Tarefa sairá da view atual → animar saída antes de remover
+    const willLeaveView =
+      (taskView === 'personal' && newVisibility === 'workspace') ||
+      (taskView === 'workspace' && newVisibility === 'personal')
+
+    if (willLeaveView) {
+      setExitingTaskIds(prev => new Set([...prev, taskId]))
+      await new Promise(resolve => setTimeout(resolve, 220))
+    }
+
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .update({
+          visibility: newVisibility,
+          workspace_owner_id: newVisibility === 'workspace' ? user?.id : null,
+        })
+        .eq('id', taskId)
+      if (error) throw error
+
+      if (willLeaveView) {
+        setTasks(prev => prev.filter(t => t.id !== taskId))
+      } else {
+        setTasks(prev => prev.map(t =>
+          t.id === taskId
+            ? { ...t, visibility: newVisibility, workspaceOwnerId: newVisibility === 'workspace' ? user?.id : undefined }
+            : t
+        ))
+      }
+      // Limpar sempre após sucesso para o card não ficar invisível na outra view
+      setExitingTaskIds(prev => { const s = new Set(prev); s.delete(taskId); return s })
+    } catch (err) {
+      console.error('Erro ao mover visibilidade:', err)
+      // Reverter animação em caso de erro
+      setExitingTaskIds(prev => { const s = new Set(prev); s.delete(taskId); return s })
+    }
+  }
 
   const handleAddTask = async (newTask: any) => {
     try {
@@ -1159,7 +1233,7 @@ const Tasks: React.FC = () => {
 
   return (
     <>
-      <div className="px-4 sm:px-6 lg:px-10 pt-4 sm:pt-6 bg-white sticky top-0 z-10">
+      <div className="px-4 sm:px-6 lg:px-10 pt-4 sm:pt-6 bg-white sticky top-[56px] lg:top-0 z-20">
         <div className="max-w-full mx-auto w-full">
           <div className="flex items-center justify-between mb-4 sm:mb-6">
             <div className="min-w-0">
@@ -1173,16 +1247,13 @@ const Tasks: React.FC = () => {
             <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
               {!loading && tasks.length > 0 && (
                 <motion.button
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
                   onClick={openCreateModal}
                   whileHover={{ y: -1 }}
                   whileTap={{ scale: 0.98 }}
-                  className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 bg-[#202020] text-white rounded-[6px] text-[11px] sm:text-xs font-semibold hover:bg-[#202020]/90 transition-all shadow-md shadow-black/10 h-[34px] sm:h-[38px]"
+                  className="hidden sm:flex items-center gap-2 px-5 bg-[#202020] text-white rounded-[6px] text-xs font-semibold hover:bg-[#202020]/90 transition-all shadow-md shadow-black/10 h-[38px]"
                 >
                   <Plus size={14} strokeWidth={2.5} />
-                  <span className="hidden sm:inline">Novo Item</span>
-                  <span className="sm:hidden">Novo</span>
+                  Novo Item
                 </motion.button>
               )}
             </div>
@@ -1245,14 +1316,14 @@ const Tasks: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-x-auto overflow-y-hidden bg-white">
+      <div className="flex-1 overflow-x-auto lg:overflow-y-hidden bg-white">
         {loading ? (
-          <div className="h-full w-full flex flex-col items-center justify-center gap-3 opacity-40">
+          <div className="min-h-[50vh] w-full flex flex-col items-center justify-center gap-3 opacity-40">
             <Loader2 className="animate-spin text-[#37352f]" size={24} />
             <p className="text-xs font-semibold">Carregando tarefas...</p>
           </div>
         ) : tasks.length === 0 ? (
-          <div className="h-full w-full flex flex-col items-center justify-center p-8 sm:p-20 text-center bg-white">
+          <div className="min-h-[50vh] w-full flex flex-col items-center justify-center p-8 sm:p-20 text-center bg-white">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1292,11 +1363,11 @@ const Tasks: React.FC = () => {
                 onDragOver={handleDragOver}
                 onDragEnd={handleDragEnd}
               >
-                <div className="p-4 sm:p-6 lg:p-10 flex flex-col md:flex-row gap-6 md:h-full md:min-w-max md:items-stretch">
+                <div className="p-4 sm:p-6 lg:p-10 flex flex-row gap-4 sm:gap-6 min-w-max lg:h-full lg:items-stretch items-start">
                   {columns.map((column) => {
                     const columnTasks = tasks.filter(t => t.status === column.id)
                     return (
-                      <div key={column.id} className="w-full md:w-72 lg:w-[320px] flex-shrink-0 flex flex-col min-w-0">
+                      <div key={column.id} className="w-[260px] sm:w-72 lg:w-[320px] flex-shrink-0 flex flex-col">
                         <div className="flex items-center justify-between px-1 mb-3 sm:mb-4">
                           <div className="flex items-center gap-2.5">
                             <span className={`w-2 h-2 rounded-full ${column.color}`}></span>
@@ -1308,7 +1379,7 @@ const Tasks: React.FC = () => {
                         </div>
 
                         <SortableContext id={column.id} items={columnTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
-                          <DroppableContainer id={column.id} className="flex-1 flex flex-col min-h-[120px] md:min-h-0 overflow-y-auto hide-scrollbar p-4">
+                          <DroppableContainer id={column.id} className="flex-1 flex flex-col min-h-[200px] lg:min-h-0 lg:overflow-y-auto hide-scrollbar p-4">
                             <div className="flex-1 flex flex-col space-y-3 pb-4 sm:pb-6">
                               {columnTasks.map((task) => (
                                 <SortableTaskCard
@@ -1327,6 +1398,9 @@ const Tasks: React.FC = () => {
                                   onStopTimer={handleStopTimer}
                                   onCardClick={handleCardClick}
                                   isWorkspaceView={taskView === 'workspace'}
+                                  onMoveVisibility={handleMoveVisibility}
+                                  canMoveVisibility={isAdmin && hasWorkspaceAccess}
+                                  isExiting={exitingTaskIds.has(task.id)}
                                 />
                               ))}
                             </div>
@@ -1446,6 +1520,21 @@ const Tasks: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* FAB — apenas mobile, sempre visível após carregamento */}
+      {!loading && (
+        <motion.button
+          onClick={openCreateModal}
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25, delay: 0.1 }}
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.92 }}
+          className="sm:hidden fixed bottom-6 right-5 z-30 w-14 h-14 bg-[#202020] text-white rounded-full shadow-2xl shadow-black/25 flex items-center justify-center"
+        >
+          <Plus size={22} strokeWidth={2.5} />
+        </motion.button>
+      )}
 
       <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingTask(null); }} title={editingTask ? 'Editar Tarefa' : 'Nova Tarefa'} hideScrollbar={true}>
         <TaskForm
