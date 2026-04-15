@@ -209,10 +209,10 @@ const LandingPage: React.FC = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.1, type: "spring", stiffness: 70 }}
-              className="text-5xl md:text-7xl font-extrabold tracking-tight leading-[1.1] text-[#202020] mb-6"
+              className="text-5xl md:text-6xl font-extrabold tracking-tight leading-[1.1] text-[#202020] mb-6"
             >
-              Organize tudo com
-              <span className="block mt-2">extrema clareza.</span>
+              Sua mente livre.
+              <span className="block mt-2">Suas tarefas, resolvidas.</span>
             </motion.h1>
 
             <motion.p
@@ -223,6 +223,29 @@ const LandingPage: React.FC = () => {
             >
               Gerencie sua vida sem atrito, domine sua rotina e tenha uma AI cuidando de suas tarefas repetitivas.
             </motion.p>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, delay: 0.35, type: "spring", stiffness: 70 }}
+              className="mt-8"
+            >
+              <Link
+                to={user ? "/dashboard" : "/login"}
+                className="relative inline-block overflow-hidden bg-[#202020] text-white font-semibold text-base px-8 py-4 rounded-2xl shadow-lg shadow-black/10 hover:bg-[#30302E] transition-colors"
+              >
+                <motion.span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0"
+                  style={{
+                    background: 'linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.18) 50%, transparent 70%)',
+                  }}
+                  animate={{ x: ['-100%', '100%'] }}
+                  transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 1.5, ease: 'easeInOut' }}
+                />
+                Comece usando gratuito.
+              </Link>
+            </motion.div>
           </div>
         </div>
 
@@ -509,8 +532,9 @@ const LandingPage: React.FC = () => {
                 {/* User Audio Bubble */}
                 <motion.div
                   initial={{ opacity: 0, x: 20, scale: 0.9 }}
-                  animate={{ opacity: 1, x: 0, scale: 1 }}
-                  transition={{ delay: 0.5, duration: 0.6, type: "spring" }}
+                  whileInView={{ opacity: 1, x: 0, scale: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: 0.3, duration: 0.6, type: "spring" }}
                   className="w-[85%] bg-[#25D366] text-white rounded-[14px] rounded-tr-[4px] p-2.5 shadow-sm self-end"
                 >
                   <div className="flex items-center gap-2">
@@ -536,8 +560,9 @@ const LandingPage: React.FC = () => {
                 {/* System Reply Bubble */}
                 <motion.div
                   initial={{ opacity: 0, x: -20, scale: 0.9 }}
-                  animate={{ opacity: 1, x: 0, scale: 1 }}
-                  transition={{ delay: 2.2, duration: 0.6, type: "spring" }}
+                  whileInView={{ opacity: 1, x: 0, scale: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: 1.2, duration: 0.6, type: "spring" }}
                   className="w-[85%] bg-white border border-[#e9e9e7] text-[#37352f] rounded-[14px] rounded-tl-[4px] p-2 shadow-sm self-start relative ml-1"
                 >
                   <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-[#202020] border-2 border-[#fcfcfc] flex items-center justify-center shadow-sm z-10">

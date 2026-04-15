@@ -8,9 +8,10 @@ import lovingDoodle from '../assets/doodles/LovingDoodle.png'
 interface ThankYouModalProps {
   isOpen: boolean
   onClose: () => void
+  onGoToDashboard?: () => void
 }
 
-const ThankYouModal: React.FC<ThankYouModalProps> = ({ isOpen, onClose }) => {
+const ThankYouModal: React.FC<ThankYouModalProps> = ({ isOpen, onClose, onGoToDashboard }) => {
   const navigate = useNavigate()
   const { user } = useAuth()
   const firstName = user?.user_metadata?.full_name?.split(' ')[0]
@@ -31,7 +32,11 @@ const ThankYouModal: React.FC<ThankYouModalProps> = ({ isOpen, onClose }) => {
 
   const handleGoToDashboard = () => {
     onClose()
-    navigate('/dashboard', { replace: true })
+    if (onGoToDashboard) {
+      onGoToDashboard()
+    } else {
+      navigate('/dashboard', { replace: true })
+    }
   }
 
   return (

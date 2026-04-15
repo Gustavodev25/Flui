@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, useSearchParams, useLocation } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { apiFetch } from './lib/api'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
@@ -19,7 +19,28 @@ import { SidebarProvider } from './contexts/SidebarContext'
 import { SubscriptionProvider } from './contexts/SubscriptionContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import ThankYouModal from './components/ThankYouModal'
+import WhatsAppOnboardingModal from './components/WhatsAppOnboardingModal'
 import { AdminPanel } from './pages/AdminPanel'
+
+function WhatsAppChecker({ onNeedWhatsApp }: { onNeedWhatsApp: () => void }) {
+  const { user } = useAuth()
+  const checkedRef = useRef(false)
+
+  useEffect(() => {
+    if (!user || checkedRef.current) return
+    checkedRef.current = true
+
+    const isGoogleUser = user.identities?.some((i: any) => i.provider === 'google') &&
+      !user.identities?.some((i: any) => i.provider === 'email')
+    if (!isGoogleUser) return
+
+    apiFetch<{ phone: string | null }>('/api/whatsapp/linked-phone', undefined, { userId: user.id })
+      .then(({ phone }) => { if (!phone) onNeedWhatsApp() })
+      .catch(() => {})
+  }, [user])
+
+  return null
+}
 
 function InviteProcessor() {
   const { user } = useAuth()
@@ -50,14 +71,17 @@ function InviteProcessor() {
 
 function App() {
   const [showThankYou, setShowThankYou] = useState(false)
+  const [showWhatsAppOnboarding, setShowWhatsAppOnboarding] = useState(false)
 
   useEffect(() => {
     const handler = () => setShowThankYou(true)
     window.addEventListener('flui:subscription-success', handler)
     ;(window as any).__testThankYouModal = () => setShowThankYou(true)
+    ;(window as any).__testWhatsAppOnboarding = () => setShowWhatsAppOnboarding(true)
     return () => {
       window.removeEventListener('flui:subscription-success', handler)
       delete (window as any).__testThankYouModal
+      delete (window as any).__testWhatsAppOnboarding
     }
   }, [])
 
@@ -67,6 +91,7 @@ function App() {
       <SidebarProvider>
         <Router>
             <InviteProcessor />
+            <WhatsAppChecker onNeedWhatsApp={() => setShowWhatsAppOnboarding(true)} />
             <Routes>
               <Route path="/admin" element={<AdminPanel />} />
               <Route path="/invite" element={<InvitePage />} />
@@ -90,7 +115,15 @@ function App() {
               <Route path="/mockups" element={<MockupsPage />} />
               <Route path="/" element={<LandingPage />} />
             </Routes>
-          <ThankYouModal isOpen={showThankYou} onClose={() => setShowThankYou(false)} />
+          <ThankYouModal
+            isOpen={showThankYou}
+            onClose={() => setShowThankYou(false)}
+            onGoToDashboard={() => setShowWhatsAppOnboarding(true)}
+          />
+          <WhatsAppOnboardingModal
+            isOpen={showWhatsAppOnboarding}
+            onClose={() => setShowWhatsAppOnboarding(false)}
+          />
           </Router>
           <AppToaster />
       </SidebarProvider>
