@@ -2384,6 +2384,67 @@ app.get('/api/reminders', async (req, res) => {
   }
 });
 
+app.get('/api/whatsapp/linked-phone', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    const binding = await findBindingByUserId(userId, 'whatsapp');
+    res.json({ phone: binding?.external_user_id || null });
+  } catch (error) {
+    return sendApiError(res, req, error, 500);
+  }
+});
+
+app.post('/api/whatsapp/link-phone', async (req, res) => {
+  try {
+    const { userId, phone } = req.body;
+    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    if (!phone) throw createHttpError(400, 'missing_phone', 'phone required');
+
+    const normalizedPhone = phone.replace(/\D/g, '');
+    if (normalizedPhone.length < 10) throw createHttpError(400, 'invalid_phone', 'Número inválido');
+
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (userError || !user) throw createHttpError(404, 'user_not_found', 'Usuário não encontrado');
+
+    const userName = user.user_metadata?.full_name || user.user_metadata?.name || 'você';
+
+    await upsertChannelBinding({
+      userId,
+      channel: 'whatsapp',
+      externalUserId: normalizedPhone,
+      displayName: userName,
+      authenticated: true,
+      metadata: { email: user.email, phone: normalizedPhone },
+    });
+
+    await sendWhatsAppMessage(normalizedPhone,
+      `Conta conectada, *${userName}* 🚀\n\nAgora é só me mandar uma mensagem por aqui e eu te ajudo com suas tarefas!`
+    );
+
+    res.json({ ok: true, phone: normalizedPhone });
+  } catch (error) {
+    return sendApiError(res, req, error, 500);
+  }
+});
+
+app.delete('/api/whatsapp/link-phone', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+
+    const binding = await findBindingByUserId(userId, 'whatsapp');
+    if (binding?.external_user_id) {
+      await deleteChannelBinding('whatsapp', binding.external_user_id);
+      pendingAuthSessions.delete(binding.external_user_id);
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    return sendApiError(res, req, error, 500);
+  }
+});
+
 app.get('/api/whatsapp/messages', async (req, res) => {
   try {
     const userId = req.query.userId;
