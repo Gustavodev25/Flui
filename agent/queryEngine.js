@@ -624,7 +624,8 @@ function cleanupTaskTitle(text) {
     .replace(/\s+/g, ' ')
     .trim()
     .split(' ')
-    .filter(word => word && !TASK_GLUE_WORDS.has(normalizeTextForIntent(word)));
+    .filter(word => word && !TASK_GLUE_WORDS.has(normalizeTextForIntent(word)))
+    .slice(0, 7);
 
   const title = words.join(' ').trim();
   if (title.length < 3) return null;
@@ -642,7 +643,7 @@ function timerPhraseRegex() {
 
 function stripCreationPreamble(text) {
   return String(text || '')
-    .replace(/^\s*(cria(?:r)?(?:\s+uma)?\s+tarefa|adiciona(?:r)?(?:\s+uma)?\s+tarefa|me\s+lembr(?:a|ar|e)(?:\s+de|\s+que)?|me\s+avis(?:a|ar)(?:\s+de|\s+que)?|n[aã]o\s+deixa\s+(?:eu\s+)?esquecer(?:\s+de|\s+que)?|anota(?:\s+a[ií]|\s+isso|\s+pra\s+mim)?|registr(?:a|ar)|salva(?:\s+isso|\s+a[ií])?|tenho\s+que|preciso(?:\s+de)?)\s+/i, ' ');
+    .replace(/^\s*(cria(?:r(?:am)?)?(?:\s+uma?)?\s+tarefa|adiciona(?:r)?(?:\s+uma?)?\s+tarefa|me\s+lembr(?:a|ar|e)(?:\s+de|\s+que)?|me\s+avis(?:a|ar)(?:\s+de|\s+que)?|n[aã]o\s+deixa\s+(?:eu\s+)?esquecer(?:\s+de|\s+que)?|anota(?:\s+a[ií]|\s+isso|\s+pra\s+mim)?|registr(?:a|ar)|salva(?:\s+isso|\s+a[ií])?|tenho\s+que|preciso(?:\s+de)?)\s+/i, ' ');
 }
 
 function extractSimpleTaskTitle(message) {
@@ -656,6 +657,7 @@ function extractSimpleTaskTitle(message) {
 
   const withoutTimers = stripCreationPreamble(text)
     .replace(timerPhraseRegex(), ' ')
+    .replace(/\bàs?\s*$/i, ' ')
     .replace(/\b(n[aã]o|não)\b[^.?!]*$/i, ' ');
 
   return cleanupTaskTitle(withoutTimers);
