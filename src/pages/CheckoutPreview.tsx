@@ -53,7 +53,6 @@ const CheckoutPreview: React.FC = () => {
     )
   }
 
-
   const handleStartPayment = async (plan: 'flow' | 'pulse') => {
     setLoading(plan)
     try {
@@ -74,6 +73,24 @@ const CheckoutPreview: React.FC = () => {
       alert('Erro ao iniciar checkout.')
     } finally {
       setLoading(null)
+    }
+  }
+
+  const handleStartFree = async () => {
+    try {
+      // Cria/atualiza registro de starter para que o ProtectedRoute saiba que o user optou pelo plano gratuito
+      await supabase
+        .from('subscriptions')
+        .upsert({
+          user_id: user.id,
+          status: 'starter',
+          plan_id: 'starter',
+        }, { onConflict: 'user_id' })
+      navigate('/dashboard', { replace: true })
+    } catch (err) {
+      console.error('Erro ao ativar starter:', err)
+      // Mesmo com erro, deixa navegar
+      navigate('/dashboard', { replace: true })
     }
   }
 
@@ -215,7 +232,7 @@ const CheckoutPreview: React.FC = () => {
           </div>
 
           <button
-            onClick={() => navigate('/dashboard', { replace: true })}
+            onClick={handleStartFree}
             className="w-full bg-[#f7f7f5] border border-[#e9e9e7] rounded-2xl px-4 py-3 flex items-center gap-3 hover:bg-[#f1f1f0] transition-all active:scale-[0.98]"
           >
             <div className="w-9 h-9 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm shrink-0">

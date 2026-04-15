@@ -4,6 +4,14 @@
 CLAUDE.md
 whatsapp_sessions.json
 output.json
+.cursor/
+.kiro/
+.mcp.json
+.opencode.json
+test-ai.js
+restore_tasks.py
+server.log
+INSTRUCOES_STRIPE.md
 
 # Logs
 logs

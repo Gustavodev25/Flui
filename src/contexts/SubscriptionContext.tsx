@@ -64,7 +64,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const togglePlanMode = () => setUseOwnPlan(v => !v)
 
   useEffect(() => {
-    if (!user) {
+    if (!user?.id) {
       setSubscription(null)
       setWorkspaceMembership(null)
       setLoading(false)
@@ -90,7 +90,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     }).finally(() => {
       setLoading(false)
     })
-  }, [user, tick])
+  }, [user?.id, tick])
 
   const isWorkspaceMember = !!workspaceMembership
 

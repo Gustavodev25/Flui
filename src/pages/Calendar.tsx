@@ -40,6 +40,7 @@ interface Task {
   assignedToName?: string
   assignedToAvatar?: string
   assignedToEmail?: string
+  dueTime?: string
 }
 
 const MONTHS_PT = [
@@ -52,7 +53,7 @@ const DAYS_PT_SHORT = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
 const STATUS_CONFIG = {
   todo:     { label: 'A Fazer',      dot: 'bg-slate-400',  bar: 'bg-slate-100 border-slate-200',  text: 'text-slate-600' },
   doing:    { label: 'Em Progresso', dot: 'bg-[#2383e2]',  bar: 'bg-blue-50 border-blue-200',    text: 'text-blue-700'  },
-  done:     { label: 'Concluído',    dot: 'bg-[#6366f1]',  bar: 'bg-indigo-50 border-indigo-200', text: 'text-indigo-700'},
+  done:     { label: 'Concluído',    dot: 'bg-emerald-500', bar: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700'},
   canceled: { label: 'Cancelado',    dot: 'bg-red-300',    bar: 'bg-red-50 border-red-200',       text: 'text-red-500'   },
 }
 
@@ -89,6 +90,7 @@ export default function CalendarPage() {
     progress: dbTask.progress || 0,
     description: dbTask.description || '',
     subtasks: dbTask.subtasks || [],
+    dueTime: dbTask.due_time || undefined,
     timerAt: dbTask.timer_at || undefined,
     timerFired: dbTask.timer_fired || false,
     whatsappMessage: dbTask.whatsapp_message || undefined,
@@ -246,6 +248,7 @@ export default function CalendarPage() {
             status: newTask.status,
             priority: newTask.priority,
             due_date: newTask.dueDate,
+            due_time: newTask.dueTime || null,
             source: newTask.source,
             progress: newTask.progress,
             description: newTask.description,
@@ -264,6 +267,7 @@ export default function CalendarPage() {
             status: taskData.status,
             priority: taskData.priority,
             due_date: taskData.dueDate,
+            due_time: taskData.dueTime || null,
             source: taskData.source,
             progress: taskData.progress,
             description: taskData.description,
@@ -584,7 +588,7 @@ export default function CalendarPage() {
                           <div className="flex items-start gap-2">
                             <div className="flex-shrink-0 mt-0.5">
                               {isDone ? (
-                                <CheckCircle2 size={14} className="text-[#6366f1]" />
+                                <CheckCircle2 size={14} className="text-emerald-500" />
                               ) : isCanceled ? (
                                 <X size={14} className="text-red-300" />
                               ) : (
@@ -615,6 +619,12 @@ export default function CalendarPage() {
                                   )}
                                   {!isWorkspaceView && task.visibility === 'workspace' && (
                                     <Users size={9} className="text-[#37352f] opacity-40" />
+                                  )}
+                                  {task.dueTime && (
+                                    <span className="text-[9px] font-bold text-[#37352f]/70 bg-[#37352f]/5 px-1 py-0.5 rounded flex items-center gap-0.5">
+                                      <Clock size={8} />
+                                      {task.dueTime.substring(0, 5)}
+                                    </span>
                                   )}
                                   {task.priority === 'high' && (
                                     <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">Crítica</span>
@@ -776,7 +786,7 @@ export default function CalendarPage() {
                           <div className="flex items-start gap-2">
                             <div className="flex-shrink-0 mt-0.5">
                               {isDone ? (
-                                <CheckCircle2 size={14} className="text-[#6366f1]" />
+                                <CheckCircle2 size={14} className="text-emerald-500" />
                               ) : isCanceled ? (
                                 <X size={14} className="text-red-300" />
                               ) : (

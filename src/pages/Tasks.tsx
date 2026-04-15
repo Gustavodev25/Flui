@@ -58,6 +58,7 @@ interface Task {
   timerAt?: string
   timerFired?: boolean
   whatsappMessage?: string
+  dueTime?: string
   reminderDaysBefore?: number
   reminderFired?: boolean
   visibility?: 'personal' | 'workspace'
@@ -160,19 +161,25 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
 
   const [isSubtasksExpanded, setIsSubtasksExpanded] = useState(false)
 
-  // Countdown em tempo real (tick a cada 1s)
+  // Countdown em tempo real (tick a cada 1s) — apenas para tarefas com timer_at (ex: criadas pelo WhatsApp)
+  const effectiveTimerAt = task.timerAt || null;
+
   const [timerParts, setTimerParts] = useState<{ h: number; m: number; s: number } | null>(
-    task.timerAt && !task.timerFired ? getTimerParts(task.timerAt) : null
+    effectiveTimerAt && !task.timerFired ? getTimerParts(effectiveTimerAt) : null
   )
+
   useEffect(() => {
-    if (!task.timerAt || task.timerFired) return
+    if (!effectiveTimerAt || task.timerFired) {
+      setTimerParts(null)
+      return
+    }
     const interval = setInterval(() => {
-      const parts = getTimerParts(task.timerAt!)
+      const parts = getTimerParts(effectiveTimerAt)
       setTimerParts(parts)
       if (parts === null) clearInterval(interval)
     }, 1000)
     return () => clearInterval(interval)
-  }, [task.timerAt, task.timerFired])
+  }, [effectiveTimerAt, task.timerFired])
 
   // Hold-to-stop timer (pressionar e segurar por 700ms para encerrar o timer)
   const HOLD_DURATION = 6000
@@ -428,7 +435,7 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
             {/* 2A. LINHA 1: Priority | Timer (ou Subtarefas se timer inativo) | Date */}
             <motion.div
               layout
-              className={`flex items-start justify-center px-4 relative gap-2 transition-opacity duration-200 w-full ${isOverlay ? 'opacity-100' : 'opacity-100'}`}
+              className={`grid grid-cols-[auto_1fr_auto] items-start px-4 gap-2 transition-opacity duration-200 w-full ${isOverlay ? 'opacity-100' : 'opacity-100'}`}
             >
               {/* Prioridade Esquerda */}
               <div
@@ -440,7 +447,7 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
               </div>
 
               {/* Centro: grupo vertical Timer+Subtarefas fundidos OU apenas Subtarefas */}
-              <div className="flex items-start gap-2">
+              <div className="flex items-start gap-2 justify-center">
                 {timerParts ? (
                   /* ── Timer ativo: timer + subtarefas como bloco único ── */
                   <div className="flex flex-col items-stretch">
@@ -592,12 +599,12 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
               </div>
 
               {/* Data Direita */}
-              <div
-                className={`border border-[#e9e9e7] border-t-0 rounded-b-xl rounded-t-none px-1 py-1 bg-white transition-all flex-shrink-0 w-[76px] flex items-center justify-center h-[22px] ${isOverlay ? 'shadow-lg shadow-black/5' : ''}`}
-              >
-                <span className="text-[9px] font-bold text-[#37352f]/60 tracking-tight truncate block text-center whitespace-nowrap">
-                  {formatDate(task.dueDate)}
-                </span>
+              <div className={`flex bg-white rounded-b-xl border border-[#e9e9e7] border-t-0 shadow-sm overflow-hidden flex-shrink-0 h-[22px] max-w-[120px] justify-self-end ${isOverlay ? 'shadow-lg shadow-black/5' : ''}`}>
+                <div className="px-2 flex items-center justify-center flex-shrink-0 min-w-0">
+                  <span className="text-[9px] font-bold text-[#37352f]/60 tracking-tight truncate">
+                    {formatDate(task.dueDate)}
+                  </span>
+                </div>
               </div>
             </motion.div>
 
@@ -688,16 +695,23 @@ const DroppableContainer: React.FC<{
   )
 }
 
+// Module-level caching to prevent loading flash on navigation
+let cachedTasks: Task[] = []
+let lastTaskView: 'personal' | 'workspace' | null = null
+
 const Tasks: React.FC = () => {
   const { user } = useAuth()
   const { isWorkspaceMember, workspaceModeActive, workspaceMembership, hasPulse } = useSubscription()
   const isAdmin = hasPulse && !workspaceModeActive
   const isGuest = workspaceModeActive
   const [viewMode, setViewMode] = useState<'board' | 'table'>('board')
-  const [taskView, setTaskView] = useState<'personal' | 'workspace'>(workspaceModeActive ? 'workspace' : 'personal')
+  
+  const initialView = workspaceModeActive ? 'workspace' : 'personal'
+  const [taskView, setTaskView] = useState<'personal' | 'workspace'>(initialView)
+  
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [loading, setLoading] = useState(lastTaskView === initialView ? cachedTasks.length === 0 : true)
+  const [tasks, setTasks] = useState<Task[]>(lastTaskView === initialView ? cachedTasks : [])
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -708,6 +722,13 @@ const Tasks: React.FC = () => {
   const [exitingTaskIds, setExitingTaskIds] = useState<Set<string>>(new Set())
   const dragOriginalStatus = useRef<{ id: string; status: Task['status'] } | null>(null)
   const justDraggedRef = useRef(false)
+
+  // Keep module-level cache always in sync
+  useEffect(() => {
+    cachedTasks = tasks
+    lastTaskView = taskView
+  }, [tasks, taskView])
+
 
   // Determina se o usuário tem acesso ao workspace (membro ou dono Pulse)
   const hasWorkspaceAccess = isWorkspaceMember || hasPulse
@@ -733,6 +754,7 @@ const Tasks: React.FC = () => {
     progress: dbTask.progress || 0,
     description: dbTask.description || '',
     subtasks: dbTask.subtasks || [],
+    dueTime: dbTask.due_time || undefined,
     timerAt: dbTask.timer_at || undefined,
     timerFired: dbTask.timer_fired || false,
     whatsappMessage: dbTask.whatsapp_message || undefined,
@@ -752,7 +774,10 @@ const Tasks: React.FC = () => {
   const fetchTasks = useCallback(async (view?: 'personal' | 'workspace') => {
     const currentView = view ?? taskView
     try {
-      setLoading(true)
+      // Only show full loading block if no cached data for this view exists
+      if (lastTaskView !== currentView || cachedTasks.length === 0) {
+        setLoading(true)
+      }
 
       if (currentView === 'workspace') {
         // Busca tarefas compartilhadas via API (owner ou membro)
@@ -779,6 +804,7 @@ const Tasks: React.FC = () => {
       }
     } catch (error) {
       console.error('Erro ao buscar tarefas:', error)
+      alert('Não foi possível carregar as tarefas. Por favor, verifique sua conexão e tente novamente.')
     } finally {
       setLoading(false)
     }
@@ -863,10 +889,10 @@ const Tasks: React.FC = () => {
 
   const tabs = [
     { id: 'board', label: 'Quadro', icon: Layout },
-    { id: 'table', label: 'Tabela', icon: TableIcon, disabled: true },
+    { id: 'table', label: 'Tabela', icon: TableIcon },
   ]
 
-  const handleMoveVisibility = async (taskId: string, newVisibility: 'personal' | 'workspace') => {
+  const handleMoveVisibility = useCallback(async (taskId: string, newVisibility: 'personal' | 'workspace') => {
     // Tarefa sairá da view atual → animar saída antes de remover
     const willLeaveView =
       (taskView === 'personal' && newVisibility === 'workspace') ||
@@ -903,7 +929,7 @@ const Tasks: React.FC = () => {
       // Reverter animação em caso de erro
       setExitingTaskIds(prev => { const s = new Set(prev); s.delete(taskId); return s })
     }
-  }
+  }, [taskView, user?.id])
 
   const handleAddTask = async (newTask: any) => {
     try {
@@ -926,6 +952,7 @@ const Tasks: React.FC = () => {
             description: newTask.description,
             subtasks: newTask.subtasks,
             visibility: newTask.visibility || 'personal',
+            ...(newTask.timerAt !== undefined ? { timer_at: newTask.timerAt, timer_fired: false } : {}),
           })
           .eq('id', editingTask.id)
 
@@ -951,6 +978,8 @@ const Tasks: React.FC = () => {
             title: taskData.title, status: taskData.status, priority: taskData.priority,
             due_date: (taskData.dueDate && taskData.dueDate !== 'Sem prazo') ? taskData.dueDate : null, source: taskData.source, progress: taskData.progress,
             description: taskData.description, subtasks: taskData.subtasks,
+            timer_at: taskData.timerAt || null,
+            timer_fired: false,
             visibility: 'personal',
           }]).select()
 
@@ -968,10 +997,10 @@ const Tasks: React.FC = () => {
     }
   }
 
-  const handleDeleteTask = (id: string) => {
+  const handleDeleteTask = useCallback((id: string) => {
     setTaskToDelete(id)
     setActiveDropdownId(null)
-  }
+  }, [])
 
   const executeDelete = async () => {
     if (!taskToDelete) return
@@ -988,16 +1017,16 @@ const Tasks: React.FC = () => {
     }
   }
 
-  const openEditModal = (task: Task) => {
+  const openEditModal = useCallback((task: Task) => {
     setEditingTask(task)
     setIsModalOpen(true)
     setActiveDropdownId(null)
-  }
+  }, [])
 
-  const openCreateModal = () => {
+  const openCreateModal = useCallback(() => {
     setEditingTask(null)
     setIsModalOpen(true)
-  }
+  }, [])
 
   const handleAssignTask = async (taskId: string, assignedTo: string | null) => {
     try {
@@ -1027,10 +1056,10 @@ const Tasks: React.FC = () => {
     }
   }
 
-  const handleCardClick = (task: Task) => {
+  const handleCardClick = useCallback((task: Task) => {
     if (justDraggedRef.current) return
     setDetailTask(task)
-  }
+  }, [])
 
   const handleDragStart = (event: DragStartEvent) => {
     justDraggedRef.current = true
@@ -1147,7 +1176,7 @@ const Tasks: React.FC = () => {
     }
   }
 
-  const confirmStatusChange = () => {
+  const confirmStatusChange = useCallback(() => {
     if (!pendingStatusTask) return
     const { id, targetStatus } = pendingStatusTask
     setPendingStatusTask(null)
@@ -1165,16 +1194,16 @@ const Tasks: React.FC = () => {
           fetchTasks()
         }
       })
-  }
+  }, [pendingStatusTask, fetchTasks])
 
-  const cancelStatusChange = () => {
+  const cancelStatusChange = useCallback(() => {
     if (!pendingStatusTask) return
     const { id, originalStatus } = pendingStatusTask
     setPendingStatusTask(null)
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status: originalStatus } : t))
-  }
+  }, [pendingStatusTask])
 
-  const handleStopTimer = async (taskId: string) => {
+  const handleStopTimer = useCallback(async (taskId: string) => {
     // Atualiza local imediatamente
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, timerFired: true } : t))
     // Persiste no banco
@@ -1182,41 +1211,43 @@ const Tasks: React.FC = () => {
       .from('tasks')
       .update({ timer_fired: true })
       .eq('id', taskId)
-  }
+  }, [])
 
-  const handleToggleSubtask = async (taskId: string, subtaskId: string) => {
-    const task = tasks.find(t => t.id === taskId)
-    if (!task || !task.subtasks) return
+  const handleToggleSubtask = useCallback(async (taskId: string, subtaskId: string) => {
+    setTasks(prev => {
+      const taskIndex = prev.findIndex(t => t.id === taskId)
+      if (taskIndex === -1) return prev
+      const task = prev[taskIndex]
+      if (!task.subtasks) return prev
 
-    const updatedSubtasks = task.subtasks.map(s =>
-      s.id === subtaskId ? { ...s, completed: !s.completed } : s
-    )
+      const updatedSubtasks = task.subtasks.map(s =>
+        s.id === subtaskId ? { ...s, completed: !s.completed } : s
+      )
 
-    const totalSubtasks = updatedSubtasks.length
-    const completedSubtasks = updatedSubtasks.filter(s => s.completed).length
-    const progress = Math.round((completedSubtasks / totalSubtasks) * 100)
-
-    // Update local state immediately for snappy feel
-    setTasks(prev => prev.map(t =>
-      t.id === taskId ? { ...t, subtasks: updatedSubtasks, progress } : t
-    ))
-
-    try {
-      const { error } = await supabase
+      const totalSubtasks = updatedSubtasks.length
+      const completedSubtasks = updatedSubtasks.filter(s => s.completed).length
+      const progress = Math.round((completedSubtasks / totalSubtasks) * 100)
+      
+      // Fire and forget database update
+      supabase
         .from('tasks')
         .update({
           subtasks: updatedSubtasks,
           progress: progress
         })
         .eq('id', taskId)
+        .then(({ error }) => {
+          if (error) {
+            console.error('Erro ao atualizar subtarefa:', error)
+            fetchTasks() // revert on error
+          }
+        })
 
-      if (error) throw error
-    } catch (error) {
-      console.error('Erro ao atualizar subtarefa:', error)
-      // Revert on error
-      fetchTasks()
-    }
-  }
+      const newTasks = [...prev]
+      newTasks[taskIndex] = { ...task, subtasks: updatedSubtasks, progress }
+      return newTasks
+    })
+  }, [fetchTasks])
 
   // Configuração sutil do drop (encaixe rápido e limpo ao soltar)
   const dropAnimationConfig = {
@@ -1264,20 +1295,14 @@ const Tasks: React.FC = () => {
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => !tab.disabled && setViewMode(tab.id as any)}
-                  disabled={tab.disabled}
+                  onClick={() => setViewMode(tab.id as any)}
                   className={`flex items-center gap-1.5 sm:gap-2 pb-3 text-xs sm:text-sm font-semibold transition-all relative ${viewMode === tab.id
                     ? 'text-[#37352f]'
-                    : tab.disabled ? 'text-[#37352f]/20 cursor-not-allowed' : 'text-[#37352f]/40 hover:text-[#37352f]/60'
+                    : 'text-[#37352f]/40 hover:text-[#37352f]/60'
                     }`}
                 >
                   <tab.icon size={16} strokeWidth={viewMode === tab.id ? 2.5 : 2} />
                   {tab.label}
-                  {tab.disabled && (
-                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[#f1f1ef] text-[#37352f]/40 text-[9px] font-bold tracking-wider">
-                      Em breve
-                    </span>
-                  )}
                   {viewMode === tab.id && (
                     <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#37352f]" />
                   )}
@@ -1287,28 +1312,42 @@ const Tasks: React.FC = () => {
 
             {/* Toggle pessoal / workspace — somente para admin (dono), convidados ficam fixos em workspace */}
             {hasWorkspaceAccess && isAdmin && (
-              <div className="flex items-center gap-1 bg-[#f7f7f5] border border-[#e9e9e7] rounded-lg p-0.5 mb-3">
+              <div className="relative flex items-center bg-[#f7f7f5]/80 border border-[#e9e9e7]/50 rounded-full p-1 mb-3">
                 <button
                   onClick={() => setTaskView('personal')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold transition-all ${
+                  className={`relative z-10 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[11px] font-semibold transition-colors duration-300 ${
                     taskView === 'personal'
-                      ? 'bg-white text-[#37352f] shadow-sm border border-[#e9e9e7]'
-                      : 'text-[#37352f]/40 hover:text-[#37352f]/70'
+                      ? 'text-[#37352f]'
+                      : 'text-[#37352f]/30 hover:text-[#37352f]/50'
                   }`}
                 >
                   <Lock size={11} strokeWidth={2.5} />
                   <span className="hidden sm:inline">Pessoal</span>
+                  {taskView === 'personal' && (
+                    <motion.div
+                      layoutId="task-view-active"
+                      className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
+                      transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
+                    />
+                  )}
                 </button>
                 <button
                   onClick={() => setTaskView('workspace')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold transition-all ${
+                  className={`relative z-10 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[11px] font-semibold transition-colors duration-300 ${
                     taskView === 'workspace'
-                      ? 'bg-white text-[#37352f] shadow-sm border border-[#e9e9e7]'
-                      : 'text-[#37352f]/40 hover:text-[#37352f]/70'
+                      ? 'text-[#37352f]'
+                      : 'text-[#37352f]/30 hover:text-[#37352f]/50'
                   }`}
                 >
                   <Users size={11} strokeWidth={2.5} />
                   <span className="hidden sm:inline">Workspace</span>
+                  {taskView === 'workspace' && (
+                    <motion.div
+                      layoutId="task-view-active"
+                      className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
+                      transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
+                    />
+                  )}
                 </button>
               </div>
             )}
@@ -1460,8 +1499,12 @@ const Tasks: React.FC = () => {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-[#f1f1f0]">
-                              {columnTasks.map((task) => (
-                                <tr key={task.id} className="group hover:bg-[#fcfcfa] transition-colors relative">
+                                {columnTasks.map((task) => (
+                                  <tr 
+                                    key={task.id} 
+                                    className="group hover:bg-[#fcfcfa] transition-colors relative cursor-pointer"
+                                    onClick={() => handleCardClick(task)}
+                                  >
                                   <td className="py-4 px-5 border-r border-[#f1f1f0]">
                                     <span className="text-sm font-semibold text-[#37352f] line-clamp-1">{task.title}</span>
                                   </td>

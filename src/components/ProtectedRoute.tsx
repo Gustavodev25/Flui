@@ -9,15 +9,15 @@ const FREE_ROUTES = ['/checkout-preview', '/subscription']
 
 export const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading: authLoading } = useAuth()
-  const [hasActivePlan, setHasActivePlan] = useState<boolean | null>(null)
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null)
   const [loadingSub, setLoadingSub] = useState(true)
   const location = useLocation()
 
   useEffect(() => {
-    setHasActivePlan(null)
+    setHasAccess(null)
     setLoadingSub(true)
 
-    if (!user) {
+    if (!user?.id) {
       setLoadingSub(false)
       return
     }
@@ -40,20 +40,24 @@ export const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
         const sub = subRes.status === 'fulfilled' ? subRes.value.data : null
         const membership = memberRes.status === 'fulfilled' ? memberRes.value.membership : null
 
-        const ownPlanActive =
-          sub?.status === 'active' && ['flow', 'pulse'].includes(sub?.plan_id ?? '')
+        // User has access if:
+        // 1. Has any subscription record (active paid, or 'starter' free plan)
+        // 2. OR is a workspace member
+        const hasSubscriptionRecord = !!sub
+        const isWorkspaceMember = !!membership
 
-        setHasActivePlan(ownPlanActive || !!membership)
+        setHasAccess(hasSubscriptionRecord || isWorkspaceMember)
       } catch (err) {
         console.error('Access check error:', err)
-        setHasActivePlan(false)
+        // On error, be permissive — don't lock out the user
+        setHasAccess(true)
       } finally {
         setLoadingSub(false)
       }
     }
 
     checkAccess()
-  }, [user])
+  }, [user?.id])
 
   if (authLoading || loadingSub) {
     return (
@@ -67,8 +71,8 @@ export const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     return <Navigate to="/login" replace />
   }
 
-  // Sem plano ativo: redireciona para checkout, exceto nas rotas liberadas
-  if (!hasActivePlan && !FREE_ROUTES.includes(location.pathname)) {
+  // Sem nenhum registro de plano: redireciona para checkout, exceto nas rotas liberadas
+  if (!hasAccess && !FREE_ROUTES.includes(location.pathname)) {
     return <Navigate to="/checkout-preview" replace />
   }
 

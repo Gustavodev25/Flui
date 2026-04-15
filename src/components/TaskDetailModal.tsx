@@ -32,14 +32,12 @@ interface Task {
   subtasks?: Subtask[]
   timerAt?: string
   timerFired?: boolean
-  whatsappMessage?: string
-  reminderDaysBefore?: number
-  reminderFired?: boolean
   visibility?: 'personal' | 'workspace'
   assignedToId?: string
   assignedToName?: string
   assignedToAvatar?: string
   assignedToEmail?: string
+  dueTime?: string
 }
 
 const statusMap: Record<Task['status'], string> = {
@@ -156,7 +154,9 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           </DetailRow>
 
           <DetailRow label="Prazo">
-            <span className="text-[13px] text-[#37352f]">{formatDate(task.dueDate)}</span>
+            <span className="text-[13px] text-[#37352f]">
+              {formatDate(task.dueDate)}
+            </span>
           </DetailRow>
 
           {hasTimer && (
@@ -259,22 +259,29 @@ const DetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({ lab
 // ── Timer Inline ──
 const TimerInline: React.FC<{ task: Task; onStopTimer: (id: string) => void }> = ({ task, onStopTimer }) => {
   const HOLD_DURATION = 6000
+
+  const effectiveTimerAt = task.timerAt || null;
+
   const [timerParts, setTimerParts] = useState<{ h: number; m: number; s: number } | null>(
-    task.timerAt ? getTimerParts(task.timerAt) : null
+    effectiveTimerAt && !task.timerFired ? getTimerParts(effectiveTimerAt) : null
   )
+
   const [holdProgress, setHoldProgress] = useState(0)
   const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const holdStartRef = useRef<number>(0)
 
   useEffect(() => {
-    if (!task.timerAt || task.timerFired) return
+    if (!effectiveTimerAt || task.timerFired) {
+      setTimerParts(null)
+      return
+    }
     const interval = setInterval(() => {
-      const parts = getTimerParts(task.timerAt!)
+      const parts = getTimerParts(effectiveTimerAt)
       setTimerParts(parts)
       if (parts === null) clearInterval(interval)
     }, 1000)
     return () => clearInterval(interval)
-  }, [task.timerAt, task.timerFired])
+  }, [effectiveTimerAt, task.timerFired])
 
   const startHold = (e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
     e.stopPropagation()

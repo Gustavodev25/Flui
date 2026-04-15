@@ -3,6 +3,7 @@ import { Loader2, Plus, Trash2, CheckCircle2, Circle, Lock, Users, UserCheck } f
 import { motion, AnimatePresence } from 'framer-motion'
 import Select from './ui/Select'
 import DatePicker from './ui/DatePicker'
+import TimePicker from './ui/TimePicker'
 import { useAuth } from '../contexts/AuthContext'
 import Avvvatars from 'avvvatars-react'
 import { apiFetch } from '../lib/api'
@@ -41,6 +42,20 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, is
       ? new Date(initialData.dueDate)
       : null
   )
+  const [timerDuration, setTimerDuration] = useState<string | null>(() => {
+    if (initialData?.timerAt && !initialData?.timerFired) {
+      const remaining = new Date(initialData.timerAt).getTime() - Date.now()
+      if (remaining > 0) {
+        const totalSeconds = Math.floor(remaining / 1000)
+        const h = Math.floor(totalSeconds / 3600)
+        const m = Math.floor((totalSeconds % 3600) / 60)
+        const s = totalSeconds % 60
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      }
+    }
+    return null
+  })
+  const [timerTouched, setTimerTouched] = useState(false)
   const [visibility, setVisibility] = useState<'personal' | 'workspace'>(
     initialData?.visibility || defaultVisibility || 'personal'
   )
@@ -162,6 +177,18 @@ REGRAS:
       progress = Math.round((completedSubtasks / totalSubtasks) * 100)
     }
 
+    // Calcula timer_at a partir da duração (igual ao WhatsApp faz no backend)
+    let timerAt: string | null | undefined = undefined
+    if (timerTouched) {
+      if (timerDuration && timerDuration !== '00:00:00') {
+        const [h, m, s] = timerDuration.split(':').map(Number)
+        const totalMs = (h * 3600 + m * 60 + s) * 1000
+        timerAt = new Date(Date.now() + totalMs).toISOString()
+      } else {
+        timerAt = null
+      }
+    }
+
     onSubmit({
       id: initialData?.id || Math.random().toString(36).substr(2, 9),
       title,
@@ -170,6 +197,7 @@ REGRAS:
       priority,
       source: initialData?.source || 'user',
       dueDate: dueDate ? formatDateForTask(dueDate) : 'Sem prazo',
+      timerAt,
       progress,
       subtasks,
       visibility,
@@ -397,12 +425,18 @@ REGRAS:
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         {/* Due Date */}
         <DatePicker
           label="Prazo"
           value={dueDate}
           onChange={setDueDate}
+        />
+
+        <TimePicker
+          label="Timer"
+          value={timerDuration}
+          onChange={(val) => { setTimerDuration(val); setTimerTouched(true) }}
         />
       </div>
 
@@ -466,41 +500,47 @@ REGRAS:
         </div>
       </div>
 
-      {/* Visibility Toggle (workspace members/owners only) */}
-      {hasWorkspaceAccess && (
+      {/* Visibility Toggle (workspace members/owners only) - Hidden during edit */}
+      {hasWorkspaceAccess && !isEditing && (
         <div className="space-y-1.5">
-          <label className="text-[11px] font-medium text-[#37352f]/70 flex items-center h-5">Visibilidade</label>
-          <div className="flex items-center gap-2 bg-[#f7f7f5] border border-[#e9e9e7] rounded-lg p-1">
+          <label className="text-[11px] font-medium text-[#37352f]/40 flex items-center h-5">Visibilidade</label>
+          <div className="relative flex items-center bg-[#f7f7f5]/80 rounded-full p-1 border border-[#e9e9e7]/50">
             <button
               type="button"
               onClick={() => setVisibility('personal')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-[11px] font-semibold transition-all ${
+              className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-semibold transition-colors duration-300 ${
                 visibility === 'personal'
-                  ? 'bg-white text-[#37352f] shadow-sm border border-[#e9e9e7]'
-                  : 'text-[#37352f]/40 hover:text-[#37352f]/70'
+                  ? 'text-[#37352f]'
+                  : 'text-[#37352f]/30 hover:text-[#37352f]/50'
               }`}
             >
-              <Lock size={12} strokeWidth={2.5} />
-              Pessoal
+              <Lock size={12} strokeWidth={2.5} className="transition-transform group-hover:scale-110" />
+              <span>Pessoal</span>
               {visibility === 'personal' && (
-                <span className="text-[9px] text-[#37352f]/40 font-normal ml-0.5">só você vê</span>
+                <motion.div
+                  layoutId="active-visibility"
+                  className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
+                  transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
+                />
               )}
             </button>
             <button
               type="button"
               onClick={() => setVisibility('workspace')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-[11px] font-semibold transition-all ${
+              className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-semibold transition-colors duration-300 ${
                 visibility === 'workspace'
-                  ? 'bg-white text-[#37352f] shadow-sm border border-[#e9e9e7]'
-                  : 'text-[#37352f]/40 hover:text-[#37352f]/70'
+                  ? 'text-[#37352f]'
+                  : 'text-[#37352f]/30 hover:text-[#37352f]/50'
               }`}
             >
-              <Users size={12} strokeWidth={2.5} />
-              Workspace
+              <Users size={12} strokeWidth={2.5} className="transition-transform group-hover:scale-110" />
+              <span>Workspace</span>
               {visibility === 'workspace' && (
-                <span className="text-[9px] text-[#37352f]/40 font-normal ml-0.5">
-                  {workspaceName ? `${workspaceName}` : 'equipe vê'}
-                </span>
+                <motion.div
+                  layoutId="active-visibility"
+                  className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
+                  transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
+                />
               )}
             </button>
           </div>
