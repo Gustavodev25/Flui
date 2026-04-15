@@ -4,7 +4,7 @@ dotenv.config();
 import OpenAI from 'openai';
 
 export const PRIMARY_PROVIDER = 'nvidia';
-export const PRIMARY_MODEL_ID = process.env.MODEL_ID || 'deepseek-ai/deepseek-v3-0324';
+export const PRIMARY_MODEL_ID = process.env.MODEL_ID || 'moonshotai/kimi-k2.5';
 export const PRIMARY_TIMEOUT_MS = Math.max(Number(process.env.PRIMARY_LLM_TIMEOUT_MS || 45000), 45000);
 
 export const FALLBACK_PROVIDER = 'groq';
@@ -146,7 +146,7 @@ export async function createChatCompletion(params, options = {}) {
       console.warn(
         `[LLM] ${error.provider || 'provider'}:${error.model || 'model'} falhou com ${error.error_class || classifyError(error)} (${error.message})`
       );
-      if (!isRetryableModelError(error)) break;
+      // sempre tenta o próximo provider (Groq fallback)
     }
   }
 

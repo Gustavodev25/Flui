@@ -1142,7 +1142,7 @@ app.get('/api/subscription/sync', async (req, res) => {
 // ================== CHAT API (DeepSeek/NIM) ==================
 app.post('/api/chat', async (req, res) => {
   try {
-    const { messages, temperature = 0.7, max_tokens = 100 } = req.body;
+    const { messages, temperature = 0.7, max_tokens = 2048 } = req.body;
 
     const { response, telemetry } = await createChatCompletion({
       messages,
@@ -1274,12 +1274,12 @@ REGRAS GERAIS:
 
     for (let turn = 0; turn < MAX_CHAT_AGENT_TURNS; turn++) {
       const response = await nimClient.chat.completions.create({
-        model: process.env.MODEL_ID || 'deepseek-ai/deepseek-v3-0324',
+        model: process.env.MODEL_ID || 'deepseek-ai/deepseek-v3.2',
         messages: turnMessages,
         tools: CHAT_AGENT_TOOLS,
         tool_choice: 'auto',
         temperature: 0.6,
-        max_tokens: 512,
+        max_tokens: 1024,
       });
 
       const choice = response.choices[0];
@@ -1312,10 +1312,10 @@ REGRAS GERAIS:
     if (!finalContent) {
       // Força resposta final se o loop acabou sem texto
       const finalResponse = await nimClient.chat.completions.create({
-        model: process.env.MODEL_ID || 'deepseek-ai/deepseek-v3-0324',
+        model: process.env.MODEL_ID || 'deepseek-ai/deepseek-v3.2',
         messages: turnMessages,
         temperature: 0.6,
-        max_tokens: 256,
+        max_tokens: 2048,
       });
       finalContent = finalResponse.choices[0]?.message?.content || 'Pronto! Posso ajudar com mais alguma coisa?';
     }
