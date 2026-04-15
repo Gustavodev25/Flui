@@ -250,6 +250,7 @@ ATRIBUIÇÃO DE TAREFAS (assigned_to_name):
 
 ` : ''}═══ REGRAS DE AÇÃO ═══
 1. FERRAMENTA OBRIGATÓRIA: Você JAMAIS pode fingir que criou, atualizou ou deletou uma tarefa sem chamar a ferramenta correspondente. Se sua resposta diz "anotei", "criei", "registrei" ou qualquer variação, você DEVE ter chamado TaskCreate ou TaskBatchCreate antes. NUNCA simule uma ação.
+   TÍTULO DA TAREFA — REGRA CRÍTICA: O campo "title" deve ter NO MÁXIMO 5 a 7 palavras. NUNCA use o texto transcrito do áudio como título. Extraia a ação principal e crie um nome curto: "Ligar pro dentista", "Enviar proposta cliente", "Comprar material". O texto completo do usuário vai no campo "description".
 
 2. INTENÇÃO DE CRIAÇÃO — LISTA AMPLA DE GATILHOS:
    Qualquer uma dessas frases (ou variações) é intenção clara de criar tarefa. Chame TaskCreate IMEDIATAMENTE:

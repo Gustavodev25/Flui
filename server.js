@@ -2563,29 +2563,58 @@ setTimeout(() => {
 // ================== TIMERS DE TAREFAS ==================
 // Verifica a cada minuto avisos prévios e timers expirados
 
-// ── Pool de templates de timer (variação natural) ────────────────────────────
-const TIMER_WARN_TEMPLATES = [
+// ── Gerador de mensagens de timer via IA (com fallback em templates) ──────────
+
+const TIMER_WARN_FALLBACK = [
   '{name}, daqui a pouco é hora de: "{title}" (faltam {time})',
   'Ei {name}, lembrete: "{title}" em {time}',
   '{name}, não esquece — "{title}" daqui {time}',
-  'Atenção, {name}: "{title}" em {time}',
-  '{name}, tô passando pra lembrar: "{title}" em {time}',
 ];
 
-const TIMER_COMBINED_TEMPLATES = [
+const TIMER_FIRE_FALLBACK = [
   '{name}, é agora: "{title}"',
   'Ei {name}, hora de: "{title}"',
   '{name}, bora — "{title}"',
-  'Chegou a hora, {name}: "{title}"',
-  '{name}, lembrete final: "{title}"',
 ];
 
-function pickTimerTemplate(templates, name, title, timeLabel) {
+function pickFallbackTemplate(templates, name, title, timeLabel) {
   const tpl = templates[Math.floor(Math.random() * templates.length)];
   return tpl
     .replace('{name}', name)
     .replace('{title}', title)
     .replace('{time}', timeLabel || '');
+}
+
+async function generateTimerMessage(name, title, type, timeLabel) {
+  const isWarn = type === 'warn';
+  const contextLine = isWarn
+    ? `Faltam ${timeLabel} para o horário da tarefa.`
+    : 'O timer da tarefa acabou agora.';
+
+  const prompt = `Você é o Lui, assistente de produtividade no WhatsApp. Gere UMA mensagem curta (máximo 2 frases) avisando ${name} sobre a tarefa "${title}". ${contextLine}
+
+Regras obrigatórias:
+- Tom casual, de amigo, português brasileiro
+- NUNCA use emojis
+- NUNCA repita literalmente o título — mencione a tarefa de forma natural
+- Varie a estrutura (não comece sempre com o nome)
+- Responda APENAS com o texto da mensagem, sem explicações`;
+
+  try {
+    const { response } = await createChatCompletion({
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 1.0,
+      max_tokens: 80,
+    }, { preferFallback: false });
+    const text = response.choices?.[0]?.message?.content?.trim();
+    if (text) return text;
+  } catch (err) {
+    console.warn(`[Timer] IA falhou ao gerar mensagem, usando fallback: ${err.message}`);
+  }
+
+  // Fallback para templates estáticos
+  const pool = isWarn ? TIMER_WARN_FALLBACK : TIMER_FIRE_FALLBACK;
+  return pickFallbackTemplate(pool, name, title, timeLabel);
 }
 
 // Aviso prévio: envia X minutos antes do timer expirar
@@ -2675,7 +2704,7 @@ async function checkTaskTimers() {
             await saveMissedFollowup(task.user_id, task.id, task.title, 'timer');
             console.log(`[Timer] Janela 24h fechada — follow-up salvo → "${task.title}"`);
           } else {
-            const msg = pickTimerTemplate(TIMER_COMBINED_TEMPLATES, userName, task.title, null);
+            const msg = await generateTimerMessage(userName, task.title, 'fire', null);
             await sendTimerMessage(task.user_id, task.title, msg);
             console.log(`[Timer] Expirado (${task.timer_warned ? 'com' : 'sem'} warn previo, enviando final) -> "${task.title}"`);
           }
@@ -2685,7 +2714,9 @@ async function checkTaskTimers() {
         if (!task.timer_warned) {
           const warnMs = warnBeforeMs(task.timer_at);
           const timeUntilTimer = timerMs - now.getTime();
-          if (timeUntilTimer <= warnMs) {
+          // Só envia aviso prévio se ainda faltam mais de 5 minutos — evita duplicar mensagem em timers curtos
+          const MIN_WARN_BUFFER_MS = 5 * 60_000;
+          if (timeUntilTimer <= warnMs && timeUntilTimer > MIN_WARN_BUFFER_MS) {
             const inWindow = await isWithin24hWindow(task.user_id);
             if (!inWindow) {
               // Janela fechada — skip silencioso (o fire vai registrar o follow-up quando expirar)
@@ -2695,7 +2726,7 @@ async function checkTaskTimers() {
                 .from('tasks').update({ timer_warned: true }).eq('id', task.id);
               if (upErr) { console.error(`[Timer] Erro ao marcar warned:`, upErr.message); continue; }
               const timeLabel = formatWarnLabel(task.timer_at);
-              const msg = pickTimerTemplate(TIMER_WARN_TEMPLATES, userName, task.title, timeLabel);
+              const msg = await generateTimerMessage(userName, task.title, 'warn', timeLabel);
               await sendTimerMessage(task.user_id, task.title, msg);
               console.log(`[Timer] Aviso previo → "${task.title}" (faltam ${timeLabel})`);
             }
@@ -2739,7 +2770,7 @@ async function checkTaskTimers() {
             await saveMissedFollowup(task.user_id, task.id, s.title, 'subtask_timer');
             console.log(`[Timer] Janela 24h fechada - follow-up de subtarefa salvo -> "${s.title}" (em "${task.title}")`);
           } else {
-            const msg = pickTimerTemplate(TIMER_COMBINED_TEMPLATES, userName, s.title, null);
+            const msg = await generateTimerMessage(userName, s.title, 'fire', null);
             await sendTimerMessage(task.user_id, s.title, msg);
             console.log(`[Timer] Subtarefa expirada (${s.timer_warned ? 'com' : 'sem'} warn previo, enviando final) -> "${s.title}" (em "${task.title}")`);
           }
@@ -2753,7 +2784,8 @@ async function checkTaskTimers() {
         if (!s.timer_warned) {
           const warnMs = warnBeforeMs(s.timer_at);
           const timeUntil = subMs - now.getTime();
-          if (timeUntil <= warnMs) {
+          const MIN_WARN_BUFFER_MS = 5 * 60_000;
+          if (timeUntil <= warnMs && timeUntil > MIN_WARN_BUFFER_MS) {
             const inWindow = await isWithin24hWindow(task.user_id);
             if (!inWindow) {
               console.log(`[Timer] Janela 24h fechada - skip warn subtarefa -> "${s.title}" (em "${task.title}")`);
@@ -2762,7 +2794,7 @@ async function checkTaskTimers() {
             }
 
             const timeLabel = formatWarnLabel(s.timer_at);
-            const msg = pickTimerTemplate(TIMER_WARN_TEMPLATES, userName, s.title, timeLabel);
+            const msg = await generateTimerMessage(userName, s.title, 'warn', timeLabel);
             await sendTimerMessage(task.user_id, s.title, msg);
             console.log(`[Timer] Aviso subtarefa -> "${s.title}" (faltam ${timeLabel})`);
             changed = true;

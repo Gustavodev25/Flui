@@ -105,7 +105,7 @@ export const TOOLS = [
         properties: {
           title: {
             type: 'string',
-            description: 'Título breve e direto da tarefa (campo obrigatório).',
+            description: 'Título RESUMIDO da tarefa — máximo 5 a 7 palavras. NUNCA copie o texto do usuário. Gere um nome curto e descritivo que identifique a tarefa (ex: "Ligar pro fornecedor", "Enviar proposta cliente", "Comprar material escritório"). Se o usuário falou por áudio ou texto longo, extraia a essência e crie um título conciso.',
           },
           description: {
             type: 'string',
@@ -331,7 +331,7 @@ export const TOOLS = [
             items: {
               type: 'object',
               properties: {
-                title: { type: 'string', description: 'Título da tarefa.' },
+                title: { type: 'string', description: 'Título RESUMIDO — máximo 5 a 7 palavras. NUNCA copie o texto do usuário. Extraia a essência e crie um nome curto e descritivo (ex: "Reunião com cliente X", "Enviar relatório mensal").' },
                 description: { type: 'string', description: 'Resumo detalhado do que precisa ser feito. Gere uma descrição para cada tarefa do lote.' },
                 priority: { type: 'string', enum: ['low', 'medium', 'high'] },
                 due_date: { type: 'string', description: 'Data YYYY-MM-DD.' },
