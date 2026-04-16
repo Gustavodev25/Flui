@@ -30,13 +30,28 @@ function WhatsAppChecker({ onNeedWhatsApp }: { onNeedWhatsApp: () => void }) {
     if (!user || checkedRef.current) return
     checkedRef.current = true
 
-    const isGoogleUser = user.identities?.some((i: any) => i.provider === 'google') &&
-      !user.identities?.some((i: any) => i.provider === 'email')
+    const providers = user?.app_metadata?.providers || []
+    const isGoogleUser = providers.includes('google') && !providers.includes('email')
+
+    console.log('[WhatsAppChecker] Checking user:', {
+      id: user.id,
+      providers,
+      isGoogleUser
+    })
+
     if (!isGoogleUser) return
 
     apiFetch<{ phone: string | null }>('/api/whatsapp/linked-phone', undefined, { userId: user.id })
-      .then(({ phone }) => { if (!phone) onNeedWhatsApp() })
-      .catch(() => {})
+      .then(({ phone }) => {
+        console.log('[WhatsAppChecker] API result:', { phone })
+        if (!phone) {
+          console.log('[WhatsAppChecker] Triggering onboarding modal')
+          onNeedWhatsApp()
+        }
+      })
+      .catch((err) => {
+        console.error('[WhatsAppChecker] Error fetching linked phone:', err)
+      })
   }, [user])
 
   return null
@@ -123,6 +138,7 @@ function App() {
           <WhatsAppOnboardingModal
             isOpen={showWhatsAppOnboarding}
             onClose={() => setShowWhatsAppOnboarding(false)}
+            mandatory
           />
           </Router>
           <AppToaster />

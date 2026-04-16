@@ -18,8 +18,13 @@ const ThankYouModal: React.FC<ThankYouModalProps> = ({ isOpen, onClose, onGoToDa
     || user?.user_metadata?.name?.split(' ')[0]
     || null
 
+  const providers = user?.app_metadata?.providers || []
+  const isGoogleUser = providers.includes('google') && !providers.includes('email')
+
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleDismiss()
+    }
     if (isOpen) {
       window.addEventListener('keydown', handleEsc)
       document.body.style.overflow = 'hidden'
@@ -28,11 +33,20 @@ const ThankYouModal: React.FC<ThankYouModalProps> = ({ isOpen, onClose, onGoToDa
       window.removeEventListener('keydown', handleEsc)
       document.body.style.overflow = 'unset'
     }
-  }, [isOpen, onClose])
+  }, [isOpen, onClose, isGoogleUser])
+
+  const handleDismiss = () => {
+    onClose()
+    console.log('[ThankYouModal] Dismissing, isGoogleUser:', isGoogleUser)
+    if (isGoogleUser && onGoToDashboard) {
+      console.log('[ThankYouModal] Triggering mandatory WhatsApp flow')
+      onGoToDashboard()
+    }
+  }
 
   const handleGoToDashboard = () => {
     onClose()
-    if (onGoToDashboard) {
+    if (isGoogleUser && onGoToDashboard) {
       onGoToDashboard()
     } else {
       navigate('/dashboard', { replace: true })
@@ -61,7 +75,7 @@ const ThankYouModal: React.FC<ThankYouModalProps> = ({ isOpen, onClose, onGoToDa
           >
             {/* Fechar */}
             <button
-              onClick={onClose}
+              onClick={handleDismiss}
               className="absolute top-3.5 right-3.5 z-10 p-1.5 hover:bg-[#f1f1f0] rounded-md transition-colors text-[#37352f]/25 hover:text-[#37352f]"
             >
               <X size={16} />

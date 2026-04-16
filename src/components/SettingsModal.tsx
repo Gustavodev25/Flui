@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, User, CreditCard, Check, Loader2, ArrowRight, ExternalLink, Camera, Smartphone, Zap } from 'lucide-react'
+import { X, User, CreditCard, Check, Loader2, ArrowRight, ExternalLink, Camera, Smartphone, Zap, CheckCircle2, XCircle } from 'lucide-react'
 import flowLogo from '../assets/logo/flow.svg'
 import pulseLogo from '../assets/logo/pulse.svg'
 import gratisLogo from '../assets/logo/gratis.svg'
@@ -11,6 +11,9 @@ import Avvvatars from 'avvvatars-react'
 import { AvatarUploadModal } from './AvatarUploadModal'
 import { apiFetch } from '../lib/api'
 import { useNavigate } from 'react-router-dom'
+import CountrySelector from './CountrySelector'
+import { countries } from '../constants/countries'
+import type { Country } from '../constants/countries'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -33,15 +36,63 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
   const [editName, setEditName] = useState(user?.user_metadata?.full_name || user?.user_metadata?.name || '')
   const [isSavingName, setIsSavingName] = useState(false)
   const [linkedPhone, setLinkedPhone] = useState<string | null>(null)
-  const [phoneInput, setPhoneInput] = useState('')
-  const [isLinkingPhone, setIsLinkingPhone] = useState(false)
+  const [ddd, setDdd] = useState('')
+  const [phoneRemainder, setPhoneRemainder] = useState('')
   const [phoneLinkSuccess, setPhoneLinkSuccess] = useState(false)
+  const [phoneLinkError, setPhoneLinkError] = useState<string | null>(null)
   const [isUnlinkingPhone, setIsUnlinkingPhone] = useState(false)
+  const [isLinkingPhone, setIsLinkingPhone] = useState(false)
+  const [isValidatingPhone, setIsValidatingPhone] = useState(false)
+  const [isPhoneValid, setIsPhoneValid] = useState<boolean | null>(null)
 
-
+  const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]) // Brasil (+55) default
   const navigate = useNavigate()
-  const isGoogleUser = user?.identities?.some(i => i.provider === 'google') &&
-    !user?.identities?.some(i => i.provider === 'email')
+  const providers = user?.app_metadata?.providers || []
+  const isGoogleUser = providers.includes('google') && !providers.includes('email')
+
+  // Sincroniza para o backend
+  const phoneInput = `${selectedCountry.code}${ddd}${phoneRemainder.replace(/\D/g, '')}`
+
+  const handleDddChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPhoneLinkError(null)
+    const val = e.target.value.replace(/\D/g, '').slice(0, 2)
+    setDdd(val)
+  }
+
+  const handleRemainderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPhoneLinkError(null)
+    const raw = e.target.value.replace(/\D/g, '').slice(0, 9)
+    let formatted = raw
+    if (raw.length > 5) {
+      formatted = `${raw.slice(0, 5)}-${raw.slice(5)}`
+    }
+    setPhoneRemainder(formatted)
+  }
+
+  // Validação "Real" (Formato + Simulação) no Settings
+  useEffect(() => {
+    const raw = phoneRemainder.replace(/\D/g, '')
+    if (ddd.length === 2 && raw.length >= 8) {
+      const timer = setTimeout(() => {
+        setIsValidatingPhone(true)
+        setIsPhoneValid(null)
+        
+        const isBR = selectedCountry.iso === 'BR'
+        const validFormat = isBR 
+          ? (raw.length === 9 && raw.startsWith('9')) || (raw.length === 8)
+          : raw.length >= 8
+
+        setTimeout(() => {
+          setIsPhoneValid(validFormat)
+          setIsValidatingPhone(false)
+        }, 1200)
+      }, 500)
+      return () => clearTimeout(timer)
+    } else {
+      setIsPhoneValid(null)
+      setIsValidatingPhone(false)
+    }
+  }, [ddd, phoneRemainder, selectedCountry])
 
   useEffect(() => {
     const fetchSubscription = async () => {
@@ -245,8 +296,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
   }
 
   const handleLinkPhone = async () => {
-    if (!user || !phoneInput.trim()) return
+    if (!user || !phoneInput.trim() || ddd.length < 2 || isPhoneValid === false) return
     setIsLinkingPhone(true)
+    setPhoneLinkError(null)
     try {
       const { phone } = await apiFetch<{ ok: boolean; phone: string }>('/api/whatsapp/link-phone', {
         method: 'POST',
@@ -254,11 +306,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
         body: JSON.stringify({ userId: user.id, phone: phoneInput.trim() }),
       })
       setLinkedPhone(phone)
-      setPhoneInput('')
+      setDdd('')
+      setPhoneRemainder('')
       setPhoneLinkSuccess(true)
       setTimeout(() => setPhoneLinkSuccess(false), 4000)
     } catch (err: any) {
-      alert('Erro ao vincular número: ' + (err.message || 'Tente novamente'))
+      setPhoneLinkError(err.message || 'Não foi possível validar este número.')
     } finally {
       setIsLinkingPhone(false)
     }
@@ -274,7 +327,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
         body: JSON.stringify({ userId: user.id }),
       })
       setLinkedPhone(null)
-      setPhoneInput('')
+      setDdd('')
+      setPhoneRemainder('')
     } catch (err: any) {
       alert('Erro ao desvincular: ' + (err.message || 'Tente novamente'))
     } finally {
@@ -498,13 +552,55 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
 
                           {!linkedPhone && !phoneLinkSuccess && (
                             <>
-                              <input
-                                type="tel"
-                                placeholder="Ex: 5511999998888 (com DDD e código do país)"
-                                value={phoneInput}
-                                onChange={(e) => setPhoneInput(e.target.value)}
-                                className="w-full px-4 py-3 bg-[#fcfcfa] border border-[#e9e9e7] rounded-xl text-sm font-medium text-[#37352f] placeholder:text-[#37352f]/30 placeholder:font-normal focus:outline-none focus:border-[#37352f]/30 focus:ring-1 focus:ring-black/5 transition-all"
-                              />
+                              <div className={`w-full flex items-center gap-0 p-2 bg-[#fcfcfa] border rounded-xl focus-within:ring-1 focus-within:ring-black/5 transition-all ${phoneLinkError ? 'border-red-100' : isPhoneValid === true ? 'border-green-100' : 'border-[#e9e9e7] focus-within:border-[#37352f]/30'}`}>
+                                <CountrySelector 
+                                  selectedCountry={selectedCountry} 
+                                  onSelect={setSelectedCountry} 
+                                />
+                                <div className="h-4 w-[1px] bg-[#e9e9e7] mx-1" />
+                                <span className="text-sm font-bold text-[#37352f]/40 ml-1">
+                                  (
+                                </span>
+                                <input
+                                  type="tel"
+                                  maxLength={2}
+                                  placeholder="18"
+                                  value={ddd}
+                                  onChange={handleDddChange}
+                                  className="w-5 text-sm font-bold bg-transparent border-none focus:outline-none placeholder:text-[#37352f]/20 p-0 text-center text-[#37352f]"
+                                />
+                                <span className="text-sm font-bold text-[#37352f]/40">
+                                  )
+                                </span>
+                                <input
+                                  type="tel"
+                                  placeholder="91234-5678"
+                                  value={phoneRemainder}
+                                  onChange={handleRemainderChange}
+                                  className="flex-1 ml-2 text-sm font-medium bg-transparent border-none focus:outline-none text-[#37352f] placeholder:text-[#37352f]/30 p-0"
+                                />
+
+                                {/* Validação no lado direito */}
+                                <div className="flex items-center px-1.5 min-w-[20px] justify-center">
+                                  {isValidatingPhone ? (
+                                    <Loader2 size={12} className="animate-spin text-[#37352f]/20" />
+                                  ) : isPhoneValid === true ? (
+                                    <CheckCircle2 size={12} className="text-green-400" />
+                                  ) : isPhoneValid === false ? (
+                                    <XCircle size={12} className="text-red-400" />
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              {phoneLinkError && (
+                                <p className="px-1 text-[10px] text-red-500 font-medium -mt-1.5">
+                                  {phoneLinkError}
+                                </p>
+                              )}
+
+                              <p className="px-1 text-[10px] text-[#37352f]/40 leading-relaxed">
+                                Use seu <span className={`font-bold transition-colors ${ddd.length === 2 ? 'text-green-500' : 'text-[#37352f]/60'}`}>DDD</span> e número. O <span className="font-semibold">+{selectedCountry.code}</span> já está incluído.
+                              </p>
                               <div className="flex items-center gap-3 px-1">
                                 <button
                                   onClick={handleLinkPhone}
