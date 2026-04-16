@@ -9,6 +9,7 @@ import flowIcon from '../assets/logo/flow.svg'
 import gratisIcon from '../assets/logo/gratis.svg'
 import pulseIcon from '../assets/logo/pulse.svg'
 import DeepSeekLandingChat from '../components/DeepSeekLandingChat'
+import PixelBlast from '../components/ui/PixelBlast'
 
 const LandingPage: React.FC = () => {
   const { user } = useAuth()
@@ -42,19 +43,29 @@ const LandingPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-white text-[#37352f] font-sans selection:bg-[#37352f]/10 relative overflow-x-hidden">
-      {/* Background Grid Moderno com Mockups Transparentes */}
-      <div className="absolute top-0 left-0 w-full h-[1000px] pointer-events-none z-0 overflow-hidden">
-        <div className="absolute inset-0"
-          style={{
-            backgroundImage: `
-              linear-gradient(to right, rgba(55, 53, 47, 0.05) 1px, transparent 1px),
-              linear-gradient(to bottom, rgba(55, 53, 47, 0.05) 1px, transparent 1px)
-            `,
-            backgroundSize: '40px 40px',
-            maskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)',
-            WebkitMaskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)'
-          }}
-        />
+      {/* Background Grid Moderno com Pixel Blast */}
+      <div className="absolute top-0 left-0 w-full h-[800px] pointer-events-none z-0 overflow-hidden"
+        style={{
+          maskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)'
+        }}
+      >
+        <div className="absolute inset-0">
+          <PixelBlast
+            variant="square"
+            pixelSize={3}
+            color="#e2e2e2" // Cor clara para não conflitar com o texto
+            patternScale={4} // Padrões maiores e mais limpos
+            patternDensity={0.6} // Menos densidade para legibilidade
+            enableRipples
+            rippleSpeed={0.3}
+            rippleThickness={0.1}
+            rippleIntensityScale={1}
+            speed={0.3} // Mais lento e sutil
+            transparent
+            edgeFade={0}
+          />
+        </div>
 
         {/* Mockup Fragments Floating in Background */}
         <div className="absolute inset-0 opacity-[0.05] select-none">
@@ -209,10 +220,10 @@ const LandingPage: React.FC = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.1, type: "spring", stiffness: 70 }}
-              className="text-5xl md:text-6xl font-extrabold tracking-tight leading-[1.1] text-[#202020] mb-6"
+              className="text-5xl md:text-7xl font-bold tracking-tight leading-[1.05] text-[#202020] mb-8"
             >
-              Sua mente livre.
-              <span className="block mt-2">Suas tarefas, resolvidas.</span>
+              Libere sua mente.
+              <span className="block mt-2">O Flui resolve o resto.</span>
             </motion.h1>
 
             <motion.p
@@ -265,14 +276,14 @@ const LandingPage: React.FC = () => {
             {[1, 2].map((_, index) => (
               <div key={index} className="flex items-center">
                 {[
-                  { text: 'Inteligência Artificial', icon: <div className="w-2 h-2 rounded-full bg-[#37352f]/20" /> },
-                  { text: 'Gestão Ágil', icon: <div className="w-2 h-2 rotate-45 bg-[#37352f]/20" /> },
-                  { text: 'Automações Fluidas', icon: <svg className="w-3 h-3 text-[#37352f]/20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg> },
-                  { text: 'Kanban Intuitivo', icon: <div className="w-2 h-2 rounded-[2px] bg-[#37352f]/20" /> },
-                  { text: 'Foco Total', icon: <svg className="w-3 h-3 text-[#37352f]/20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" /></svg> },
-                  { text: 'Assistente por Áudio', icon: <div className="w-1.5 h-3 rounded-full bg-[#37352f]/20" /> },
-                  { text: 'Análises Inteligentes', icon: <div className="w-2 h-2 rounded-tl-full rounded-br-full bg-[#37352f]/20 border border-[#37352f]/30" /> },
-                  { text: 'Hiper Produtividade', icon: <svg className="w-3 h-3 text-[#37352f]/20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg> },
+                  { text: 'Inteligência Artificial', icon: <div className="w-3 h-3 rounded-full bg-[#37352f]/40 shrink-0" /> },
+                  { text: 'Gestão Ágil', icon: <div className="w-3 h-3 rounded-[2px] bg-[#37352f]/40 shrink-0" /> },
+                  { text: 'Automações Fluidas', icon: <div className="w-0 h-0 border-l-[7px] border-l-transparent border-r-[7px] border-r-transparent border-b-[11px] border-b-[#37352f]/40 shrink-0 mb-[2px]" /> },
+                  { text: 'Kanban Intuitivo', icon: <div className="w-3 h-3 rotate-45 bg-[#37352f]/40 shrink-0" /> },
+                  { text: 'Foco Total', icon: <div className="w-3 h-3 rounded-full bg-[#37352f]/40 shrink-0" /> },
+                  { text: 'Assistente por Áudio', icon: <div className="w-4 h-2 rounded-full bg-[#37352f]/40 shrink-0" /> },
+                  { text: 'Análises Inteligentes', icon: <div className="w-3 h-3 rounded-tr-full bg-[#37352f]/40 shrink-0 mt-0.5 origin-bottom-left" /> },
+                  { text: 'Hiper Produtividade', icon: <div className="w-3 h-3 rounded-[1px] bg-[#37352f]/40 shrink-0" /> },
                 ].map((item, j) => (
                   <div key={j} className="flex items-center gap-4 mx-6">
                     {item.icon}
@@ -426,7 +437,7 @@ const LandingPage: React.FC = () => {
           >
             <div className="relative z-10 mb-auto">
               <h3 className="text-xl font-bold tracking-tight mb-2">Visão por Calendário</h3>
-              <p className="text-[#37352f]/60 font-medium text-sm">Visualize sua semana e planeje seus próximos passos com clareza visual absoluta.</p>
+              <p className="text-[#37352f]/60 font-medium text-sm leading-relaxed">Visualize sua semana e planeje seus próximos passos com clareza visual absoluta.</p>
             </div>
 
             <div className="absolute -bottom-4 left-0 w-full px-6 pointer-events-none">
@@ -518,7 +529,7 @@ const LandingPage: React.FC = () => {
           >
             <div className="relative z-10">
               <h3 className="text-xl font-bold tracking-tight mb-2">Seu assistente via WhatsApp</h3>
-              <p className="text-[#37352f]/60 font-medium text-sm">Crie tarefas de áudio ou texto direto pelo celular.</p>
+              <p className="text-[#37352f]/60 font-medium text-sm leading-relaxed">Crie tarefas de áudio ou texto direto pelo celular.</p>
             </div>
 
             <div className="absolute -bottom-2 -right-2 w-full h-full flex items-end justify-end pointer-events-none p-4">
@@ -695,7 +706,6 @@ const LandingPage: React.FC = () => {
 
             {/* Card Flow */}
             <div className="relative flex flex-col">
-{/* Card Flow - Destacado */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 30 }}
                 whileInView={{ opacity: 1, scale: 1, y: 0 }}
