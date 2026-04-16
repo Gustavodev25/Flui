@@ -1,0 +1,9 @@
+.ark-toast {
+  height: var(--height);
+  opacity: var(--opacity);
+  scale: var(--scale);
+  translate: var(--x) var(--y);
+  z-index: var(--z-index);
+  transition: all 300ms cubic-bezier(0.2, 0, 0, 1);
+  will-change: translate, opacity, scale, height;
+}
