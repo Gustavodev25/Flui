@@ -309,24 +309,6 @@ async function getWhatsAppSession(phone) {
   const binding = await findBindingByExternalUserId('whatsapp', normalizedPhone);
   if (!binding?.user_id) return null;
 
-  // Verifica se o usuário ainda tem plano Flow ativo
-  const { data: subData } = await supabaseAdmin
-    .from('subscriptions')
-    .select('status, plan_id')
-    .eq('user_id', binding.user_id)
-    .limit(1)
-    .maybeSingle();
-
-  const hasActiveFlow = subData?.status === 'active' && ['flow', 'pulse'].includes(subData?.plan_id);
-
-  if (!hasActiveFlow) {
-    console.log(`[WhatsApp] ❌ Binding existe para ${normalizedPhone} mas plano Flow/Pulse expirou/inativo`);
-    await sendWhatsAppMessage(normalizedPhone,
-      "Oi! Sua assinatura não está mais ativa 😕\n\nO assistente via WhatsApp é exclusivo para assinantes do Flow ou Pulse.\n\nRenove em: *flui.app → Assinatura*\n\nAssim que ativar, volte aqui! 🚀"
-    );
-    return { blocked: true };
-  }
-
   const thread = await getDefaultThreadForUser(binding.user_id);
   return {
     authenticated: true,
@@ -579,10 +561,64 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     // ===== AUTH =====
     if (!session.authenticated) {
       if (session.step === 'ask_email') {
-        session.email = cleanMessage;
+        const candidateEmail = cleanMessage.trim().toLowerCase();
+        session.email = candidateEmail;
+        sendTypingIndicator(userPhone, messageId);
+
+
+        // Verifica se é um usuário Google-only ANTES de pedir senha
+        try {
+          // Busca o usuário por email via REST API admin do GoTrue
+          const lookupResp = await fetch(
+            `${SUPABASE_URL}/auth/v1/admin/users?filter=${encodeURIComponent(candidateEmail)}&per_page=5`,
+            { headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}` } }
+          );
+          const lookupJson = await lookupResp.json();
+          const matchedUsers = (lookupJson?.users || []).filter(
+            u => u.email?.toLowerCase() === candidateEmail
+          );
+          const foundUser = matchedUsers[0];
+
+          if (foundUser) {
+            const providers = (foundUser.identities || []).map(i => i.provider);
+            const isGoogleOnly = providers.includes('google') && !providers.includes('email');
+
+            if (isGoogleOnly) {
+              console.log(`[WhatsApp Auth] 🔵 Usuário Google-only detectado: ${candidateEmail} — autenticando automaticamente`);
+
+              // Autentica automaticamente via admin — sem precisar de senha
+              session.authenticated = true;
+              session.userId = foundUser.id;
+              session.userName = foundUser.user_metadata?.full_name || foundUser.user_metadata?.name || 'Usuário';
+              pendingAuthSessions.delete(userPhone);
+
+              // Cria binding e finaliza
+              await upsertChannelBinding({
+                userId: foundUser.id,
+                channel: 'whatsapp',
+                externalUserId: userPhone,
+                displayName: session.userName,
+                authenticated: true,
+                metadata: { email: candidateEmail, phone: userPhone, authMethod: 'google_auto' },
+              });
+
+              const thread = await getDefaultThreadForUser(foundUser.id);
+              session.threadId = thread?.id || null;
+
+              await sendWhatsAppMessage(userPhone,
+                `Fechou, *${session.userName}*! 🚀\n\nConectei com sua conta Google automaticamente.\n\nO que vamos fazer hoje?`
+              );
+              return;
+            }
+          }
+        } catch (err) {
+          console.error('[WhatsApp Auth] Erro ao verificar Google-only:', err.message);
+          // Continua normalmente pedindo senha
+        }
+
+        // Não é Google-only, pede senha normalmente
         session.step = 'ask_password';
         pendingAuthSessions.set(userPhone, session);
-
         await sendWhatsAppMessage(userPhone, "Boa! Agora sua *senha* 🔒");
         return;
       }
@@ -599,51 +635,8 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
           session.step = 'ask_email';
           pendingAuthSessions.set(userPhone, session);
 
-          // Verifica se o usuário existe e tem apenas identidade Google (sem senha)
-          let isGoogleOnlyUser = false;
-          try {
-            const resp = await fetch(
-              `${SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(session.email)}&per_page=1`,
-              { headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}` } }
-            );
-            const json = await resp.json();
-            const found = json?.users?.[0];
-            if (found) {
-              const providers = (found.identities || []).map(i => i.provider);
-              isGoogleOnlyUser = providers.includes('google') && !providers.includes('email');
-            }
-          } catch (_) { }
-
-          if (isGoogleOnlyUser) {
-            await sendWhatsAppMessage(userPhone,
-              "Sua conta foi criada com o *Google* 🔵\n\nPara usar o assistente aqui, você precisa definir uma senha:\n1. Acesse o site\n2. Vá em *Configurações → Meu Perfil*\n3. Defina uma senha na seção indicada\n\nDepois volte e tente de novo. Qual é seu e-mail?"
-            );
-          } else {
-            await sendWhatsAppMessage(userPhone,
-              "Não bateu aqui 😕 vamos tentar de novo. Seu e-mail?"
-            );
-          }
-          return;
-        }
-
-        // ===== VERIFICAÇÃO DE PLANO FLOW =====
-        // Só permite conectar via WhatsApp se o usuário tiver plano Flow ativo
-        const { data: subData, error: subError } = await supabaseAdmin
-          .from('subscriptions')
-          .select('status, plan_id')
-          .eq('user_id', data.user.id)
-          .limit(1)
-          .maybeSingle();
-
-        const hasActiveFlow = subData?.status === 'active' && ['flow', 'pulse'].includes(subData?.plan_id);
-
-        if (!hasActiveFlow) {
-          console.log(`[WhatsApp Auth] ❌ Usuário ${data.user.email} bloqueado — sem plano Flow/Pulse ativo`);
-          session.step = 'ask_email';
-          pendingAuthSessions.set(userPhone, session);
-
           await sendWhatsAppMessage(userPhone,
-            "Login OK, mas o assistente via WhatsApp é exclusivo dos planos *Flow* ou *Pulse* \n\nVocê está no plano gratuito. Para liberar, acesse:\n *flui.app → Assinatura*\n\nDepois é só voltar aqui e conectar!"
+            "Não bateu aqui 😕 vamos tentar de novo. Seu e-mail?"
           );
           return;
         }
@@ -692,6 +685,23 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
 
       await sendWhatsAppMessage(userPhone,
         `Até logo, *${session.userName}*! 👋\n\nSua conta foi desconectada com sucesso.\n\nQuando quiser voltar, é só mandar qualquer mensagem que eu peço seus dados de novo. 🌱`
+      );
+      return;
+    }
+
+    // ===== VERIFICAÇÃO DE PLANO (antes de usar a IA) =====
+    const { data: subData } = await supabaseAdmin
+      .from('subscriptions')
+      .select('status, plan_id')
+      .eq('user_id', session.userId)
+      .limit(1)
+      .maybeSingle();
+
+    const hasActivePlan = subData?.status === 'active' && ['flow', 'pulse'].includes(subData?.plan_id);
+
+    if (!hasActivePlan) {
+      await sendWhatsAppMessage(userPhone,
+        "Oi! Para usar o assistente via WhatsApp você precisa de um plano ativo 😊\n\nAcesse *flui.ia.br → Assinatura* para ativar.\n\nAssim que ativar, volte aqui! 🚀"
       );
       return;
     }
