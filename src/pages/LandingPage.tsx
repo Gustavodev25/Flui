@@ -653,7 +653,14 @@ const LandingPage: React.FC = () => {
               transition={{ duration: 0.7, type: "spring", bounce: 0.4 }}
               className="w-full h-full bg-[#fcfcfc] border border-[#e9e9e7] rounded-3xl p-8 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.05)] relative overflow-hidden flex flex-col"
             >
-              <div className="absolute -top-16 -right-16 w-32 h-32 bg-black/5 blur-3xl rounded-full" />
+              <motion.div 
+                animate={{ 
+                  opacity: [0.03, 0.08, 0.03],
+                  scale: [1, 1.2, 1],
+                }}
+                transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+                className="absolute -top-16 -right-16 w-48 h-48 bg-black/10 blur-[80px] rounded-full pointer-events-none" 
+              />
 
               <div className="flex justify-between items-center pb-6 relative z-10">
                 <div className="flex items-center gap-3">
@@ -713,7 +720,14 @@ const LandingPage: React.FC = () => {
                 transition={{ duration: 0.7, type: "spring", bounce: 0.4, delay: 0.1 }}
                 className="w-full h-full bg-[#fcfcfc] border border-[#e9e9e7] rounded-3xl p-8 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.1)] relative overflow-hidden flex flex-col md:-mt-6 md:mb-6 z-20 border-black/5"
               >
-                <div className="absolute -top-16 -right-16 w-32 h-32 bg-black/5 blur-3xl rounded-full" />
+                <motion.div 
+                  animate={{ 
+                    opacity: [0.04, 0.1, 0.04],
+                    scale: [1, 1.3, 1],
+                  }}
+                  transition={{ duration: 7, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+                  className="absolute -top-16 -right-16 w-48 h-48 bg-black/10 blur-[80px] rounded-full pointer-events-none" 
+                />
 
                 <div className="flex justify-between items-center pb-6 relative z-10">
                   <div className="flex items-center gap-3">
@@ -791,7 +805,14 @@ const LandingPage: React.FC = () => {
                 transition={{ duration: 0.7, type: "spring", bounce: 0.4, delay: 0.2 }}
                 className="w-full h-full bg-[#fcfcfc] border border-[#e9e9e7] rounded-3xl p-8 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.05)] relative overflow-hidden flex flex-col"
               >
-                <div className="absolute -top-16 -right-16 w-32 h-32 bg-blue-500/5 blur-3xl rounded-full" />
+                <motion.div 
+                  animate={{ 
+                    opacity: [0.05, 0.12, 0.05],
+                    scale: [1, 1.2, 1],
+                  }}
+                  transition={{ duration: 8, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+                  className="absolute -top-16 -right-16 w-48 h-48 bg-blue-500/15 blur-[80px] rounded-full pointer-events-none" 
+                />
 
                 <div className="flex justify-between items-center pb-6 relative z-10">
                   <div className="flex items-center gap-3">

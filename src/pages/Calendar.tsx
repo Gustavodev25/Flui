@@ -8,6 +8,7 @@ import { apiFetch } from '../lib/api'
 import Avvvatars from 'avvvatars-react'
 import Modal from '../components/ui/Modal'
 import TaskForm from '../components/TaskForm'
+import { Loading } from '../components/ui/Loading'
 import finlozLogo from '../assets/logo/lui.svg'
 
 interface Subtask {
@@ -411,9 +412,7 @@ export default function CalendarPage() {
 
           {/* Células dos dias */}
           {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="w-5 h-5 border-2 border-[#37352f]/20 border-t-[#37352f]/60 rounded-full animate-spin" />
-            </div>
+            <Loading fullScreen={false} />
           ) : (
             <div className="grid grid-cols-7">
               {calendarDays.map(({ day, month: dm, key }) => {

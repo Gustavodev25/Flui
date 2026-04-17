@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { Loader2, Plus, Trash2, CheckCircle2, Circle, Lock, Users, UserCheck } from 'lucide-react'
+import React, { useState, useEffect, useRef } from 'react'
+import { Plus, Trash2, CheckCircle2, Circle, Lock, Users, Check } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Select from './ui/Select'
 import DatePicker from './ui/DatePicker'
@@ -59,12 +59,21 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, is
   const [visibility, setVisibility] = useState<'personal' | 'workspace'>(
     initialData?.visibility || defaultVisibility || 'personal'
   )
-  const [assignedTo, setAssignedTo] = useState<string>(initialData?.assignedToId || '')
+  const [assignedTo, setAssignedTo] = useState<string[]>(() => {
+    if (initialData?.assignedToIds && Array.isArray(initialData.assignedToIds)) return initialData.assignedToIds
+    if (initialData?.assignedToId) return [initialData.assignedToId]
+    return []
+  })
   const [subtasks, setSubtasks] = useState<{ id: string, title: string, completed: boolean }[]>(initialData?.subtasks || [])
   const [newSubtask, setNewSubtask] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [lastAnalyzed, setLastAnalyzed] = useState(initialData?.title || '')
   const [showFullMessage, setShowFullMessage] = useState(false)
+
+  const lastAnalyzedRef = useRef(lastAnalyzed)
+  lastAnalyzedRef.current = lastAnalyzed
+  const isAnalyzingRef = useRef(isAnalyzing)
+  isAnalyzingRef.current = isAnalyzing
 
   useEffect(() => {
     if (initialData?.source !== 'whatsapp' || !initialData?.whatsappMessage) return
@@ -74,14 +83,15 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, is
 
   useEffect(() => {
     const trimmedTitle = title.trim()
-    if (!trimmedTitle || trimmedTitle === lastAnalyzed) return
+    if (!trimmedTitle || trimmedTitle === lastAnalyzedRef.current || isAnalyzingRef.current) return
 
     const timeoutId = setTimeout(() => {
       handleAIAnalyze(trimmedTitle)
-    }, 1200)
+    }, 1500)
 
     return () => clearTimeout(timeoutId)
-  }, [title, lastAnalyzed])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title])
 
   const handleAIAnalyze = async (textToAnalyze: string) => {
     if (!textToAnalyze || isAnalyzing) return
@@ -201,7 +211,8 @@ REGRAS:
       progress,
       subtasks,
       visibility,
-      assignedTo: visibility === 'workspace' && assignedTo ? assignedTo : undefined,
+      assignedTo: visibility === 'workspace' && assignedTo.length > 0 ? assignedTo[0] : undefined,
+      assignedToIds: visibility === 'workspace' && assignedTo.length > 0 ? assignedTo : undefined,
     })
   }
 
@@ -238,7 +249,7 @@ REGRAS:
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-3">
 
       {/* WhatsApp original message bubble */}
       {initialData?.source === 'whatsapp' && initialData?.whatsappMessage && (
@@ -279,84 +290,25 @@ REGRAS:
                 ) : (
                   <motion.div
                     key="message"
-                    className="text-[12px] font-medium leading-relaxed relative"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, ease: [0.2, 0.65, 0.3, 0.9] }}
+                    className="text-[12px] font-medium leading-relaxed"
                   >
-                    {/* 1. Camada Base (Texto Escuro Sólido - Sempre Visível) */}
-                    <span className="text-[#37352f]/70 flex flex-wrap">
-                      {(showFullMessage || initialData.whatsappMessage.length <= 150
+                    <span className="text-[#37352f]/70">
+                      {showFullMessage || initialData.whatsappMessage.length <= 150
                         ? initialData.whatsappMessage
-                        : initialData.whatsappMessage.slice(0, 150)
-                      ).split("").map((char: string, i: number) => (
-                        <motion.span
-                          key={i}
-                          initial={{ y: "100%", opacity: 0 }}
-                          animate={{ y: 0, opacity: 1 }}
-                          transition={{
-                            duration: 0.3,
-                            delay: i * 0.003,
-                            ease: [0.2, 0.65, 0.3, 0.9]
-                          }}
-                          className="inline-block"
-                          style={{ whiteSpace: char === " " ? "pre" : "normal" }}
-                        >
-                          {char}
-                        </motion.span>
-                      ))}
-                      
+                        : initialData.whatsappMessage.slice(0, 150)}
                       {!showFullMessage && initialData.whatsappMessage.length > 150 && (
-                        <motion.button
-                          key="see-more"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          transition={{ delay: 150 * 0.003 + 0.1 }}
+                        <button
                           type="button"
                           onClick={() => setShowFullMessage(true)}
                           className="text-[#37352f]/40 hover:text-[#37352f] ml-1.5 text-[11px] font-bold transition-colors underline underline-offset-2 decoration-[#37352f]/10"
                         >
                           ver mais
-                        </motion.button>
+                        </button>
                       )}
                     </span>
-
-                    {/* 2. Camada de Brilho (Texto Branco com Opacidade Controlada) */}
-                    <motion.span
-                      className="absolute inset-0 flex flex-wrap text-white pointer-events-none select-none"
-                      style={{
-                        WebkitMaskImage: "linear-gradient(90deg, transparent 40%, black 50%, transparent 60%)",
-                        WebkitMaskSize: "200% 100%",
-                        maskImage: "linear-gradient(90deg, transparent 40%, black 50%, transparent 60%)",
-                        maskSize: "200% 100%",
-                      }}
-                      initial={{ maskPosition: "150%", opacity: 0 }}
-                      animate={{
-                        maskPosition: "-150%",
-                        opacity: [0, 1, 0]
-                      }}
-                      transition={{
-                        maskPosition: { delay: 0.3, duration: 1.5, ease: "easeInOut" },
-                        opacity: { delay: 0.3, duration: 1.5, times: [0, 0.15, 1], ease: "linear" }
-                      }}
-                    >
-                      {(showFullMessage || initialData.whatsappMessage.length <= 150
-                        ? initialData.whatsappMessage
-                        : initialData.whatsappMessage.slice(0, 150)
-                      ).split("").map((char: string, i: number) => (
-                        <motion.span
-                          key={i}
-                          initial={{ y: "100%", opacity: 0 }}
-                          animate={{ y: 0, opacity: 1 }}
-                          transition={{
-                            duration: 0.3,
-                            delay: i * 0.003,
-                            ease: [0.2, 0.65, 0.3, 0.9]
-                          }}
-                          className="inline-block"
-                          style={{ whiteSpace: char === " " ? "pre" : "normal" }}
-                        >
-                          {char}
-                        </motion.span>
-                      ))}
-                    </motion.span>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -365,32 +317,30 @@ REGRAS:
         </div>
       )}
 
-      {/* Title Input */}
-      <div className="space-y-1.5">
-        <label className="text-[11px] font-medium text-[#37352f]/70 flex items-center h-5">Título da Tarefa</label>
+      <div className="space-y-1">
+        <label className="text-[10px] font-bold text-[#37352f]/30 flex items-center h-4 uppercase tracking-tight">Título da Tarefa</label>
         <input
           type="text"
           placeholder="O que precisa ser feito?"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full bg-white border border-[#e9e9e7] rounded-lg py-2.5 px-4 text-sm font-medium text-[#37352f] placeholder-[#37352f]/50 placeholder:font-normal outline-none focus:border-[#000000] focus:ring-1 focus:ring-[#000000]/5 transition-all"
+          className="w-full bg-white border border-[#edf0f2] rounded-lg py-2 px-3 text-[13px] font-medium text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#000000] transition-all"
           autoFocus
           required
         />
       </div>
 
-      {/* Description Input */}
-      <div className="space-y-1.5">
-        <label className="text-[11px] font-medium text-[#37352f]/70 flex items-center h-5">Descrição</label>
+      <div className="space-y-1">
+        <label className="text-[10px] font-bold text-[#37352f]/30 flex items-center h-4 uppercase tracking-tight">Descrição</label>
         <textarea
-          placeholder="Adicione detalhes sobre esta tarefa..."
+          placeholder="Adicione detalhes..."
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="w-full bg-white border border-[#e9e9e7] rounded-lg py-2.5 px-4 text-sm font-medium text-[#37352f] placeholder-[#37352f]/50 placeholder:font-normal outline-none focus:border-[#000000] focus:ring-1 focus:ring-[#000000]/5 transition-all resize-none h-24"
+          className="w-full bg-white border border-[#edf0f2] rounded-lg py-2 px-3 text-[13px] font-medium text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#000000] transition-all resize-none h-20"
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
         <Select
           label="Status"
           value={status}
@@ -404,17 +354,7 @@ REGRAS:
         />
 
         <Select
-          label={
-            <>
-              Prioridade
-              {isAnalyzing && (
-                <span className="flex items-center gap-1 ml-1.5 text-black font-medium normal-case">
-                  <Loader2 size={10} className="animate-spin" />
-                  <span className="text-[9px] opacity-70">IA Analisando</span>
-                </span>
-              )}
-            </>
-          }
+          label="Prioridade"
           value={priority}
           onChange={(val) => setPriority(val as any)}
           options={[
@@ -425,7 +365,7 @@ REGRAS:
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
         {/* Due Date */}
         <DatePicker
           label="Prazo"
@@ -440,6 +380,53 @@ REGRAS:
         />
       </div>
 
+      {/* Visibilidade (membros/donos de workspace) */}
+      {hasWorkspaceAccess && (
+        <div className="space-y-1.5 mb-4">
+          <label className="text-[10px] font-bold text-[#37352f]/30 flex items-center h-4 uppercase tracking-tight">Visibilidade</label>
+          <div className="relative flex items-center bg-[#f7f7f5]/80 rounded-full p-1 border border-[#e9e9e7]/50">
+            <button
+              type="button"
+              onClick={() => setVisibility('personal')}
+              className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-bold transition-colors duration-300 ${
+                visibility === 'personal'
+                  ? 'text-[#37352f]'
+                  : 'text-[#37352f]/30 hover:text-[#37352f]/50'
+              }`}
+            >
+              <Lock size={12} strokeWidth={2.5} />
+              <span>Pessoal</span>
+              {visibility === 'personal' && (
+                <motion.div
+                  layoutId="active-visibility"
+                  className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
+                  transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
+                />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setVisibility('workspace')}
+              className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-bold transition-colors duration-300 ${
+                visibility === 'workspace'
+                  ? 'text-[#37352f]'
+                  : 'text-[#37352f]/30 hover:text-[#37352f]/50'
+              }`}
+            >
+              <Users size={12} strokeWidth={2.5} />
+              <span>Workspace</span>
+              {visibility === 'workspace' && (
+                <motion.div
+                  layoutId="active-visibility"
+                  className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
+                  transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
+                />
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Subtasks Section */}
       <div className="space-y-1.5 mt-1">
         <label className="text-[11px] font-medium text-[#37352f]/70 flex items-center h-5 gap-2">
@@ -447,12 +434,6 @@ REGRAS:
           {subtasks.length > 0 && (
             <span className="text-[9px] bg-[#f7f7f5] px-1.5 py-0.5 rounded-full border border-[#e9e9e7]">
               {subtasks.filter(s => s.completed).length}/{subtasks.length}
-            </span>
-          )}
-          {isAnalyzing && (
-            <span className="flex items-center gap-1 ml-0.5 text-black font-medium">
-              <Loader2 size={10} className="animate-spin" />
-              <span className="text-[9px] opacity-70">IA Sugerindo</span>
             </span>
           )}
         </label>
@@ -500,115 +481,100 @@ REGRAS:
         </div>
       </div>
 
-      {/* Visibility Toggle (workspace members/owners only) - Hidden during edit */}
-      {hasWorkspaceAccess && !isEditing && (
-        <div className="space-y-1.5">
-          <label className="text-[11px] font-medium text-[#37352f]/40 flex items-center h-5">Visibilidade</label>
-          <div className="relative flex items-center bg-[#f7f7f5]/80 rounded-full p-1 border border-[#e9e9e7]/50">
-            <button
-              type="button"
-              onClick={() => setVisibility('personal')}
-              className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-semibold transition-colors duration-300 ${
-                visibility === 'personal'
-                  ? 'text-[#37352f]'
-                  : 'text-[#37352f]/30 hover:text-[#37352f]/50'
-              }`}
-            >
-              <Lock size={12} strokeWidth={2.5} className="transition-transform group-hover:scale-110" />
-              <span>Pessoal</span>
-              {visibility === 'personal' && (
-                <motion.div
-                  layoutId="active-visibility"
-                  className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
-                  transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
-                />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setVisibility('workspace')}
-              className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-semibold transition-colors duration-300 ${
-                visibility === 'workspace'
-                  ? 'text-[#37352f]'
-                  : 'text-[#37352f]/30 hover:text-[#37352f]/50'
-              }`}
-            >
-              <Users size={12} strokeWidth={2.5} className="transition-transform group-hover:scale-110" />
-              <span>Workspace</span>
-              {visibility === 'workspace' && (
-                <motion.div
-                  layoutId="active-visibility"
-                  className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
-                  transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
-                />
-              )}
-            </button>
-          </div>
-        </div>
-      )}
 
-      {/* Assignee Selector (workspace only, when members exist) */}
-      {hasWorkspaceAccess && visibility === 'workspace' && workspaceMembers.filter(m => m.member_user_id).length > 0 && (
-        <div className="space-y-1.5">
-          <label className="text-[11px] font-medium text-[#37352f]/70 flex items-center gap-1.5 h-5">
-            <UserCheck size={11} strokeWidth={2.5} />
-            Atribuir a
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {/* Opção: ninguém (eu mesmo) */}
-            <button
-              type="button"
-              onClick={() => setAssignedTo('')}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
-                assignedTo === ''
-                  ? 'bg-[#37352f] text-white border-[#37352f]'
-                  : 'bg-white text-[#37352f]/60 border-[#e9e9e7] hover:border-[#37352f]/20'
-              }`}
-            >
-              <div className="w-4 h-4 rounded-full overflow-hidden flex-shrink-0">
-                <Avvvatars value={user?.email || 'me'} size={16} style="character" />
-              </div>
-              Eu
-            </button>
-            {/* Membros */}
-            {workspaceMembers.filter(m => m.member_user_id && m.role !== 'pending').map(m => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setAssignedTo(m.member_user_id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
-                  assignedTo === m.member_user_id
-                    ? 'bg-[#37352f] text-white border-[#37352f]'
-                    : 'bg-white text-[#37352f]/60 border-[#e9e9e7] hover:border-[#37352f]/20'
-                }`}
-              >
-                <div className="w-4 h-4 rounded-full overflow-hidden flex-shrink-0">
-                  {m.member_avatar
-                    ? <img src={m.member_avatar} alt="" className="w-full h-full object-cover" />
-                    : <Avvvatars value={m.member_email} size={16} style="character" />
-                  }
-                </div>
-                {m.member_name?.split(' ')[0] || m.member_email.split('@')[0]}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {hasWorkspaceAccess && visibility === 'workspace' && workspaceMembers.filter(m => m.member_user_id).length > 0 && (() => {
+        const meId = currentUserId || user?.id || ''
+        // Build all members list: me + others
+        const allMembers: { id: string, name: string, avatar: string | null | undefined, email: string, isMe: boolean }[] = [
+          { id: meId, name: 'Eu', avatar: user?.user_metadata?.avatar_url, email: user?.email || 'me', isMe: true },
+          ...workspaceMembers
+            .filter(m => m.member_user_id && m.role !== 'pending' && m.member_user_id !== meId)
+            .map(m => ({ id: m.member_user_id, name: m.member_name?.split(' ')[0] || m.member_email.split('@')[0], avatar: m.member_avatar, email: m.member_email, isMe: false }))
+        ]
+        // Sort: selected first
+        const sorted = [...allMembers].sort((a, b) => {
+          const aS = assignedTo.includes(a.id) ? 0 : 1
+          const bS = assignedTo.includes(b.id) ? 0 : 1
+          return aS - bS
+        })
 
-      {/* Form Buttons */}
-      <div className="flex items-center justify-end gap-3 pt-2">
+        return (
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-[#37352f]/30 flex items-center h-4 uppercase tracking-tight">Responsáveis</label>
+            <motion.div layout transition={{ type: 'spring', stiffness: 400, damping: 30 }} className="flex items-center gap-2">
+              {sorted.map(m => {
+                const isSelected = assignedTo.includes(m.id)
+                return (
+                  <motion.button
+                    key={m.id}
+                    type="button"
+                    layout
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => {
+                      setAssignedTo(prev =>
+                        prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id]
+                      )
+                    }}
+                    className="relative"
+                    title={m.name}
+                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                  >
+                    <motion.div
+                      layout
+                      animate={{
+                        scale: isSelected ? 1 : 0.85,
+                        opacity: isSelected ? 1 : 0.4,
+                      }}
+                      whileHover={{ opacity: isSelected ? 1 : 0.7, scale: isSelected ? 1.05 : 0.92 }}
+                      transition={{ type: 'spring', stiffness: 500, damping: 28 }}
+                      className={`w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ${
+                        isSelected
+                          ? 'ring-2 ring-[#37352f] ring-offset-1'
+                          : 'ring-1 ring-[#e9e9e7]'
+                      }`}
+                    >
+                      {m.avatar
+                        ? <img src={m.avatar} alt="" className="w-full h-full object-cover" />
+                        : <Avvvatars value={m.email} size={32} style="character" />
+                      }
+                    </motion.div>
+                    <AnimatePresence>
+                      {isSelected && (
+                        <motion.div
+                          initial={{ scale: 0, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          exit={{ scale: 0, opacity: 0 }}
+                          transition={{ type: 'spring', stiffness: 600, damping: 25 }}
+                          className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-[#37352f] rounded-full flex items-center justify-center"
+                        >
+                          <Check size={8} strokeWidth={3} className="text-white" />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.button>
+                )
+              })}
+            </motion.div>
+          </div>
+        )
+      })()}
+
+      {/* Rodapé Minimalista Refatorado */}
+      <div className="flex items-center justify-end gap-3 mt-8 py-5 border-t border-[#f1f1f0] -mx-5 sm:-mx-6 px-5 sm:px-6 rounded-b-2xl">
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2.5 text-xs font-medium text-[#37352f]/40 hover:text-[#37352f] transition-colors"
+          className="px-4 py-2 text-[11px] font-bold text-[#37352f]/40 hover:text-[#37352f] hover:bg-[#37352f]/[0.03] rounded-xl transition-all whitespace-nowrap"
         >
           Descartar
         </button>
         <button
           type="submit"
-          className="bg-[#202020] text-white px-6 py-2.5 rounded-lg text-xs font-medium hover:bg-black transition-all shadow-md shadow-black/5 active:scale-95"
+          disabled={!title.trim()}
+          className="h-9 px-6 rounded-xl bg-[#202020] text-white text-[11px] font-bold hover:bg-black transition-all active:scale-[0.98] disabled:opacity-20 disabled:scale-100 flex items-center gap-2 whitespace-nowrap shadow-sm shadow-black/5"
         >
-          {isEditing ? 'Salvar Alterações' : 'Criar Tarefa'}
+          {isEditing ? <CheckCircle2 size={14} strokeWidth={2.5} /> : <Plus size={14} strokeWidth={2.5} />}
+          <span>{isEditing ? 'Salvar Tarefa' : 'Criar Tarefa'}</span>
         </button>
       </div>
     </form>

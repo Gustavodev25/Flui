@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { Loading } from '../components/ui/Loading'
 import { motion } from 'framer-motion'
 import { Check, Zap, Loader2, ArrowRight } from 'lucide-react'
 import NumberFlow from '@number-flow/react'
@@ -89,14 +90,7 @@ const SubscriptionPage: React.FC = () => {
   }
 
   if (checkingStatus) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-3 bg-[#fcfcfa]">
-        <Loader2 className="animate-spin text-[#37352f]/20" size={28} />
-        {isSuccess && (
-          <p className="text-[12px] text-[#37352f]/40 font-medium">Confirmando sua assinatura...</p>
-        )}
-      </div>
-    )
+    return <Loading message={isSuccess ? "Confirmando sua assinatura..." : "Carregando..."} />
   }
 
   // Se já tiver assinatura ativa e tentar entrar aqui, joga pro dashboard (a menos que queira ver o status)

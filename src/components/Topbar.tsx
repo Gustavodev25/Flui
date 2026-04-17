@@ -65,37 +65,6 @@ export const Topbar: React.FC = () => {
         </div>
       </div>
 
-      {/* Badge de Validação - Versão Desktop (Hanging) */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="absolute inset-x-0 top-[56px] hidden xl:flex justify-center pointer-events-none z-[35]"
-      >
-        <div className="flex items-center gap-4 px-6 py-2 bg-[#f7f7f5] border border-[#e9e9e7] border-t-0 rounded-b-2xl shadow-xl shadow-black/[0.03] max-w-[70%]">
-          <motion.div
-            animate={{
-              rotate: [0, 15, -15, 0],
-              scale: [1, 1.1, 1],
-            }}
-            transition={{
-              duration: 4,
-              ease: "easeInOut",
-              repeat: Infinity
-            }}
-            className="shrink-0"
-          >
-            <Star
-              size={10}
-              className="text-amber-400 fill-amber-400"
-              strokeWidth={2.5}
-            />
-          </motion.div>
-          <span className="text-[11px] text-[#37352f]/60 font-bold tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
-            Sistema na versão inicial de validação • Futuramente se transformará em um produto gigante
-          </span>
-        </div>
-      </motion.div>
 
       {/* Direita: Ações e Perfil */}
       <div className="flex items-center gap-2 sm:gap-3 flex-1 lg:flex-none justify-end">
@@ -221,7 +190,7 @@ export const Topbar: React.FC = () => {
             <DropdownItem 
               icon={<LifeBuoy size={14} />}
               label="Suporte" 
-              onClick={() => { setIsDropdownOpen(false); window.open('https://wa.me/5511925870754?text=Olá,%20tenho%20uma%20dúvida.', '_blank') }} 
+              onClick={() => { setIsDropdownOpen(false); window.open('https://wa.me/5518996239335?text=Olá,%20tenho%20uma%20dúvida.', '_blank') }} 
             />
             
             <DropdownDivider />

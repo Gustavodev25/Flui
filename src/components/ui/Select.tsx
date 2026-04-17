@@ -16,19 +16,42 @@ interface SelectProps {
   containerClassName?: string
 }
 
-const Select: React.FC<SelectProps> = ({ 
-  label, 
-  options, 
+const Select: React.FC<SelectProps> = ({
+  label,
+  options,
   value,
   onChange,
-  containerClassName = '', 
+  containerClassName = '',
 }) => {
   const [isOpen, setIsOpen] = useState(false)
+  const [shouldRender, setShouldRender] = useState(false)
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   const selectedOption = options.find(opt => opt.value === value)
+
+  // Force close dropdown on unmount to prevent orphaned Portal elements
+  useEffect(() => {
+    return () => {
+      setIsOpen(false)
+      setShouldRender(false)
+    }
+  }, [])
+
+  // Sync shouldRender with isOpen — open immediately, close after exit animation
+  useEffect(() => {
+    if (isOpen) {
+      setShouldRender(true)
+    }
+  }, [isOpen])
+
+  const handleExitComplete = () => {
+    if (!isOpen) {
+      setShouldRender(false)
+    }
+  }
 
   const updatePosition = () => {
     if (triggerRef.current) {
@@ -51,6 +74,17 @@ const Select: React.FC<SelectProps> = ({
       window.removeEventListener('scroll', updatePosition, true)
       window.removeEventListener('resize', updatePosition)
     }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as Node
+      if (containerRef.current?.contains(target) || dropdownRef.current?.contains(target)) return
+      setIsOpen(false)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
   }, [isOpen])
 
   const handleSelect = (optionValue: string) => {
@@ -81,45 +115,44 @@ const Select: React.FC<SelectProps> = ({
         </button>
 
         {/* Custom Dropdown Content via Portal */}
-        <AnimatePresence>
-          {isOpen && (
-            <Portal>
-              <div 
-                className="fixed inset-0 z-[1000]" 
-                onClick={() => setIsOpen(false)} 
-              />
-              <motion.div
-                initial={{ opacity: 0, y: -4, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -4, scale: 0.98 }}
-                transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                style={{
-                  position: 'fixed',
-                  top: coords.top + 45,
-                  left: coords.left,
-                  width: coords.width,
-                  zIndex: 1001,
-                }}
-                className="bg-white border border-[#e9e9e7] rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] py-1.5 px-1.5 overflow-hidden flex flex-col gap-0.5"
-              >
-                {options.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => handleSelect(option.value)}
-                    className={`w-full flex items-center justify-between px-3 py-1.5 text-xs transition-colors text-left rounded-lg ${
-                      option.value === value 
-                        ? 'text-[#000000] font-medium bg-[#000000]/[0.04]' 
-                        : 'text-[#37352f]/70 font-medium hover:bg-[#000000]/[0.03]'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </motion.div>
-            </Portal>
-          )}
-        </AnimatePresence>
+        {shouldRender && (
+          <Portal>
+            <AnimatePresence onExitComplete={handleExitComplete}>
+              {isOpen && (
+                <motion.div
+                  ref={dropdownRef}
+                  initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  style={{
+                    position: 'fixed',
+                    top: coords.top + 45,
+                    left: coords.left,
+                    width: coords.width,
+                    zIndex: 1001,
+                  }}
+                  className="bg-white border border-[#e9e9e7] rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] py-1.5 px-1.5 overflow-hidden flex flex-col gap-0.5"
+                >
+                  {options.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => handleSelect(option.value)}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-xs transition-colors text-left rounded-lg ${
+                        option.value === value 
+                          ? 'text-[#000000] font-medium bg-[#000000]/[0.04]' 
+                          : 'text-[#37352f]/70 font-medium hover:bg-[#000000]/[0.03]'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </Portal>
+        )}
       </div>
     </div>
   )

@@ -19,6 +19,29 @@ const QR_CODE_URL = `https://api.qrserver.com/v1/create-qr-code/?size=80x80&data
 
 import { useMediaQuery } from '../hooks/useMediaQuery'
 
+/* ── Tooltip Card ────────────────────────────────────────────────── */
+const TooltipCard: React.FC<{ label: string; subLabel?: string; disabled?: boolean }> = ({ label, subLabel, disabled }) => (
+  <motion.div
+    initial={{ opacity: 0, x: -10, scale: 0.98 }}
+    animate={{ opacity: 1, x: 0, scale: 1 }}
+    exit={{ opacity: 0, x: -10, scale: 0.98 }}
+    transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+    className="absolute left-full ml-5 z-[100] px-3 py-1.5 bg-white border border-[#e9e9e7] rounded-xl shadow-[0_8px_20px_rgba(0,0,0,0.06)] pointer-events-none whitespace-nowrap"
+  >
+    <div className="flex flex-col items-start text-left">
+       <div className="flex items-center gap-2">
+         <span className="text-[12px] font-bold text-[#37352f] tracking-tight">{label}</span>
+         {disabled && (
+           <span className="text-[8px] font-black bg-[#fceddb] text-[#cc7a33] px-1.5 py-0.5 rounded-md border border-[#e9e9e7] uppercase">Breve</span>
+         )}
+       </div>
+       {subLabel && !disabled && (
+         <span className="text-[9px] font-bold text-[#37352f]/40 mt-0.5">{subLabel}</span>
+       )}
+    </div>
+  </motion.div>
+)
+
 /* ── Componente de borda colapsável ─────────────────────────────── */
 interface CollapseEdgeProps {
   isCollapsed: boolean
@@ -33,6 +56,7 @@ type PillPhase = 'idle' | 'attention' | 'settled'
 
 const CollapseEdge: React.FC<CollapseEdgeProps> = ({ isCollapsed, onToggle }) => {
   const [phase, setPhase] = useState<PillPhase>('idle')
+  const [isHovered, setIsHovered] = useState(false)
   const t1 = useRef<ReturnType<typeof setTimeout> | null>(null)
   const t2 = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -68,8 +92,9 @@ const CollapseEdge: React.FC<CollapseEdgeProps> = ({ isCollapsed, onToggle }) =>
   return (
     <motion.div
       onClick={onToggle}
-      title={isCollapsed ? 'Expandir sidebar' : 'Colapsar sidebar'}
-      className="absolute top-1/2 -translate-y-1/2 z-[60] cursor-pointer hidden lg:flex items-center justify-center"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className="absolute top-1/2 -translate-y-1/2 z-[60] cursor-pointer hidden lg:flex items-center justify-center group/collapse"
       animate={{ right: rightPos }}
       transition={{ right: { type: 'spring', stiffness: 280, damping: 24 } }}
       whileTap={{ scale: 0.9 }}
@@ -98,6 +123,12 @@ const CollapseEdge: React.FC<CollapseEdgeProps> = ({ isCollapsed, onToggle }) =>
             : { backgroundColor: { duration: 0.5, ease: 'easeInOut' } }
         }
       />
+      
+      <AnimatePresence>
+        {isHovered && (
+          <TooltipCard label={isCollapsed ? 'Expandir' : 'Recolher'} />
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
@@ -115,6 +146,7 @@ export const Sidebar: React.FC = () => {
   const [ownerWorkspaceName, setOwnerWorkspaceName] = useState<string | null>(null)
   // membership enriquecida com workspaceName (não está no contexto)
   const [workspaceMembership, setWorkspaceMembership] = useState<{ ownerName: string; ownerEmail: string; planId: string; workspaceName?: string } | null>(null)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const isMobile = !isDesktop
 
@@ -178,20 +210,44 @@ export const Sidebar: React.FC = () => {
 
       {/* Logo */}
       <div className={`flex items-center gap-3 px-2 py-3 mb-6 ${isCollapsed && !isMobile ? 'justify-center' : ''}`}>
-        <div className="w-9 h-9 flex-shrink-0 flex items-center justify-center">
+        <motion.div 
+          key={isCollapsed ? 'collapsed' : 'expanded'}
+          initial={false}
+          animate={{ 
+            scale: [1, 1.12, 1],
+            rotate: [0, isCollapsed ? 15 : -15, 0]
+          }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
+          className="w-9 h-9 flex-shrink-0 flex items-center justify-center"
+        >
           <img src={logo} alt="Logo" className="w-full h-full object-contain" />
-        </div>
+        </motion.div>
 
         <AnimatePresence mode="wait">
           {(!isCollapsed || isMobile) && (
-            <motion.span
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -10 }}
-              className="font-bold text-sm tracking-tight overflow-hidden whitespace-nowrap"
+            <motion.div
+              key="flui-text"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, transition: { duration: 0.1 } }}
+              className="flex items-center overflow-hidden whitespace-nowrap"
             >
-              Flui
-            </motion.span>
+              {"flui.".split("").map((char, i) => (
+                <motion.span
+                  key={i}
+                  initial={{ opacity: 0, x: -5 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{
+                    duration: 0.25,
+                    delay: i * 0.08,
+                    ease: "easeOut"
+                  }}
+                  className="font-bold text-sm tracking-tight text-[#37352f]"
+                >
+                  {char}
+                </motion.span>
+              ))}
+            </motion.div>
           )}
         </AnimatePresence>
       </div>
@@ -230,9 +286,16 @@ export const Sidebar: React.FC = () => {
             return (
               <div
                 key={index}
-                className={`${baseClasses} text-[#37352f]/20 cursor-not-allowed`}
+                onMouseEnter={() => isCollapsed && !isMobile && setHoveredId(`nav-${index}`)}
+                onMouseLeave={() => setHoveredId(null)}
+                className={`${baseClasses} relative text-[#37352f]/20 cursor-not-allowed`}
               >
                 {Content}
+                <AnimatePresence>
+                  {isCollapsed && !isMobile && hoveredId === `nav-${index}` && (
+                    <TooltipCard label={item.label} disabled={true} />
+                  )}
+                </AnimatePresence>
               </div>
             )
           }
@@ -241,12 +304,19 @@ export const Sidebar: React.FC = () => {
             <Link
               key={index}
               to={item.path}
-              className={`${baseClasses} ${isActive
+              onMouseEnter={() => isCollapsed && !isMobile && setHoveredId(`nav-${index}`)}
+              onMouseLeave={() => setHoveredId(null)}
+              className={`${baseClasses} relative ${isActive
                   ? 'bg-[#e9e9e7] text-[#37352f]'
                   : 'text-[#37352f]/70 hover:bg-[#e9e9e7]'
                 }`}
             >
               {Content}
+              <AnimatePresence>
+                {isCollapsed && !isMobile && hoveredId === `nav-${index}` && (
+                  <TooltipCard label={item.label} disabled={item.disabled} />
+                )}
+              </AnimatePresence>
             </Link>
           )
         })}
@@ -278,14 +348,20 @@ export const Sidebar: React.FC = () => {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.8 }}
                   onClick={() => window.open(WHATSAPP_LINK, '_blank')}
-                  className="w-full flex justify-center cursor-pointer"
-                  title="Lui — Assistente IA no WhatsApp"
+                  onMouseEnter={() => isCollapsed && !isMobile && setHoveredId('lui')}
+                  onMouseLeave={() => setHoveredId(null)}
+                  className="w-full flex justify-center cursor-pointer relative"
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   <div className="w-10 h-10 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm hover:shadow-md transition-shadow">
                     <img src={luiLogo} alt="Lui" className="w-6 h-6 object-contain" />
                   </div>
+                  <AnimatePresence>
+                    {isCollapsed && !isMobile && hoveredId === 'lui' && (
+                      <TooltipCard label="Lui Assistant" subLabel="WhatsApp IA" />
+                    )}
+                  </AnimatePresence>
                 </motion.button>
               ) : (
                 <motion.div
@@ -330,7 +406,9 @@ export const Sidebar: React.FC = () => {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.8 }}
                   onClick={() => navigate('/checkout-preview')}
-                  className="w-full flex justify-center cursor-pointer px-1"
+                  onMouseEnter={() => isCollapsed && !isMobile && setHoveredId('upgrade')}
+                  onMouseLeave={() => setHoveredId(null)}
+                  className="w-full flex justify-center cursor-pointer px-1 relative"
                   title="Ativar Flow"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
@@ -338,6 +416,11 @@ export const Sidebar: React.FC = () => {
                   <div className="w-10 h-10 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm hover:shadow-md transition-all">
                     <img src={flowLogo} alt="Flow" className="w-6 h-6 object-contain" />
                   </div>
+                  <AnimatePresence>
+                    {isCollapsed && !isMobile && hoveredId === 'upgrade' && (
+                      <TooltipCard label="Plano Flow" subLabel="Upgrade" />
+                    )}
+                  </AnimatePresence>
                 </motion.button>
               ) : (
                 <motion.div
@@ -391,10 +474,23 @@ export const Sidebar: React.FC = () => {
           return (
             <AnimatePresence mode="wait">
               {(isCollapsed && !isMobile) ? (
-                <motion.div key="wsm-collapsed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex justify-center py-1">
-                  <div title={`${displayName} · ${planLabel}`}>
+                <motion.div 
+                  key="wsm-collapsed" 
+                  initial={{ opacity: 0 }} 
+                  animate={{ opacity: 1 }} 
+                  exit={{ opacity: 0 }} 
+                  onMouseEnter={() => isCollapsed && !isMobile && setHoveredId('wsm')}
+                  onMouseLeave={() => setHoveredId(null)}
+                  className="flex justify-center py-1 relative"
+                >
+                  <div className="cursor-pointer">
                     <Avvvatars value={avatarValue} style="shape" size={32} radius={8} />
                   </div>
+                  <AnimatePresence>
+                    {isCollapsed && !isMobile && hoveredId === 'wsm' && (
+                      <TooltipCard label={displayName} subLabel={`Workspace · ${planLabel}`} />
+                    )}
+                  </AnimatePresence>
                 </motion.div>
               ) : (
                 <motion.div key="wsm-expanded" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-2 px-1 py-1.5 rounded-lg">
@@ -420,10 +516,24 @@ export const Sidebar: React.FC = () => {
           return (
             <AnimatePresence mode="wait">
               {(isCollapsed && !isMobile) ? (
-                <motion.div key="ws-collapsed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex justify-center py-1" onClick={() => setIsWorkspaceOpen(true)}>
+                <motion.div 
+                  key="ws-collapsed" 
+                  initial={{ opacity: 0 }} 
+                  animate={{ opacity: 1 }} 
+                  exit={{ opacity: 0 }} 
+                  onMouseEnter={() => isCollapsed && !isMobile && setHoveredId('ws-owner')}
+                  onMouseLeave={() => setHoveredId(null)}
+                  className="flex justify-center py-1 relative" 
+                  onClick={() => setIsWorkspaceOpen(true)}
+                >
                   <div className="cursor-pointer hover:opacity-80 transition-opacity">
                     <Avvvatars value={avatarValue} style="shape" size={32} radius={8} />
                   </div>
+                  <AnimatePresence>
+                    {isCollapsed && !isMobile && hoveredId === 'ws-owner' && (
+                      <TooltipCard label={wsName} subLabel="Seu Workspace" />
+                    )}
+                  </AnimatePresence>
                 </motion.div>
               ) : (
                 <motion.div key="ws-expanded" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsWorkspaceOpen(true)} className="flex items-center gap-2 px-1 py-1.5 rounded-lg hover:bg-[#e9e9e7]/60 cursor-pointer transition-colors">

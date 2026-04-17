@@ -84,19 +84,32 @@ function InviteProcessor() {
   return null
 }
 
+import { Loading } from './components/ui/Loading'
+
 function App() {
   const [showThankYou, setShowThankYou] = useState(false)
   const [showWhatsAppOnboarding, setShowWhatsAppOnboarding] = useState(false)
+  const [showLoading, setShowLoading] = useState(false) // Desativado por padrão
 
   useEffect(() => {
     const handler = () => setShowThankYou(true)
     window.addEventListener('flui:subscription-success', handler)
     ;(window as any).__testThankYouModal = () => setShowThankYou(true)
     ;(window as any).__testWhatsAppOnboarding = () => setShowWhatsAppOnboarding(true)
+    ;(window as any).__testLoading = (val: boolean) => setShowLoading(val)
+    
+    // Auto-hide após alguns segundos para não travar a experiência por muito tempo, 
+    // mas deixaremos tempo suficiente para ele ver bem.
+    const timer = setTimeout(() => {
+      // setShowLoading(false) // Descomente aqui se quiser que desapareça sozinho
+    }, 10000)
+
     return () => {
       window.removeEventListener('flui:subscription-success', handler)
       delete (window as any).__testThankYouModal
       delete (window as any).__testWhatsAppOnboarding
+      delete (window as any).__testLoading
+      clearTimeout(timer)
     }
   }, [])
 
@@ -105,6 +118,7 @@ function App() {
       <SubscriptionProvider>
       <SidebarProvider>
         <Router>
+            {showLoading && <Loading />}
             <InviteProcessor />
             <WhatsAppChecker onNeedWhatsApp={() => setShowWhatsAppOnboarding(true)} />
             <Routes>

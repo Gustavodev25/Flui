@@ -1,19 +1,26 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import luiLogo from '../assets/logo/lui.svg'
 import { useAuth } from '../contexts/AuthContext'
 import { motion, AnimatePresence, useAnimation } from 'framer-motion'
+import { Dropdown, DropdownItem } from './ui/Dropdown'
+import { EyeOff, MoreVertical } from 'lucide-react'
 
 // Tempo visível (ms) | Tempo escondido (ms)
-const HIDDEN_DURATION  = 45000  // 45s some
-const INITIAL_DELAY    = 20000  // 20s antes da primeira aparição
-const MSG_INTERVAL     = 3500   // 3.5s por mensagem
+const HIDDEN_DURATION = 45000  // 45s some
+const INITIAL_DELAY = 20000  // 20s antes da primeira aparição
+const MSG_INTERVAL = 3500   // 3.5s por mensagem
 
 export const FinlozBottomLogo: React.FC = () => {
   const { user } = useAuth()
+  const [isDismissed, setIsDismissed] = useState(() => {
+    return localStorage.getItem('finloz_bottom_logo_dismissed') === 'true'
+  })
   const [visible, setVisible] = useState(false)
   const [showBalloon, setShowBalloon] = useState(false)
   const [messageIndex, setMessageIndex] = useState(0)
+  const [showDropdown, setShowDropdown] = useState(false)
   const controls = useAnimation()
+  const tagRef = useRef<HTMLButtonElement>(null)
 
   const firstName = user?.user_metadata?.full_name?.split(' ')[0] || 'amigo'
 
@@ -26,6 +33,8 @@ export const FinlozBottomLogo: React.FC = () => {
   ]
 
   useEffect(() => {
+    if (isDismissed) return
+
     let cancelled = false
 
     const delay = (ms: number) => new Promise<void>(res => {
@@ -65,7 +74,7 @@ export const FinlozBottomLogo: React.FC = () => {
 
     run()
     return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleIconClick = async () => {
@@ -83,6 +92,8 @@ export const FinlozBottomLogo: React.FC = () => {
 
   const currentMessage = MESSAGES[messageIndex]
 
+  if (isDismissed) return null
+
   return (
     <AnimatePresence>
       {visible && (
@@ -97,10 +108,45 @@ export const FinlozBottomLogo: React.FC = () => {
           <motion.div
             layout
             transition={{ layout: { type: 'spring', stiffness: 280, damping: 28 } }}
-            className="flex items-center gap-3 bg-white border border-[#e9e9e7] rounded-2xl px-3 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.07)] cursor-pointer hover:shadow-[0_10px_28px_rgba(0,0,0,0.1)] active:scale-[0.98] pointer-events-auto"
+            className="flex items-center gap-3 bg-white border border-[#e9e9e7] rounded-2xl px-3 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.07)] cursor-pointer hover:shadow-[0_10px_28px_rgba(0,0,0,0.1)] active:scale-[0.98] pointer-events-auto relative group"
             onClick={handleIconClick}
             style={{ borderRadius: 16 }}
           >
+            {/* Container da Tag e Dropdown no Canto */}
+            <div className="absolute -top-2 -right-1 z-50 pointer-events-auto">
+              <button
+                ref={tagRef}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowDropdown(!showDropdown)
+                }}
+                className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-full px-2 py-0.5 flex items-center gap-1 shadow-sm opacity-0 group-hover:opacity-100 transition-all hover:bg-white active:scale-90"
+              >
+                <span className="text-[9px] font-bold text-[#37352f]/50 uppercase tracking-tighter">Opções</span>
+              </button>
+
+              <Dropdown
+                isOpen={showDropdown}
+                onClose={() => setShowDropdown(false)}
+                className="!w-[230px] !top-auto !bottom-full !mb-2 !right-0 !left-auto"
+              >
+                <div className="px-3 py-2 text-[11px] text-[#37352f]/60 font-medium leading-relaxed bg-[#f7f7f5]/50 border-b border-[#f1f1f0]">
+                  Gostaria de não receber mais estes lembretes do Lui?
+                </div>
+                <div className="p-1">
+                  <DropdownItem
+                    icon={<EyeOff size={14} />}
+                    label="Ocultar para sempre"
+                    variant="danger"
+                    onClick={() => {
+                      localStorage.setItem('finloz_bottom_logo_dismissed', 'true')
+                      setIsDismissed(true)
+                      setShowDropdown(false)
+                    }}
+                  />
+                </div>
+              </Dropdown>
+            </div>
             {/* Badge da logo */}
             <motion.div layout className="w-8 h-8 rounded-xl bg-[#f7f7f5] border border-[#e9e9e7] flex items-center justify-center shrink-0">
               <motion.img

@@ -12,9 +12,27 @@ interface DatePickerProps {
 
 const DatePicker: React.FC<DatePickerProps> = ({ label, value, onChange }) => {
   const [isOpen, setIsOpen] = useState(false)
+  const [shouldRender, setShouldRender] = useState(false)
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Force close on unmount to prevent orphaned Portal elements
+  useEffect(() => {
+    return () => {
+      setIsOpen(false)
+      setShouldRender(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isOpen) setShouldRender(true)
+  }, [isOpen])
+
+  const handleExitComplete = () => {
+    if (!isOpen) setShouldRender(false)
+  }
 
   const updatePosition = () => {
     if (triggerRef.current) {
@@ -40,17 +58,15 @@ const DatePicker: React.FC<DatePickerProps> = ({ label, value, onChange }) => {
   }, [isOpen])
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        // Se clicar fora do container (trigger) E fora do portal... 
-        // Mas o portal está no body.
-        // Verificamos o portal manualmente abaixo pelo ID ou algo assim?
-        // Na verdade, se o clique não for no trigger nem em nada que pertença ao calendário.
-      }
+    if (!isOpen) return
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as Node
+      if (containerRef.current?.contains(target) || dropdownRef.current?.contains(target)) return
+      setIsOpen(false)
     }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [isOpen])
 
   const formatDate = (date: Date | null) => {
     if (!date) return ''
@@ -91,39 +107,36 @@ const DatePicker: React.FC<DatePickerProps> = ({ label, value, onChange }) => {
           )}
         </button>
 
-        <AnimatePresence>
-          {isOpen && (
-            <Portal>
-               {/* Overlay para fechar ao clicar fora */}
-               <div 
-                  className="fixed inset-0 z-[1000]" 
-                  onClick={() => setIsOpen(false)} 
-               />
-               
-               <motion.div
+        {shouldRender && (
+          <Portal>
+            <AnimatePresence onExitComplete={handleExitComplete}>
+              {isOpen && (
+                <motion.div
+                  ref={dropdownRef}
                   initial={{ opacity: 0, y: -8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -8, scale: 0.98 }}
                   transition={{ type: 'spring', stiffness: 500, damping: 35 }}
                   style={{
                     position: 'fixed',
-                    top: coords.top + 45, // Abre abaixo por padrão agora que está no Portal
+                    top: coords.top + 45,
                     left: coords.left,
                     zIndex: 1001,
                   }}
                   className="bg-white border border-[#e9e9e7] rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] overflow-hidden"
-               >
-                 <Calendar
-                   selectedDate={value}
-                   onSelect={(date) => {
-                     onChange(date)
-                     setIsOpen(false)
-                   }}
-                 />
-               </motion.div>
-            </Portal>
-          )}
-        </AnimatePresence>
+                >
+                  <Calendar
+                    selectedDate={value}
+                    onSelect={(date) => {
+                      onChange(date)
+                      setIsOpen(false)
+                    }}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </Portal>
+        )}
       </div>
     </div>
   )

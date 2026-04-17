@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react'
+import { Loading } from '../components/ui/Loading'
 import { motion, AnimatePresence } from 'framer-motion'
 import logoSvg from '../assets/logo/logo.svg'
 import finlozLogo from '../assets/logo/lui.svg'
@@ -455,11 +456,7 @@ const LoginPage: React.FC = () => {
 
 
   if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f7f7f5]">
-        <div className="w-8 h-8 border-4 border-[#2383e2]/20 border-t-[#2383e2] rounded-full animate-spin" />
-      </div>
-    )
+    return <Loading />
   }
 
   if (user) {

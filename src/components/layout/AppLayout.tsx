@@ -36,8 +36,8 @@ export const AppLayout: React.FC = () => {
         <Topbar />
         
         {/* Área de Conteúdo arredondada com borda nativa */}
-        <div className="flex-1 bg-white rounded-none lg:rounded-tl-[32px] border-[#e9e9e7] lg:border-l lg:border-t relative flex flex-col min-w-0 shadow-sm lg:overflow-hidden overflow-visible">
-          <div className="flex-1 flex flex-col lg:overflow-hidden overflow-visible">
+        <div className="flex-1 bg-white rounded-none lg:rounded-tl-[32px] border-[#e9e9e7] lg:border-l lg:border-t relative flex flex-col min-w-0 shadow-sm lg:overflow-hidden overflow-x-hidden">
+          <div className="flex-1 flex flex-col lg:overflow-hidden overflow-x-hidden">
             <Outlet />
           </div>
         </div>

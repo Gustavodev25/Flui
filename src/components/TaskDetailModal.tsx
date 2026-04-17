@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, memo } from 'react'
 import NumberFlow from '@number-flow/react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CheckCircle2, Circle, Edit2, UserCheck, ChevronDown, Check } from 'lucide-react'
@@ -128,6 +128,7 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
       onClose={onClose}
       title={task.title}
       maxWidth="max-w-md"
+      bodyClassName="!px-0 !pt-2"
       headerActions={
         <button
           onClick={() => { onClose(); onEdit(task) }}
@@ -138,10 +139,10 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         </button>
       }
     >
-      <div className="space-y-5">
+      <div className="flex flex-col pb-6">
 
         {/* Propriedades da tarefa */}
-        <div className="space-y-2.5">
+        <div className="flex flex-col">
           <DetailRow label="Status">
             <div className="flex items-center gap-2">
               <span className={`w-[7px] h-[7px] rounded-full ${statusDot[task.status]}`} />
@@ -231,9 +232,9 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
         {/* Descrição */}
         {hasDescription && (
-          <div className="pt-1">
-            <span className="text-[11px] font-semibold text-[#37352f]/25 uppercase tracking-wider">Descrição</span>
-            <p className="text-[13px] text-[#37352f]/60 leading-relaxed whitespace-pre-wrap mt-1.5">
+          <div className="px-5 sm:px-6 pt-5">
+            <span className="text-[13px] font-medium text-[#37352f]/40">Descrição</span>
+            <p className="text-[13px] text-[#37352f]/60 leading-relaxed whitespace-pre-wrap mt-2">
               {task.description}
             </p>
           </div>
@@ -241,7 +242,9 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
         {/* Subtarefas */}
         {hasSubtasks && (
-          <SubtasksSection task={task} onToggleSubtask={onToggleSubtask} />
+          <div className="px-5 sm:px-6 pt-5">
+            <SubtasksSection task={task} onToggleSubtask={onToggleSubtask} />
+          </div>
         )}
       </div>
     </Modal>
@@ -250,14 +253,14 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
 // ── Detail Row ──
 const DetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div className="flex items-center justify-between">
-    <span className="text-[13px] text-[#37352f]/35">{label}</span>
+  <div className="flex items-center justify-between min-h-[44px] py-1 px-5 sm:px-6 border-b border-[#f7f7f5] last:border-0 hover:bg-[#f7f7f5]/40 transition-[background-color]">
+    <span className="text-[13px] font-medium text-[#37352f]/40">{label}</span>
     {children}
   </div>
 )
 
 // ── Timer Inline ──
-const TimerInline: React.FC<{ task: Task; onStopTimer: (id: string) => void }> = ({ task, onStopTimer }) => {
+const TimerInline: React.FC<{ task: Task; onStopTimer: (id: string) => void }> = memo(({ task, onStopTimer }) => {
   const HOLD_DURATION = 6000
 
   const effectiveTimerAt = task.timerAt || null;
@@ -340,10 +343,10 @@ const TimerInline: React.FC<{ task: Task; onStopTimer: (id: string) => void }> =
       )}
     </div>
   )
-}
+})
 
 // ── Subtasks Section ──
-const SubtasksSection: React.FC<{ task: Task; onToggleSubtask: (taskId: string, subtaskId: string) => void }> = ({ task, onToggleSubtask }) => {
+const SubtasksSection: React.FC<{ task: Task; onToggleSubtask: (taskId: string, subtaskId: string) => void }> = memo(({ task, onToggleSubtask }) => {
   const subtasks = task.subtasks || []
   const completed = subtasks.filter(s => s.completed).length
   const total = subtasks.length
@@ -352,8 +355,8 @@ const SubtasksSection: React.FC<{ task: Task; onToggleSubtask: (taskId: string, 
   return (
     <div>
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[11px] font-semibold text-[#37352f]/25 uppercase tracking-wider">Subtarefas</span>
-        <span className={`text-[11px] font-semibold tabular-nums transition-colors duration-500 ${allDone ? 'text-[#2b8a3e]' : 'text-[#37352f]/30'}`}>
+        <span className="text-[13px] font-medium text-[#37352f]/40">Subtarefas</span>
+        <span className={`text-[12px] font-medium tabular-nums transition-colors duration-500 ${allDone ? 'text-[#2b8a3e]' : 'text-[#37352f]/30'}`}>
           {completed}/{total}
         </span>
       </div>
@@ -375,7 +378,7 @@ const SubtasksSection: React.FC<{ task: Task; onToggleSubtask: (taskId: string, 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             onClick={() => onToggleSubtask(task.id, subtask.id)}
-            className="flex items-center gap-2.5 group/sub cursor-pointer py-2 px-2 hover:bg-[#f7f7f5] rounded-lg transition-all"
+            className="flex items-center gap-3 group/sub cursor-pointer py-3 px-2 hover:bg-[#f7f7f5] active:bg-[#f0f0ee] rounded-lg transition-all min-h-[44px]"
           >
             <div className={`transition-all duration-200 flex-shrink-0 ${
               subtask.completed ? 'text-[#1a1a1a]' : 'text-[#37352f]/15 group-hover/sub:text-[#37352f]/30'
@@ -392,6 +395,6 @@ const SubtasksSection: React.FC<{ task: Task; onToggleSubtask: (taskId: string, 
       </div>
     </div>
   )
-}
+})
 
 export default TaskDetailModal
