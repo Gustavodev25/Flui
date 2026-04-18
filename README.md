@@ -24,7 +24,7 @@
 | Banco de Dados | Supabase (PostgreSQL + Auth + RLS) |
 | Pagamentos | Stripe (checkout, subscriptions, webhooks) |
 | Mensageria | WhatsApp Business API (Meta Cloud API) |
-| IA | NVIDIA NIM (DeepSeek V3.1), Groq (transcrição de áudio) |
+| IA | NVIDIA NIM (Meta Llama 3 70B Instruct), Groq (transcrição de áudio) |
 
 ---
 
