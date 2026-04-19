@@ -16,6 +16,20 @@ const supabase = createClient(
 
 // ÔöÇÔöÇ Zod schemas (valida├º├úo em runtime dos args gerados pela IA) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
+// Detecta quando o modelo coloca resposta conversacional no campo title
+const CHATTY_TITLE_RE = /^(já\s+(tá|ta|está|foi|estou)\b|anotad[oa][,!.]?\s*$|certo[,!.]\s|pronto[,!.]\s|perfeito[,!.]\s|ok[,!.]\s|com prazer|pode deixar|claro[,!.]\s|feito[,!.]\s|entendid[oa][,!.]\s)/i;
+
+function sanitizeTaskTitle(title, description) {
+  if (!title) return title;
+  if (!CHATTY_TITLE_RE.test(title.trim())) return title;
+  console.warn(`[TaskCreate] Título chatty detectado: "${title}" — extraindo da descrição`);
+  if (description) {
+    const sentence = description.replace(/\s+/g, ' ').trim().split(/[.!?\n]/)[0].trim();
+    if (sentence.length >= 5) return sentence.split(/\s+/).slice(0, 7).join(' ');
+  }
+  return title;
+}
+
 const optionalPositiveInt = (max) =>
   z.preprocess((value) => {
     if (value === '' || value === null || value === undefined) return undefined;
@@ -106,12 +120,13 @@ export const TOOLS = [
         properties: {
           title: {
             type: 'string',
-            description: 'Título claro e conciso da tarefa (3 a 8 palavras). EXTRAIA a AÇÃO PRINCIPAL da mensagem do usuário. ' +
-              'Exemplos: "Ligar o computador" (de "preciso ligar o computador daqui a dois minutos"), ' +
-              '"Cobrar Rafael sobre proposta" (de "fala lui preciso cobrar o rafael sobre a proposta dele"), ' +
-              '"Comprar material de escritório" (de "me lembra de comprar material pro escritório amanhã"). ' +
-              'NUNCA use saudações, interjeições ou trechos de conversa como título (ex: não use "Me lembra viu", "Fala Luí"). ' +
-              'Foque no VERBO + OBJETO da ação.',
+            description: 'Título claro e conciso da tarefa (3 a 8 palavras). EXTRAIA a AÇÃO PRINCIPAL: VERBO + OBJETO. ' +
+              'CORRETO: "Desabilitar firewall do computador" (de "daqui a pouco preciso desabilitar o firewall do meu computador"). ' +
+              'CORRETO: "Cobrar Rafael sobre proposta" (de "preciso cobrar o rafael sobre a proposta dele"). ' +
+              'CORRETO: "Comprar material de escritório" (de "me lembra de comprar material pro escritório amanhã"). ' +
+              'ERRADO: "Já tá anotado, Gustavo!" — isso é resposta ao usuário, NUNCA o título. ' +
+              'ERRADO: "Certo, vou anotar!" ou qualquer confirmação/saudação. ' +
+              'O título é SOMENTE o nome da tarefa, jamais a resposta ao usuário.',
           },
           description: {
             type: 'string',
@@ -341,7 +356,7 @@ export const TOOLS = [
             items: {
               type: 'object',
               properties: {
-                title: { type: 'string', description: 'Título claro e conciso (3 a 8 palavras). EXTRAIA a AÇÃO PRINCIPAL: VERBO + OBJETO. NUNCA copie saudações ou trechos de conversa.' },
+                title: { type: 'string', description: 'Título da tarefa (3 a 8 palavras): VERBO + OBJETO. Exemplo: "Desabilitar firewall do computador". NUNCA coloque confirmações ("Já anotei", "Certo") nem nome do usuário — o título é a ação, não a resposta.' },
                 description: { type: 'string', description: 'Resumo inteligente do que precisa ser feito. NUNCA use "Criado a partir da mensagem: ..." — resuma com suas próprias palavras.' },
                 priority: { type: 'string', enum: ['low', 'medium', 'high'] },
                 due_date: { type: 'string', description: 'Data YYYY-MM-DD.' },
@@ -449,7 +464,7 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'KnowledgeSave',
-      description: 'Salva uma informa├º├úo no "segundo c├®rebro" do usu├írio. Use para anota├º├Áes, ideias, decis├Áes, informa├º├Áes de refer├¬ncia, dados sobre pessoas, ou qualquer conhecimento que o usu├írio queira guardar. Diferente de tarefas ÔÇö isso ├® INFORMA├ç├âO, n├úo a├º├úo.',
+      description: 'Salva uma informa├º├úo no "segundo c├®rebro" do usu├írio. Use para anota├º├Áes, ideias, decis├Áes, informa├º├Áes de refer├¬ncia, dados sobre pessoas, ou qualquer conhecimento que o usu├írio queira guardar. Diferente de tarefas - isso ├® INFORMA├ç├âO, n├úo a├º├úo.',
       parameters: {
         type: 'object',
         properties: {
@@ -717,7 +732,7 @@ async function executeTaskCreate(args, userId) {
 
   const insertData = {
     user_id: userId,
-    title: parsed.title,
+    title: sanitizeTaskTitle(parsed.title, parsed.description),
     status: 'todo',
     priority: parsed.priority || 'medium',
     due_date: dueDateFixed,
@@ -769,7 +784,7 @@ async function executeTaskCreate(args, userId) {
     const hintTime = mins >= 60
       ? `${Math.floor(mins / 60)}h${mins % 60 > 0 ? ` ${mins % 60}min` : ''}`
       : `${mins} minutos`;
-    timerHint = ` Timer de ${hintTime} configurado ÔÇö vou te avisar aqui pelo WhatsApp quando chegar a hora.`;
+    timerHint = ` Timer de ${hintTime} configurado - vou te avisar aqui pelo WhatsApp quando chegar a hora.`;
   }
 
   return {
@@ -932,7 +947,7 @@ async function executeTaskUpdate(args, userId) {
   const timerHint = rest.timer_at === null
     ? ` Timer removido com sucesso.`
     : rest.timer_at
-      ? ` Timer configurado ÔÇö vou avisar no WhatsApp quando chegar a hora.`
+      ? ` Timer configurado - vou avisar no WhatsApp quando chegar a hora.`
       : '';
 
   // Track behavioral events for status changes
@@ -1007,7 +1022,7 @@ async function executeTaskList(args, userId) {
 
   const taskList = tasks.map((t, i) => {
     const statusLabel = STATUS_LABEL[t.status] || t.status;
-    const dateLabel = t.due_date ? ` ÔÇö ${humanizeDate(t.due_date)}` : '';
+    const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
     const tagsStr = t.tags?.length ? ` [${t.tags.join(', ')}]` : '';
     return `${i + 1}. *${t.title}* (${statusLabel}${dateLabel})${tagsStr}`;
   }).join('\n');
@@ -1101,7 +1116,7 @@ async function executeTaskSearch(args, userId) {
 
   const taskList = tasks.map((t, i) => {
     const statusLabel = STATUS_LABEL[t.status] || t.status;
-    const dateLabel = t.due_date ? ` ÔÇö ${humanizeDate(t.due_date)}` : '';
+    const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
     return `${i + 1}. *${t.title}* (${statusLabel}${dateLabel})`;
   }).join('\n');
 
@@ -1245,7 +1260,7 @@ async function executeTaskBatchCreate(args, userId) {
   if (error) throw new Error(`Falha ao criar tarefas: ${error.message}`);
 
   const created = (data || []).map((t, i) => {
-    const dateLabel = t.due_date ? ` ÔÇö ${humanizeDate(t.due_date)}` : '';
+    const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
     const subtaskInfo = t.subtasks?.length > 0 ? ` (${t.subtasks.length} subtarefas)` : '';
     return `${i + 1}. *${t.title}*${dateLabel}${subtaskInfo}`;
   }).join('\n');
@@ -1339,7 +1354,7 @@ async function executeMemorySave(args, userId) {
 
   return {
     success: true,
-    _hint: `Mem├│ria salva: "${summary || content.substring(0, 50)}". RESPONDA como um amigo responderia numa conversa de WhatsApp ÔÇö reaja ao que a pessoa DISSE, n├úo ao fato de ter salvado. Se ela se apresentou, responda a apresenta├º├úo ("Fala Gustavo! Massa, dev tamb├®m aqui haha. No que posso te ajudar?"). Se contou um fato pessoal, reaja a ele naturalmente. NUNCA diga "anotei essa informa├º├úo" ou "guardei isso" ÔÇö aja como se fosse parte natural da conversa. Salvar na mem├│ria ├® INVIS├ìVEL pro usu├írio.`,
+    _hint: `Mem├│ria salva: "${summary || content.substring(0, 50)}". RESPONDA como um amigo responderia numa conversa de WhatsApp - reaja ao que a pessoa DISSE, n├úo ao fato de ter salvado. Se ela se apresentou, responda a apresenta├º├úo ("Fala Gustavo! Massa, dev tamb├®m aqui haha. No que posso te ajudar?"). Se contou um fato pessoal, reaja a ele naturalmente. NUNCA diga "anotei essa informa├º├úo" ou "guardei isso" - aja como se fosse parte natural da conversa. Salvar na mem├│ria ├® INVIS├ìVEL pro usu├írio.`,
   };
 }
 
@@ -1396,7 +1411,7 @@ async function executeMemoryRecall(args, userId) {
     found: true,
     memories: memoriesFormatted,
     entities: entitiesFormatted,
-    _hint: `Encontrei ${results.length} mem├│ria(s) e ${entityInfo.length} entidade(s) sobre "${query || entity_name}". Use essas informa├º├Áes para responder ao usu├írio de forma NATURAL ÔÇö como se voc├¬ realmente lembrasse. Ex: "Sim, lembro! Voc├¬ me contou que..." NUNCA liste mem├│rias como itens t├®cnicos. Integre na conversa.`,
+    _hint: `Encontrei ${results.length} mem├│ria(s) e ${entityInfo.length} entidade(s) sobre "${query || entity_name}". Use essas informa├º├Áes para responder ao usu├írio de forma NATURAL - como se voc├¬ realmente lembrasse. Ex: "Sim, lembro! Voc├¬ me contou que..." NUNCA liste mem├│rias como itens t├®cnicos. Integre na conversa.`,
   };
 }
 
@@ -1435,7 +1450,7 @@ async function executeKnowledgeSave(args, userId) {
     entry_title: title,
     category_label: categoryLabels[category] || 'Nota',
     pinned: pinned || false,
-    _hint: `Salvo no segundo c├®rebro como ${categoryLabels[category] || 'nota'}: "${title}"${pinned ? ' (fixado ÔÇö sempre vis├¡vel)' : ''}. Confirme ao usu├írio de forma natural. Ex: "Guardei! Quando precisar, ├® s├│ perguntar." NUNCA use emojis ou jarg├úo t├®cnico.`,
+    _hint: `Salvo no segundo c├®rebro como ${categoryLabels[category] || 'nota'}: "${title}"${pinned ? ' (fixado - sempre vis├¡vel)' : ''}. Confirme ao usu├írio de forma natural. Ex: "Guardei! Quando precisar, ├® s├│ perguntar." NUNCA use emojis ou jarg├úo t├®cnico.`,
   };
 }
 
