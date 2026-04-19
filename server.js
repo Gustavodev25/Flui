@@ -35,6 +35,9 @@ import {
 import { trackEvent, analyzeAndUpdateProfile } from './agent/behavioralProfile.js';
 import { detectAndSaveCommitment } from './agent/accountabilityLoop.js';
 import { engineEvents as agentEvents } from './agent/queryEngine.js';
+import { getSession, setSession, deleteSession, checkAndMarkMessage, checkRateLimit, createBullMQConnection } from './agent/redisClient.js';
+import { enqueueWhatsAppMessage, getWhatsAppQueue } from './agent/whatsappQueue.js';
+import { Worker } from 'bullmq';
 import OpenAI from 'openai';
 import Stripe from 'stripe';
 
@@ -240,9 +243,7 @@ const nimClient = new OpenAI({
 });
 
 // ================== SESSÕES ==================
-const pendingAuthSessions = new Map();
-const processedMessages = new Map();
-const DEDUP_TTL_MS = 5 * 60 * 1000;
+// pendingAuthSessions e processedMessages migrados para Redis (agent/redisClient.js)
 const OUTBOUND_WORKER_ID = `server-${crypto.randomUUID()}`;
 
 // Track last proactive message time per userId for engagement detection
@@ -304,9 +305,8 @@ app.use((req, res, next) => {
 
 async function getWhatsAppSession(phone) {
   const normalizedPhone = phone.replace(/\D/g, '');
-  if (pendingAuthSessions.has(normalizedPhone)) {
-    return pendingAuthSessions.get(normalizedPhone);
-  }
+  const pending = await getSession(normalizedPhone);
+  if (pending) return pending;
 
   const binding = await findBindingByExternalUserId('whatsapp', normalizedPhone);
   if (!binding?.user_id) return null;
@@ -333,10 +333,8 @@ async function buildReminderSessions() {
     };
   }
 
-  for (const [phone, pending] of pendingAuthSessions.entries()) {
-    sessions[phone] = pending;
-  }
-
+  // Sessões pendentes (auth em andamento) ficam no Redis com TTL curto;
+  // usuários sem binding ativo ainda não têm lembretes configurados.
   return sessions;
 }
 
@@ -491,23 +489,8 @@ async function enqueueSystemWhatsAppMessage(userId, content, messageType = 'assi
 }
 
 // ================== DEDUPLICAÇÃO ==================
-// Evita processar a mesma mensagem 2x (Meta às vezes reenvia webhooks)
-function isDuplicate(messageId) {
-  if (!messageId) return true; // sem ID = ignora
-  if (processedMessages.has(messageId)) return true;
-
-  processedMessages.set(messageId, Date.now());
-
-  // Limpa entradas antigas a cada 100 mensagens
-  if (processedMessages.size > 200) {
-    const now = Date.now();
-    for (const [id, ts] of processedMessages) {
-      if (now - ts > DEDUP_TTL_MS) processedMessages.delete(id);
-    }
-  }
-
-  return false;
-}
+// Migrado para Redis (checkAndMarkMessage em agent/redisClient.js).
+// Garantia atômica via SET NX — funciona em múltiplas instâncias.
 
 // ================== BOAS-VINDAS COM IA ==================
 async function generateWelcomeMessage() {
@@ -552,7 +535,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     // ===== INIT =====
     if (!session) {
       session = { authenticated: false, step: 'ask_email' };
-      pendingAuthSessions.set(userPhone, session);
+      await setSession(userPhone, session);
 
       const welcomeMsg = await generateWelcomeMessage()
         || "Oi! Eu sou o Lui, assistente da Flui \n\nMe passa seu *e-mail* pra gente começar.";
@@ -615,7 +598,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
               session.authenticated = true;
               session.userId = foundUser.id;
               session.userName = foundUser.user_metadata?.full_name || foundUser.user_metadata?.name || 'Usuário';
-              pendingAuthSessions.delete(userPhone);
+              await deleteSession(userPhone);
 
               // Atualiza o binding existente explicitamente para evitar duplicatas errôneas e cobrir o número atual
               try {
@@ -647,7 +630,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
               session.authenticated = true;
               session.userId = foundUser.id;
               session.userName = foundUser.user_metadata?.full_name || foundUser.user_metadata?.name || 'Usuário';
-              pendingAuthSessions.delete(userPhone);
+              await deleteSession(userPhone);
 
               // Cria binding com o número real do WhatsApp
               await upsertChannelBinding({
@@ -675,7 +658,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
 
         // Não é Google-only nem tem binding do modal, pede senha normalmente
         session.step = 'ask_password';
-        pendingAuthSessions.set(userPhone, session);
+        await setSession(userPhone, session);
         await sendWhatsAppMessage(userPhone, "Boa! Agora sua *senha* 🔒");
         return;
       }
@@ -690,7 +673,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
 
         if (error) {
           session.step = 'ask_email';
-          pendingAuthSessions.set(userPhone, session);
+          await setSession(userPhone, session);
 
           await sendWhatsAppMessage(userPhone,
             "Não bateu aqui 😕 vamos tentar de novo. Seu e-mail?"
@@ -701,7 +684,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
         session.authenticated = true;
         session.userId = data.user.id;
         session.userName = data.user.user_metadata?.name || 'Usuário';
-        pendingAuthSessions.delete(userPhone);
+        await deleteSession(userPhone);
 
         const binding = await upsertChannelBinding({
           userId: session.userId,
@@ -737,8 +720,8 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
         console.error('[WhatsApp] Erro ao remover binding:', err.message);
       }
 
-      // Limpa sessão em memória
-      pendingAuthSessions.delete(userPhone);
+      // Limpa sessão no Redis
+      await deleteSession(userPhone);
 
       await sendWhatsAppMessage(userPhone,
         `Até logo, *${session.userName}*! 👋\n\nSua conta foi desconectada com sucesso.\n\nQuando quiser voltar, é só mandar qualquer mensagem que eu peço seus dados de novo.`
@@ -912,8 +895,8 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const message = messages[0];
     if (!message) return;
 
-    // ── FILTRO 3: Deduplicação ──
-    if (isDuplicate(message.id)) {
+    // ── FILTRO 3: Deduplicação (Redis atômico, funciona em múltiplas instâncias) ──
+    if (await checkAndMarkMessage(message.id)) {
       console.log(`[Webhook] Mensagem duplicada ignorada: ${message.id}`);
       return;
     }
@@ -922,9 +905,13 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const messageType = message.type;
     const userPhone = message.from;
 
-    // ── FILTRO 4: Ignora tipos sem conteúdo processável ──
-    // Tipos que o WhatsApp manda mas não são ações do usuário:
-    // system, reaction, ephemeral, order, unknown, unsupported, etc.
+    // ── FILTRO 4: Rate limiting por número ──
+    if (await checkRateLimit(userPhone)) {
+      console.warn(`[Webhook] Rate limit atingido para ${userPhone} — mensagem descartada`);
+      return;
+    }
+
+    // ── FILTRO 5: Ignora tipos sem conteúdo processável ──
     const SUPPORTED_TYPES = new Set(['text', 'audio']);
     if (!SUPPORTED_TYPES.has(messageType)) {
       console.log(`[Webhook] Tipo "${messageType}" não suportado, ignorado`);
@@ -933,21 +920,26 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
     console.log(`[Webhook] 📩 ${messageType} de ${userPhone} (${messageId})`);
 
-    // ── Mensagem de texto ──
+    // ── Enfileira para processamento assíncrono via BullMQ ──
     if (messageType === 'text') {
       const body = message.text?.body;
-      // Ignora textos vazios ou só whitespace
       if (!body || !body.trim()) {
         console.log('[Webhook] Texto vazio ignorado');
         return;
       }
-      await processAndRespondWithAI(userPhone, body, messageId);
+      const queued = await enqueueWhatsAppMessage({ userPhone, content: body, messageId, type: 'text' });
+      if (!queued) {
+        // Fila não disponível (Redis não configurado) — processa diretamente
+        await processAndRespondWithAI(userPhone, body, messageId);
+      }
       return;
     }
 
-    // ── Mensagem de áudio / voz ──
     if (messageType === 'audio' && message.audio?.id) {
-      await handleAudioMessage(userPhone, message.audio.id, messageId);
+      const queued = await enqueueWhatsAppMessage({ userPhone, audioId: message.audio.id, messageId, type: 'audio' });
+      if (!queued) {
+        await handleAudioMessage(userPhone, message.audio.id, messageId);
+      }
       return;
     }
 
@@ -955,6 +947,42 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     console.error('[Webhook] Erro ao processar evento:', err.message);
   }
 });
+
+// ================== BULLMQ WORKER ==================
+// Processa mensagens do WhatsApp de forma assíncrona com retry automático.
+// Concurrency=5: até 5 mensagens simultâneas por instância do servidor.
+{
+  const workerConnection = createBullMQConnection();
+  if (workerConnection) {
+    const whatsappWorker = new Worker(
+      'whatsapp-messages',
+      async (job) => {
+        const { userPhone, content, messageId, type, audioId } = job.data;
+        if (type === 'audio') {
+          await handleAudioMessage(userPhone, audioId, messageId);
+        } else {
+          await processAndRespondWithAI(userPhone, content, messageId);
+        }
+      },
+      { connection: workerConnection, concurrency: 5 }
+    );
+
+    whatsappWorker.on('failed', (job, err) => {
+      console.error(`[Worker] Job ${job?.id} falhou (tentativa ${job?.attemptsMade}): ${err.message}`);
+    });
+
+    whatsappWorker.on('completed', (job) => {
+      console.log(`[Worker] Job ${job.id} concluído (${job.data.userPhone})`);
+    });
+
+    process.on('SIGTERM', () => whatsappWorker.close());
+    process.on('SIGINT',  () => whatsappWorker.close());
+
+    console.log('[Worker] BullMQ Worker WhatsApp iniciado (concurrency=5)');
+  } else {
+    console.warn('[Worker] Redis não configurado — Worker BullMQ desativado, processamento direto ativo');
+  }
+}
 
 // ================== STRIPE ==================
 
