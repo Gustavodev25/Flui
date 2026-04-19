@@ -34,7 +34,7 @@ import {
 } from './agent/conversationOrchestrator.js';
 import { trackEvent, analyzeAndUpdateProfile } from './agent/behavioralProfile.js';
 import { detectAndSaveCommitment } from './agent/accountabilityLoop.js';
-import { agentEvents } from './agent/queryEngine.js';
+import { engineEvents as agentEvents } from './agent/queryEngine.js';
 import OpenAI from 'openai';
 import Stripe from 'stripe';
 
