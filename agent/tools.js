@@ -8,13 +8,13 @@ import { saveMemory, recallMemories, recallByEntity, getEntities } from './memor
 import { saveKnowledge, searchKnowledge, listIdeas, getPersonContext } from './secondBrain.js';
 
 // Usa service_role no backend (agente) para bypassar RLS.
-// O agente j├í filtra por user_id em todas as queries.
+// O agente já filtra por user_id em todas as queries.
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ÔöÇÔöÇ Zod schemas (valida├º├úo em runtime dos args gerados pela IA) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ÔöÇÔöÇ Zod schemas (validação em runtime dos args gerados pela IA) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 // Detecta quando o modelo coloca resposta conversacional no campo title
 const CHATTY_TITLE_RE = /^(já\s+(tá|ta|está|foi|estou)\b|anotad[oa][,!.]?\s*$|certo[,!.]\s|pronto[,!.]\s|perfeito[,!.]\s|ok[,!.]\s|com prazer|pode deixar|claro[,!.]\s|feito[,!.]\s|entendid[oa][,!.]\s)/i;
@@ -60,7 +60,7 @@ const taskCreateSchema = z.object({
   whatsapp_message: z.string().optional(),
   source: z.enum(['user', 'whatsapp']).optional(),
   visibility: z.enum(['personal', 'workspace']).optional(),
-  assigned_to_name: z.string().optional(), // nome do membro para auto-atribui├º├úo
+  assigned_to_name: z.string().optional(), // nome do membro para auto-atribuição
 });
 
 const taskUpdateSchema = z.object({
@@ -106,7 +106,7 @@ const taskBatchCreateSchema = z.object({
   })).min(1).max(20),
 });
 
-// ÔöÇÔöÇ Defini├º├Áes de ferramentas no formato OpenAI / NVIDIA NIM ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ÔöÇÔöÇ Definições de ferramentas no formato OpenAI / NVIDIA NIM ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // ——— Definições de ferramentas no formato OpenAI / NVIDIA NIM ——————————————————
 
 export const TOOLS = [
@@ -373,39 +373,39 @@ export const TOOLS = [
                   },
                   description: 'Etapas da tarefa, opcionalmente com timer individual.',
                 },
-                timer_minutes: { type: 'integer', minimum: 1, maximum: 1440, description: 'Timer em minutos para notifica├º├úo no WhatsApp.' },
+                timer_minutes: { type: 'integer', minimum: 1, maximum: 1440, description: 'Timer em minutos para notificação no WhatsApp.' },
                 visibility: { type: 'string', enum: ['personal', 'workspace'], description: 'Visibilidade: "workspace" se a tarefa for da equipe, "personal" para individual.' },
               },
               required: ['title', 'description'],
             },
-            description: 'Lista de tarefas a criar (m├íximo 20).',
+            description: 'Lista de tarefas a criar (máximo 20).',
           },
         },
         required: ['tasks'],
       },
     },
   },
-  // ÔöÇÔöÇ Ferramentas de Mem├│ria e Segundo C├®rebro ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  // ÔöÇÔöÇ Ferramentas de Memória e Segundo Cérebro ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   {
     type: 'function',
     function: {
       name: 'MemorySave',
-      description: 'Salva uma informa├º├úo na mem├│ria de longo prazo do usu├írio. Use quando o usu├írio compartilhar um fato pessoal, prefer├¬ncia, evento importante, ou qualquer informa├º├úo que seria ├║til lembrar no futuro. Tamb├®m use automaticamente quando detectar informa├º├Áes importantes na conversa.',
+      description: 'Salva uma informação na memória de longo prazo do usuário. Use quando o usuário compartilhar um fato pessoal, preferência, evento importante, ou qualquer informação que seria útil lembrar no futuro. Também use automaticamente quando detectar informações importantes na conversa.',
       parameters: {
         type: 'object',
         properties: {
           memory_type: {
             type: 'string',
             enum: ['episodic', 'semantic', 'entity'],
-            description: 'Tipo: "episodic" para eventos/conversas, "semantic" para fatos/prefer├¬ncias, "entity" para pessoas/projetos.',
+            description: 'Tipo: "episodic" para eventos/conversas, "semantic" para fatos/preferências, "entity" para pessoas/projetos.',
           },
           content: {
             type: 'string',
-            description: 'Conte├║do completo da mem├│ria. Seja espec├¡fico e detalhado.',
+            description: 'Conteúdo completo da memória. Seja específico e detalhado.',
           },
           summary: {
             type: 'string',
-            description: 'Resumo curto (1 frase) para busca r├ípida.',
+            description: 'Resumo curto (1 frase) para busca rápida.',
           },
           entities: {
             type: 'array',
@@ -414,7 +414,7 @@ export const TOOLS = [
               properties: {
                 name: { type: 'string', description: 'Nome da entidade (pessoa, projeto, lugar).' },
                 type: { type: 'string', enum: ['person', 'project', 'place', 'company', 'topic'], description: 'Tipo da entidade.' },
-                description: { type: 'string', description: 'Descri├º├úo breve.' },
+                description: { type: 'string', description: 'Descrição breve.' },
               },
               required: ['name', 'type'],
             },
@@ -423,11 +423,11 @@ export const TOOLS = [
           tags: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Tags para categoriza├º├úo (ex: ["trabalho", "sa├║de", "pessoal"]).',
+            description: 'Tags para categorização (ex: ["trabalho", "saúde", "pessoal"]).',
           },
           importance: {
             type: 'number',
-            description: 'Import├óncia de 0.0 a 1.0. Padr├úo: 0.5. Use 0.8+ para fatos cruciais.',
+            description: 'Importância de 0.0 a 1.0. Padrão: 0.5. Use 0.8+ para fatos cruciais.',
           },
         },
         required: ['memory_type', 'content', 'summary'],
@@ -438,7 +438,7 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'MemoryRecall',
-      description: 'Busca na mem├│ria de longo prazo do usu├írio. Use quando o usu├írio perguntar "o que eu te disse sobre...", "voc├¬ lembra...", "o que o [pessoa] falou...", ou quando precisar de contexto hist├│rico para responder melhor.',
+      description: 'Busca na memória de longo prazo do usuário. Use quando o usuário perguntar "o que eu te disse sobre...", "você lembra...", "o que o [pessoa] falou...", ou quando precisar de contexto histórico para responder melhor.',
       parameters: {
         type: 'object',
         properties: {
@@ -449,11 +449,11 @@ export const TOOLS = [
           memory_type: {
             type: 'string',
             enum: ['episodic', 'semantic', 'entity'],
-            description: 'Filtrar por tipo espec├¡fico (opcional).',
+            description: 'Filtrar por tipo específico (opcional).',
           },
           entity_name: {
             type: 'string',
-            description: 'Buscar mem├│rias sobre uma pessoa/projeto espec├¡fico.',
+            description: 'Buscar memórias sobre uma pessoa/projeto específico.',
           },
         },
         required: ['query'],
@@ -464,22 +464,22 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'KnowledgeSave',
-      description: 'Salva uma informa├º├úo no "segundo c├®rebro" do usu├írio. Use para anota├º├Áes, ideias, decis├Áes, informa├º├Áes de refer├¬ncia, dados sobre pessoas, ou qualquer conhecimento que o usu├írio queira guardar. Diferente de tarefas - isso ├® INFORMA├ç├âO, n├úo a├º├úo.',
+      description: 'Salva uma informação no "segundo cérebro" do usuário. Use para anotações, ideias, decisões, informações de referência, dados sobre pessoas, ou qualquer conhecimento que o usuário queira guardar. Diferente de tarefas ÔÇö isso é INFORMAÇÃO, não ação.',
       parameters: {
         type: 'object',
         properties: {
           category: {
             type: 'string',
             enum: ['note', 'idea', 'reference', 'decision', 'contact', 'routine'],
-            description: 'Categoria: "note" (anota├º├úo), "idea" (ideia futura), "reference" (consulta/senha/dado), "decision" (decis├úo tomada), "contact" (info sobre pessoa), "routine" (processo recorrente).',
+            description: 'Categoria: "note" (anotação), "idea" (ideia futura), "reference" (consulta/senha/dado), "decision" (decisão tomada), "contact" (info sobre pessoa), "routine" (processo recorrente).',
           },
           title: {
             type: 'string',
-            description: 'T├¡tulo curto e descritivo.',
+            description: 'Título curto e descritivo.',
           },
           content: {
             type: 'string',
-            description: 'Conte├║do completo da informa├º├úo. Estruture bem: quem, o qu├¬, quando, contexto.',
+            description: 'Conteúdo completo da informação. Estruture bem: quem, o quê, quando, contexto.',
           },
           entities: {
             type: 'array',
@@ -496,11 +496,11 @@ export const TOOLS = [
           tags: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Tags para organiza├º├úo.',
+            description: 'Tags para organização.',
           },
           pinned: {
             type: 'boolean',
-            description: 'Se true, essa informa├º├úo aparece SEMPRE no contexto. Use para dados muito importantes.',
+            description: 'Se true, essa informação aparece SEMPRE no contexto. Use para dados muito importantes.',
           },
         },
         required: ['category', 'title', 'content'],
@@ -511,7 +511,7 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'KnowledgeSearch',
-      description: 'Busca no segundo c├®rebro do usu├írio. Use quando perguntar "o que eu anotei sobre...", "tenho alguma nota sobre...", "quais s├úo minhas ideias", "o que eu sei sobre [pessoa]", ou qualquer consulta ao banco de conhecimento.',
+      description: 'Busca no segundo cérebro do usuário. Use quando perguntar "o que eu anotei sobre...", "tenho alguma nota sobre...", "quais são minhas ideias", "o que eu sei sobre [pessoa]", ou qualquer consulta ao banco de conhecimento.',
       parameters: {
         type: 'object',
         properties: {
@@ -526,7 +526,7 @@ export const TOOLS = [
           },
           entity: {
             type: 'string',
-            description: 'Buscar por pessoa/projeto espec├¡fico (opcional).',
+            description: 'Buscar por pessoa/projeto específico (opcional).',
           },
         },
         required: ['query'],
@@ -623,7 +623,7 @@ function humanizeDate(dateStr) {
     const diffMs = spDate.getTime() - target.getTime();
     const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
     if (diffDays === 1) return 'ontem (atrasada)';
-    if (diffDays <= 7) return `${diffDays} dias atr├ís (atrasada)`;
+    if (diffDays <= 7) return `${diffDays} dias atrás (atrasada)`;
     const weekday = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' }).format(target);
     const dayNum = target.getDate();
     const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(target);
@@ -631,8 +631,8 @@ function humanizeDate(dateStr) {
   }
 
   if (dateStr === todayISO) return 'hoje';
-  if (dateStr === tomorrowISO) return 'amanh├ú';
-  if (dateStr === dayAfterISO) return 'depois de amanh├ú';
+  if (dateStr === tomorrowISO) return 'amanhã';
+  if (dateStr === dayAfterISO) return 'depois de amanhã';
 
   const [year, month, day] = dateStr.split('-').map(Number);
   const targetDate = new Date(year, month - 1, day);
@@ -644,21 +644,21 @@ function humanizeDate(dateStr) {
   return `${weekday}, ${dayNum} de ${monthName}`;
 }
 
-const PRIORITY_LABEL = { high: 'alta', medium: 'm├®dia', low: 'baixa' };
+const PRIORITY_LABEL = { high: 'alta', medium: 'média', low: 'baixa' };
 const PRIORITY_EMOJI = { high: '', medium: '', low: '' };
-const STATUS_LABEL = { todo: 'a fazer', doing: 'em progresso', done: 'conclu├¡da', canceled: 'cancelada' };
+const STATUS_LABEL = { todo: 'a fazer', doing: 'em progresso', done: 'concluída', canceled: 'cancelada' };
 
 // ÔöÇÔöÇ Executores das ferramentas ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 async function resolveWorkspaceOwnerId(userId, visibility) {
   if (visibility !== 'workspace') return null;
-  // Verifica se ├® membro de algum workspace
+  // Verifica se é membro de algum workspace
   const { data: membership } = await supabase
     .from('workspace_members')
     .select('workspace_owner_id')
     .eq('member_user_id', userId)
     .maybeSingle();
-  // Membro ÔåÆ usa o ID do dono; dono ÔåÆ usa o pr├│prio ID
+  // Membro ÔåÆ usa o ID do dono; dono ÔåÆ usa o próprio ID
   return membership ? membership.workspace_owner_id : userId;
 }
 
@@ -687,7 +687,7 @@ async function executeTaskCreate(args, userId) {
   let visibility = parsed.visibility || 'personal';
   let isGuest = false;
 
-  // Verifica proativamente se ├® membro convidado
+  // Verifica proativamente se é membro convidado
   const { data: membership } = await supabase
     .from('workspace_members')
     .select('workspace_owner_id')
@@ -699,13 +699,13 @@ async function executeTaskCreate(args, userId) {
     isGuest = true;
   }
 
-  // Resolve workspace_owner_id se necess├írio
+  // Resolve workspace_owner_id se necessário
   const workspaceOwnerId = await resolveWorkspaceOwnerId(userId, visibility);
 
-  // Resolve respons├ível por nome (se informado)
+  // Resolve responsável por nome (se informado)
   let assignedToId = await resolveAssignedTo(userId, parsed.assigned_to_name, visibility);
 
-  // Auto-atribui para o convidado caso n├úo tenha atribui├º├úo expl├¡cita
+  // Auto-atribui para o convidado caso não tenha atribuição explícita
   if (isGuest && !assignedToId) {
     assignedToId = userId;
   }
@@ -751,7 +751,7 @@ async function executeTaskCreate(args, userId) {
     assigned_by: assignedToId ? userId : null,
   };
 
-  // Adiciona descri├º├úo (auto-gera se n├úo veio)
+  // Adiciona descrição (auto-gera se não veio)
   insertData.description = parsed.description || `Tarefa: ${parsed.title}`;
 
   const { data, error } = await supabase
@@ -771,7 +771,7 @@ async function executeTaskCreate(args, userId) {
     subtask_count: data.subtasks?.length || 0,
   }).catch(() => {});
 
-  const priorityLabel = PRIORITY_LABEL[data.priority] || 'm├®dia';
+  const priorityLabel = PRIORITY_LABEL[data.priority] || 'média';
   const dateLabel = humanizeDate(data.due_date);
   const subtaskCount = data.subtasks?.length || 0;
   const subtaskHint = subtaskCount > 0
@@ -784,7 +784,7 @@ async function executeTaskCreate(args, userId) {
     const hintTime = mins >= 60
       ? `${Math.floor(mins / 60)}h${mins % 60 > 0 ? ` ${mins % 60}min` : ''}`
       : `${mins} minutos`;
-    timerHint = ` Timer de ${hintTime} configurado - vou te avisar aqui pelo WhatsApp quando chegar a hora.`;
+    timerHint = ` Timer de ${hintTime} configurado ÔÇö vou te avisar aqui pelo WhatsApp quando chegar a hora.`;
   }
 
   return {
@@ -795,7 +795,7 @@ async function executeTaskCreate(args, userId) {
     subtask_count: subtaskCount,
     timer_set: !!data.timer_at,
     timer_minutes: parsed.timer_minutes || null,
-    _hint: `Tarefa "${data.title}" criada com prioridade ${priorityLabel} pra ${dateLabel}${subtaskHint}.${timerHint}${parsed.reminder_days_before ? ` Lembrete configurado para ${parsed.reminder_days_before} dia(s) antes do prazo.` : ''}${visibility === 'workspace' ? ' Tarefa compartilhada com o workspace (equipe).' : ''}${assignedToId ? ` Atribu├¡da a ${parsed.assigned_to_name || 'membro da equipe'}.` : ''} Responda de forma natural e curta. NUNCA use emojis, datas ISO, IDs ou JSON.`
+    _hint: `Tarefa "${data.title}" criada com prioridade ${priorityLabel} pra ${dateLabel}${subtaskHint}.${timerHint}${parsed.reminder_days_before ? ` Lembrete configurado para ${parsed.reminder_days_before} dia(s) antes do prazo.` : ''}${visibility === 'workspace' ? ' Tarefa compartilhada com o workspace (equipe).' : ''}${assignedToId ? ` Atribuída a ${parsed.assigned_to_name || 'membro da equipe'}.` : ''} Responda de forma natural e curta. NUNCA use emojis, datas ISO, IDs ou JSON.`
   };
 }
 
@@ -820,7 +820,7 @@ async function executeTaskUpdate(args, userId) {
     if (!found) {
       return {
         success: false,
-        _hint: `N├úo encontrei nenhuma tarefa com o nome "${searchTerm}". Use TaskSearch para localizar a tarefa antes de atualizar.`
+        _hint: `Não encontrei nenhuma tarefa com o nome "${searchTerm}". Use TaskSearch para localizar a tarefa antes de atualizar.`
       };
     }
     resolvedId = found.id;
@@ -841,7 +841,7 @@ async function executeTaskUpdate(args, userId) {
     }));
   }
 
-  // Busca dados atuais para opera├º├Áes que precisam de contexto
+  // Busca dados atuais para operações que precisam de contexto
   const needsCurrentData = rest.status || rest.timer_minutes !== undefined;
   let currentTask = null;
   if (needsCurrentData) {
@@ -854,7 +854,7 @@ async function executeTaskUpdate(args, userId) {
     currentTask = cur;
   }
 
-  // Quando marcar como conclu├¡da: auto-completa todas as subtarefas
+  // Quando marcar como concluída: auto-completa todas as subtarefas
   if (rest.status === 'done') {
     const currentSubs = currentTask?.subtasks || [];
     if (currentSubs.length > 0) {
@@ -868,7 +868,7 @@ async function executeTaskUpdate(args, userId) {
   if (rest.status === 'todo' || rest.status === 'doing') {
     rest.timer_fired = false;
     rest.timer_warned = false;
-    // Desmarca subtarefas se a tarefa estava conclu├¡da (todas marcadas)
+    // Desmarca subtarefas se a tarefa estava concluída (todas marcadas)
     const currentSubs = currentTask?.subtasks || [];
     if (currentSubs.length > 0 && currentSubs.every(s => s.completed)) {
       rest.subtasks = currentSubs.map(s => ({ ...s, completed: false }));
@@ -897,7 +897,7 @@ async function executeTaskUpdate(args, userId) {
   );
 
   if (Object.keys(updates).length === 0) {
-    return { success: false, _hint: 'Nenhum campo foi fornecido para atualiza├º├úo. Pergunte ao usu├írio o que ele quer mudar.' };
+    return { success: false, _hint: 'Nenhum campo foi fornecido para atualização. Pergunte ao usuário o que ele quer mudar.' };
   }
 
   const { data, error } = await supabase
@@ -913,7 +913,7 @@ async function executeTaskUpdate(args, userId) {
   if (!data) {
     return {
       success: false,
-      _hint: `Tarefa com ID "${resolvedId}" n├úo encontrada. Use TaskSearch para localizar a tarefa pelo nome e obter o ID correto antes de atualizar.`,
+      _hint: `Tarefa com ID "${resolvedId}" não encontrada. Use TaskSearch para localizar a tarefa pelo nome e obter o ID correto antes de atualizar.`,
     };
   }
 
@@ -925,7 +925,7 @@ async function executeTaskUpdate(args, userId) {
   if (rest.status) changes.push(`status: ${statusLabel}`);
   if (rest.priority) changes.push(`prioridade: ${PRIORITY_LABEL[rest.priority]}`);
   if (rest.due_date) changes.push(`prazo: ${dateLabel}`);
-  if (rest.title) changes.push(`t├¡tulo: "${data.title}"`);
+  if (rest.title) changes.push(`título: "${data.title}"`);
   if (rest.subtasks && rest.status !== 'done' && rest.status !== 'todo' && rest.status !== 'doing') changes.push(`subtarefas: ${rest.subtasks.length} novos passos`);
   if (rest.timer_at === null) {
     changes.push('timer: removido');
@@ -940,14 +940,14 @@ async function executeTaskUpdate(args, userId) {
   const subtasksAutoCompleted = rest.status === 'done' && (data.subtasks?.length || 0) > 0;
   const subtasksReset = (rest.status === 'todo' || rest.status === 'doing') && rest.subtasks?.length > 0;
   const subtaskHint = subtasksAutoCompleted
-    ? ` Todas as ${data.subtasks.length} subtarefas foram marcadas como conclu├¡das.`
+    ? ` Todas as ${data.subtasks.length} subtarefas foram marcadas como concluídas.`
     : subtasksReset
       ? ` As ${rest.subtasks.length} subtarefas foram redefinidas para pendente.`
       : '';
   const timerHint = rest.timer_at === null
     ? ` Timer removido com sucesso.`
     : rest.timer_at
-      ? ` Timer configurado - vou avisar no WhatsApp quando chegar a hora.`
+      ? ` Timer configurado ÔÇö vou avisar no WhatsApp quando chegar a hora.`
       : '';
 
   // Track behavioral events for status changes
@@ -979,7 +979,7 @@ async function executeTaskUpdate(args, userId) {
     subtask_count: data.subtasks?.length || 0,
     timer_set: !!rest.timer_at,
     changes: changes.join(', '),
-    _hint: `Tarefa "${data.title}" atualizada (${changes.join(', ')}).${subtaskHint}${timerHint} Responda de forma natural e motivacional. NUNCA mostre dados t├®cnicos.`
+    _hint: `Tarefa "${data.title}" atualizada (${changes.join(', ')}).${subtaskHint}${timerHint} Responda de forma natural e motivacional. NUNCA mostre dados técnicos.`
   };
 }
 
@@ -1016,13 +1016,13 @@ async function executeTaskList(args, userId) {
       success: true,
       count: 0,
       formatted_list: '',
-      _hint: 'O usu├írio n├úo tem tarefas nesse filtro. Informe de forma amig├ível.'
+      _hint: 'O usuário não tem tarefas nesse filtro. Informe de forma amigável.'
     };
   }
 
   const taskList = tasks.map((t, i) => {
     const statusLabel = STATUS_LABEL[t.status] || t.status;
-    const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
+    const dateLabel = t.due_date ? ` ÔÇö ${humanizeDate(t.due_date)}` : '';
     const tagsStr = t.tags?.length ? ` [${t.tags.join(', ')}]` : '';
     return `${i + 1}. *${t.title}* (${statusLabel}${dateLabel})${tagsStr}`;
   }).join('\n');
@@ -1032,7 +1032,7 @@ async function executeTaskList(args, userId) {
     count: tasks.length,
     formatted_list: taskList,
     tasks_raw: tasks.map(t => ({ id: t.id, title: t.title })),
-    _hint: `${tasks.length} tarefa(s) encontrada(s). Apresente usando a formatted_list. Os IDs em tasks_raw s├úo para seu uso interno nas ferramentas. NUNCA mostre IDs, JSON ou emojis.`
+    _hint: `${tasks.length} tarefa(s) encontrada(s). Apresente usando a formatted_list. Os IDs em tasks_raw são para seu uso interno nas ferramentas. NUNCA mostre IDs, JSON ou emojis.`
   };
 }
 
@@ -1054,14 +1054,14 @@ async function executeTaskDelete(args, userId) {
     if (!found) {
       return {
         success: false,
-        _hint: `N├úo encontrei nenhuma tarefa com o nome "${searchTerm}". Use TaskSearch para localizar antes de deletar.`
+        _hint: `Não encontrei nenhuma tarefa com o nome "${searchTerm}". Use TaskSearch para localizar antes de deletar.`
       };
     }
     deleteId = found.id;
     console.log(`[TaskDelete] ID resolvido por busca: "${searchTerm}" ÔåÆ ${deleteId}`);
   }
 
-  // Busca o t├¡tulo antes de deletar
+  // Busca o título antes de deletar
   const { data: task } = await supabase
     .from('tasks')
     .select('title')
@@ -1082,7 +1082,7 @@ async function executeTaskDelete(args, userId) {
   return {
     success: true,
     task_title: taskTitle,
-    _hint: `Tarefa "${taskTitle}" foi exclu├¡da permanentemente. Confirme ao usu├írio de forma breve.`
+    _hint: `Tarefa "${taskTitle}" foi excluída permanentemente. Confirme ao usuário de forma breve.`
   };
 }
 
@@ -1110,13 +1110,13 @@ async function executeTaskSearch(args, userId) {
       success: true,
       count: 0,
       formatted_list: '',
-      _hint: `Nenhuma tarefa encontrada com "${parsed.query}". Se o usu├írio estiver tentando anotar algo novo, use TaskCreate. Caso contr├írio, informe e sugira uma busca diferente.`
+      _hint: `Nenhuma tarefa encontrada com "${parsed.query}". Se o usuário estiver tentando anotar algo novo, use TaskCreate. Caso contrário, informe e sugira uma busca diferente.`
     };
   }
 
   const taskList = tasks.map((t, i) => {
     const statusLabel = STATUS_LABEL[t.status] || t.status;
-    const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
+    const dateLabel = t.due_date ? ` ÔÇö ${humanizeDate(t.due_date)}` : '';
     return `${i + 1}. *${t.title}* (${statusLabel}${dateLabel})`;
   }).join('\n');
 
@@ -1126,14 +1126,14 @@ async function executeTaskSearch(args, userId) {
     query: parsed.query,
     formatted_list: taskList,
     tasks_raw: tasks.map(t => ({ id: t.id, title: t.title })),
-    _hint: `${tasks.length} tarefa(s) encontrada(s) com "${parsed.query}". Apresente usando formatted_list. Os IDs em tasks_raw s├úo para seu uso interno nas ferramentas. NUNCA mostre IDs.`
+    _hint: `${tasks.length} tarefa(s) encontrada(s) com "${parsed.query}". Apresente usando formatted_list. Os IDs em tasks_raw são para seu uso interno nas ferramentas. NUNCA mostre IDs.`
   };
 }
 
 async function executeTaskDashboard(args, userId) {
   const todayISO = getTodayISO();
 
-  // Busca todas as tarefas do usu├írio
+  // Busca todas as tarefas do usuário
   const { data: allTasks, error } = await supabase
     .from('tasks')
     .select('status, priority, due_date, created_at, updated_at')
@@ -1151,16 +1151,16 @@ async function executeTaskDashboard(args, userId) {
   const overdue = tasks.filter(t => ['todo', 'doing'].includes(t.status) && t.due_date && t.due_date < todayISO).length;
   const highPriority = tasks.filter(t => t.priority === 'high' && ['todo', 'doing'].includes(t.status)).length;
 
-  // Taxa de conclus├úo
+  // Taxa de conclusão
   const completionRate = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  // Tarefas conclu├¡das esta semana
+  // Tarefas concluídas esta semana
   const weekAgo = new Date(todayISO + 'T12:00:00-03:00');
   weekAgo.setDate(weekAgo.getDate() - 7);
   const weekAgoISO = weekAgo.toISOString();
   const doneThisWeek = tasks.filter(t => t.status === 'done' && t.updated_at && t.updated_at >= weekAgoISO).length;
 
-  // Streak: dias consecutivos com pelo menos 1 tarefa conclu├¡da
+  // Streak: dias consecutivos com pelo menos 1 tarefa concluída
   const doneDates = new Set();
   for (const t of tasks) {
     if (t.status === 'done' && t.updated_at) {
@@ -1187,14 +1187,14 @@ async function executeTaskDashboard(args, userId) {
     success: true,
     formatted_dashboard: lines.join('\n'),
     stats: { total, pending, done, overdue, completionRate, streak, doneThisWeek },
-    _hint: `Apresente o dashboard ao usu├írio usando o formatted_dashboard. Adicione um coment├írio motivacional breve no final. NUNCA mostre JSON ou emojis.`
+    _hint: `Apresente o dashboard ao usuário usando o formatted_dashboard. Adicione um comentário motivacional breve no final. NUNCA mostre JSON ou emojis.`
   };
 }
 
 async function executeTaskBatchCreate(args, userId) {
   const parsed = taskBatchCreateSchema.parse(args);
 
-  // Verifica proativamente se ├® membro convidado
+  // Verifica proativamente se é membro convidado
   const { data: membership } = await supabase
     .from('workspace_members')
     .select('workspace_owner_id')
@@ -1203,7 +1203,7 @@ async function executeTaskBatchCreate(args, userId) {
 
   const isGuest = !!membership;
 
-  // Resolve workspace_owner_id uma vez se alguma tarefa ├® workspace
+  // Resolve workspace_owner_id uma vez se alguma tarefa é workspace
   const hasWorkspaceTask = isGuest || parsed.tasks.some(t => t.visibility === 'workspace');
   const workspaceOwnerId = hasWorkspaceTask ? await resolveWorkspaceOwnerId(userId, 'workspace') : null;
 
@@ -1227,7 +1227,7 @@ async function executeTaskBatchCreate(args, userId) {
 
     if (isGuest) {
       taskVisibility = 'workspace';
-      // Como n├úo tem assigned_to_name em batch, auto-atribui todas ao guest
+      // Como não tem assigned_to_name em batch, auto-atribui todas ao guest
       assignedToId = userId;
     }
 
@@ -1260,7 +1260,7 @@ async function executeTaskBatchCreate(args, userId) {
   if (error) throw new Error(`Falha ao criar tarefas: ${error.message}`);
 
   const created = (data || []).map((t, i) => {
-    const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
+    const dateLabel = t.due_date ? ` ÔÇö ${humanizeDate(t.due_date)}` : '';
     const subtaskInfo = t.subtasks?.length > 0 ? ` (${t.subtasks.length} subtarefas)` : '';
     return `${i + 1}. *${t.title}*${dateLabel}${subtaskInfo}`;
   }).join('\n');
@@ -1269,7 +1269,7 @@ async function executeTaskBatchCreate(args, userId) {
     success: true,
     count: data?.length || 0,
     formatted_list: created,
-    _hint: `${data?.length || 0} tarefas criadas com sucesso! Monte um resumo caloroso para o usu├írio usando o nome dele. Apresente a formatted_list numerada e feche com algo como "Tudo anotado! Quer ajustar alguma coisa?". NUNCA mostre JSON ou emojis.`
+    _hint: `${data?.length || 0} tarefas criadas com sucesso! Monte um resumo caloroso para o usuário usando o nome dele. Apresente a formatted_list numerada e feche com algo como "Tudo anotado! Quer ajustar alguma coisa?". NUNCA mostre JSON ou emojis.`
   };
 }
 
@@ -1291,13 +1291,13 @@ async function executeSubtaskToggle(args, userId) {
     .single();
 
   if (fetchErr || !task) {
-    return { success: false, _hint: `Tarefa n├úo encontrada. Use TaskList para verificar os IDs dispon├¡veis.` };
+    return { success: false, _hint: `Tarefa não encontrada. Use TaskList para verificar os IDs disponíveis.` };
   }
 
   const subs = task.subtasks || [];
   const subtask = subs.find(s => s.id === parsed.subtask_id);
   if (!subtask) {
-    return { success: false, _hint: `Subtarefa n├úo encontrada na tarefa "${task.title}". Verifique o subtask_id.` };
+    return { success: false, _hint: `Subtarefa não encontrada na tarefa "${task.title}". Verifique o subtask_id.` };
   }
 
   const updatedSubs = subs.map(s =>
@@ -1316,7 +1316,7 @@ async function executeSubtaskToggle(args, userId) {
 
   if (updateErr) throw new Error(`Falha ao atualizar subtarefa: ${updateErr.message}`);
 
-  const action = parsed.completed ? 'conclu├¡da' : 'desmarcada';
+  const action = parsed.completed ? 'concluída' : 'desmarcada';
   return {
     success: true,
     task_title: task.title,
@@ -1329,13 +1329,13 @@ async function executeSubtaskToggle(args, userId) {
   };
 }
 
-// ÔöÇÔöÇ Mem├│ria de Longo Prazo & Segundo C├®rebro ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ÔöÇÔöÇ Memória de Longo Prazo & Segundo Cérebro ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 async function executeMemorySave(args, userId) {
   const { memory_type, content, summary, entities, tags, importance } = args;
 
   if (!content) {
-    return { success: false, _hint: 'Conte├║do da mem├│ria ├® obrigat├│rio. Pergunte o que o usu├írio quer guardar.' };
+    return { success: false, _hint: 'Conteúdo da memória é obrigatório. Pergunte o que o usuário quer guardar.' };
   }
 
   const result = await saveMemory(userId, {
@@ -1349,12 +1349,12 @@ async function executeMemorySave(args, userId) {
   });
 
   if (!result) {
-    return { success: false, _hint: 'Erro ao salvar mem├│ria. Diga ao usu├írio para tentar novamente.' };
+    return { success: false, _hint: 'Erro ao salvar memória. Diga ao usuário para tentar novamente.' };
   }
 
   return {
     success: true,
-    _hint: `Mem├│ria salva: "${summary || content.substring(0, 50)}". RESPONDA como um amigo responderia numa conversa de WhatsApp - reaja ao que a pessoa DISSE, n├úo ao fato de ter salvado. Se ela se apresentou, responda a apresenta├º├úo ("Fala Gustavo! Massa, dev tamb├®m aqui haha. No que posso te ajudar?"). Se contou um fato pessoal, reaja a ele naturalmente. NUNCA diga "anotei essa informa├º├úo" ou "guardei isso" - aja como se fosse parte natural da conversa. Salvar na mem├│ria ├® INVIS├ìVEL pro usu├írio.`,
+    _hint: `Memória salva: "${summary || content.substring(0, 50)}". RESPONDA como um amigo responderia numa conversa de WhatsApp ÔÇö reaja ao que a pessoa DISSE, não ao fato de ter salvado. Se ela se apresentou, responda a apresentação ("Fala Gustavo! Massa, dev também aqui haha. No que posso te ajudar?"). Se contou um fato pessoal, reaja a ele naturalmente. NUNCA diga "anotei essa informação" ou "guardei isso" ÔÇö aja como se fosse parte natural da conversa. Salvar na memória é INVISÍVEL pro usuário.`,
   };
 }
 
@@ -1373,12 +1373,12 @@ async function executeMemoryRecall(args, userId) {
     });
   }
 
-  // Se n├úo encontrou, tenta buscar por entidade com o query
+  // Se não encontrou, tenta buscar por entidade com o query
   if (results.length === 0 && query) {
     results = await recallByEntity(userId, query, 3);
   }
 
-  // Tamb├®m busca entidades relevantes
+  // Também busca entidades relevantes
   let entityInfo = [];
   if (entity_name || query) {
     entityInfo = await getEntities(userId, { query: entity_name || query, limit: 3 });
@@ -1388,7 +1388,7 @@ async function executeMemoryRecall(args, userId) {
     return {
       success: true,
       found: false,
-      _hint: `N├úo encontrei nenhuma mem├│ria sobre "${query || entity_name}". Diga ao usu├írio de forma natural: "N├úo me lembro de nada sobre isso. Quer me contar pra eu guardar?"`,
+      _hint: `Não encontrei nenhuma memória sobre "${query || entity_name}". Diga ao usuário de forma natural: "Não me lembro de nada sobre isso. Quer me contar pra eu guardar?"`,
     };
   }
 
@@ -1411,7 +1411,7 @@ async function executeMemoryRecall(args, userId) {
     found: true,
     memories: memoriesFormatted,
     entities: entitiesFormatted,
-    _hint: `Encontrei ${results.length} mem├│ria(s) e ${entityInfo.length} entidade(s) sobre "${query || entity_name}". Use essas informa├º├Áes para responder ao usu├írio de forma NATURAL - como se voc├¬ realmente lembrasse. Ex: "Sim, lembro! Voc├¬ me contou que..." NUNCA liste mem├│rias como itens t├®cnicos. Integre na conversa.`,
+    _hint: `Encontrei ${results.length} memória(s) e ${entityInfo.length} entidade(s) sobre "${query || entity_name}". Use essas informações para responder ao usuário de forma NATURAL ÔÇö como se você realmente lembrasse. Ex: "Sim, lembro! Você me contou que..." NUNCA liste memórias como itens técnicos. Integre na conversa.`,
   };
 }
 
@@ -1419,7 +1419,7 @@ async function executeKnowledgeSave(args, userId) {
   const { category, title, content, entities, tags, pinned } = args;
 
   if (!title || !content) {
-    return { success: false, _hint: 'T├¡tulo e conte├║do s├úo obrigat├│rios. Pergunte o que o usu├írio quer anotar.' };
+    return { success: false, _hint: 'Título e conteúdo são obrigatórios. Pergunte o que o usuário quer anotar.' };
   }
 
   const result = await saveKnowledge(userId, {
@@ -1433,14 +1433,14 @@ async function executeKnowledgeSave(args, userId) {
   });
 
   if (!result) {
-    return { success: false, _hint: 'Erro ao salvar no segundo c├®rebro. Tente novamente.' };
+    return { success: false, _hint: 'Erro ao salvar no segundo cérebro. Tente novamente.' };
   }
 
   const categoryLabels = {
-    note: 'Anota├º├úo',
+    note: 'Anotação',
     idea: 'Ideia',
-    reference: 'Refer├¬ncia',
-    decision: 'Decis├úo',
+    reference: 'Referência',
+    decision: 'Decisão',
     contact: 'Contato',
     routine: 'Rotina',
   };
@@ -1450,7 +1450,7 @@ async function executeKnowledgeSave(args, userId) {
     entry_title: title,
     category_label: categoryLabels[category] || 'Nota',
     pinned: pinned || false,
-    _hint: `Salvo no segundo c├®rebro como ${categoryLabels[category] || 'nota'}: "${title}"${pinned ? ' (fixado - sempre vis├¡vel)' : ''}. Confirme ao usu├írio de forma natural. Ex: "Guardei! Quando precisar, ├® s├│ perguntar." NUNCA use emojis ou jarg├úo t├®cnico.`,
+    _hint: `Salvo no segundo cérebro como ${categoryLabels[category] || 'nota'}: "${title}"${pinned ? ' (fixado ÔÇö sempre visível)' : ''}. Confirme ao usuário de forma natural. Ex: "Guardei! Quando precisar, é só perguntar." NUNCA use emojis ou jargão técnico.`,
   };
 }
 
@@ -1473,7 +1473,7 @@ async function executeKnowledgeSearch(args, userId) {
           success: true,
           found: true,
           person_context: personCtx,
-          _hint: `Encontrei informa├º├Áes sobre "${entity}". Use o person_context para montar uma resposta natural sobre essa pessoa/projeto. Integre as informa├º├Áes como se voc├¬ conhecesse esse contexto.`,
+          _hint: `Encontrei informações sobre "${entity}". Use o person_context para montar uma resposta natural sobre essa pessoa/projeto. Integre as informações como se você conhecesse esse contexto.`,
         };
       }
     }
@@ -1481,7 +1481,7 @@ async function executeKnowledgeSearch(args, userId) {
     return {
       success: true,
       found: false,
-      _hint: `N├úo encontrei nada sobre "${query || entity}" no segundo c├®rebro. Diga ao usu├írio: "N├úo tenho nada anotado sobre isso. Quer que eu guarde alguma informa├º├úo?"`,
+      _hint: `Não encontrei nada sobre "${query || entity}" no segundo cérebro. Diga ao usuário: "Não tenho nada anotado sobre isso. Quer que eu guarde alguma informação?"`,
     };
   }
 
@@ -1499,7 +1499,7 @@ async function executeKnowledgeSearch(args, userId) {
     found: true,
     entries: formatted,
     count: results.length,
-    _hint: `Encontrei ${results.length} entrada(s) no segundo c├®rebro sobre "${query || entity}". Apresente as informa├º├Áes de forma NATURAL e organizada. Se for uma consulta espec├¡fica, d├¬ a resposta direta. Se listar, use formato leg├¡vel. NUNCA mostre JSON ou IDs.`,
+    _hint: `Encontrei ${results.length} entrada(s) no segundo cérebro sobre "${query || entity}". Apresente as informações de forma NATURAL e organizada. Se for uma consulta específica, dê a resposta direta. Se listar, use formato legível. NUNCA mostre JSON ou IDs.`,
   };
 }
 
@@ -1523,7 +1523,7 @@ function normalizeArgs(args) {
           normalized[key] = JSON.parse(trimmed);
           console.log(`[normalizeArgs] Parsed stringified ${key}`);
         } catch {
-          // N├úo ├® JSON v├ílido, mant├®m como string
+          // Não é JSON válido, mantém como string
         }
       }
     }
@@ -1579,23 +1579,23 @@ export async function executeTool(name, args, context) {
       case 'MemoryRecall': return await executeMemoryRecall(normalizedArgs, context.userId);
       case 'KnowledgeSave': return await executeKnowledgeSave(normalizedArgs, context.userId);
       case 'KnowledgeSearch': return await executeKnowledgeSearch(normalizedArgs, context.userId);
-      default: return { success: false, _hint: `Ferramenta "${name}" n├úo existe. Informe ao usu├írio que n├úo entendeu o pedido.` };
+      default: return { success: false, _hint: `Ferramenta "${name}" não existe. Informe ao usuário que não entendeu o pedido.` };
     }
   } catch (err) {
-    // Tratamento especial para erro de valida├º├úo (Zod)
+    // Tratamento especial para erro de validação (Zod)
     if (err instanceof z.ZodError) {
-      // Diferentes vers├Áes de Zod podem usar .issues ou .errors
+      // Diferentes versões de Zod podem usar .issues ou .errors
       const issues = err.issues || err.errors || [];
       const missingFields = issues.map(e => e.path.join('.')).join(', ');
 
-      console.error(`[Tool:${name}] Erro de valida├º├úo:`, missingFields);
+      console.error(`[Tool:${name}] Erro de validação:`, missingFields);
       return {
         success: false,
-        _hint: `Par├ómetros obrigat├│rios faltando ou inv├ílidos: ${missingFields}. Se voc├¬ n├úo tem o task_id, use TaskSearch ou TaskList para encontr├í-lo primeiro. N├âO mostre esse erro ao usu├írio.`
+        _hint: `Parâmetros obrigatórios faltando ou inválidos: ${missingFields}. Se você não tem o task_id, use TaskSearch ou TaskList para encontrá-lo primeiro. NÃO mostre esse erro ao usuário.`
       };
     }
 
     console.error(`[Tool:${name}] Erro:`, err.message);
-    return { success: false, _hint: `Houve um erro ao executar a a├º├úo. Diga ao usu├írio para tentar novamente. N├âO mostre detalhes t├®cnicos.` };
+    return { success: false, _hint: `Houve um erro ao executar a ação. Diga ao usuário para tentar novamente. NÃO mostre detalhes técnicos.` };
   }
 }

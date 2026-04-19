@@ -1343,7 +1343,7 @@ export async function queryEngineLoop(
 
   while (true) {
     try {
-      // Na 1┬¬ chamada com inten├º├úo de cria├º├úo, for├ºa a ferramenta diretamente (evita fallback)
+      // Na 1┬¬ chamada com intenção de criação, força a ferramenta diretamente (evita fallback)
       const isFirstCall = toolTurns === 0;
       const currentToolChoice = (preferredTool && isFirstCall)
         ? { type: 'function', function: { name: preferredTool } }
@@ -1393,7 +1393,7 @@ export async function queryEngineLoop(
           return limitMsg;
         }
 
-        // Remove campos n├úo-padr├úo (ex: reasoning_content do deepseek) incompat├¡veis com outros providers
+        // Remove campos não-padrão (ex: reasoning_content do deepseek) incompatíveis com outros providers
         const { reasoning_content, ...cleanAssistantMessage } = assistantMessage;
         messages.push(cleanAssistantMessage);
         toolTurns++;
@@ -1424,7 +1424,7 @@ export async function queryEngineLoop(
               }
             }
 
-            // SEMPRE sobrescreve timer_minutes com o valor extra├¡do por regex (mais preciso que o LLM)
+            // SEMPRE sobrescreve timer_minutes com o valor extraído por regex (mais preciso que o LLM)
             if (resolvedTimerMinutes) {
               if (toolCall.function.name === 'TaskCreate') {
                 if (args.timer_minutes && args.timer_minutes !== resolvedTimerMinutes) {
@@ -1452,7 +1452,7 @@ export async function queryEngineLoop(
               }
             }
 
-            // Injeta timer_at_override para hor├írios absolutos (mais preciso que timer_minutes)
+            // Injeta timer_at_override para horários absolutos (mais preciso que timer_minutes)
             if (resolvedTimerAt) {
               if (toolCall.function.name === 'TaskCreate') {
                 args.timer_at_override = resolvedTimerAt;
@@ -1460,7 +1460,7 @@ export async function queryEngineLoop(
               }
             }
 
-            // Salva a mensagem original do usu├írio para exibi├º├úo no painel web
+            // Salva a mensagem original do usuário para exibição no painel web
             if (toolCall.function.name === 'TaskCreate' || toolCall.function.name === 'TaskBatchCreate') {
               if (sourceChannel === 'whatsapp') {
                 args.whatsapp_message = userMessage;
@@ -1468,7 +1468,7 @@ export async function queryEngineLoop(
               args.source = sourceChannel === 'whatsapp' ? 'whatsapp' : 'user';
             }
 
-            // Injeta subtarefas se o modelo n├úo gerou nenhuma e a mensagem tem sub-t├│picos detect├íveis
+            // Injeta subtarefas se o modelo não gerou nenhuma e a mensagem tem sub-tópicos detectáveis
             if (toolCall.function.name === 'TaskCreate' && (!args.subtasks || args.subtasks.length === 0)) {
               const autoSubs = extractSubtasksFromMessage(userMessage);
               if (autoSubs.length >= 2) {
@@ -1481,14 +1481,14 @@ export async function queryEngineLoop(
             let result = await executeTool(toolCall.function.name, args, { userId });
             console.log(`[Agent] ÔåÉ ${toolCall.function.name}`, result.success ? 'Ô£à' : 'ÔØî');
 
-            // Auto-recovery: TaskUpdate/TaskDelete com UUID inv├ílido ou n├úo encontrado ÔåÆ
-            // busca pelo nome na mensagem do usu├írio e retenta com o ID real
+            // Auto-recovery: TaskUpdate/TaskDelete com UUID inválido ou não encontrado ÔåÆ
+            // busca pelo nome na mensagem do usuário e retenta com o ID real
             if (
               !result.success &&
               (toolCall.function.name === 'TaskUpdate' || toolCall.function.name === 'TaskDelete') &&
-              result._hint?.includes('n├úo encontrada')
+              result._hint?.includes('não encontrada')
             ) {
-              console.log(`[AutoRecover] ID inv├ílido em ${toolCall.function.name} - buscando por t├¡tulo...`);
+              console.log(`[AutoRecover] ID inválido em ${toolCall.function.name} ÔÇö buscando por título...`);
               // Extrai palavras-chave relevantes (remove stopwords curtas e limita tamanho)
               const searchQuery = userMessage.substring(0, 120).replace(/[,()!?]/g, ' ').replace(/\s+/g, ' ').trim();
               const searchResult = await executeTool('TaskSearch', { query: searchQuery }, { userId });
@@ -1518,8 +1518,8 @@ export async function queryEngineLoop(
 
         messages.push(...toolResults);
 
-        // Shortcircuit: se todas as ferramentas foram muta├º├Áes bem-sucedidas,
-        // gera a resposta em c├│digo e evita uma chamada LLM extra
+        // Shortcircuit: se todas as ferramentas foram mutações bem-sucedidas,
+        // gera a resposta em código e evita uma chamada LLM extra
         if (
           executedResults.length === 1 &&
           MUTATING_TOOLS.has(executedResults[0].toolName)
@@ -1529,7 +1529,7 @@ export async function queryEngineLoop(
           if (quick) {
             messages.push({ role: 'assistant', content: quick });
             await saveHistory(sessionId, messages.filter(m => m.role !== 'system'));
-            console.log(`[Shortcircuit] Resposta gerada em c├│digo para ${toolName}`);
+            console.log(`[Shortcircuit] Resposta gerada em código para ${toolName}`);
             return returnTelemetry ? { content: quick, telemetry: trace } : quick;
           }
         }
@@ -1537,27 +1537,27 @@ export async function queryEngineLoop(
         continue;
       }
 
-      // Safety net: se o modelo ainda assim n├úo chamou ferramenta com inten├º├úo clara,
-      // loga para diagn├│stico (n├úo deve acontecer pois for├ºamos na 1┬¬ chamada via preferredTool)
+      // Safety net: se o modelo ainda assim não chamou ferramenta com intenção clara,
+      // loga para diagnóstico (não deve acontecer pois forçamos na 1┬¬ chamada via preferredTool)
       if (toolTurns === 0 && preferredTool) {
-        console.warn(`[Fallback] tool_choice for├ºado mas modelo n├úo chamou ${preferredTool} - respondendo em texto`);
+        console.warn(`[Fallback] tool_choice forçado mas modelo não chamou ${preferredTool} ÔÇö respondendo em texto`);
       }
 
       // Resposta final — strip de bloco <think>...</think> de modelos de raciocínio (ex: Kimi K2.5)
       let finalContent = (assistantMessage.content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
-        || 'Pode repetir? N├úo entendi direito.';
+        || 'Pode repetir? Não entendi direito.';
 
       // Detecta artefatos internos do modelo (ex: "<´¢£toolÔûüsep´¢£>") na resposta final
-      // Quando presente, o modelo vazou sintaxe interna em vez de gerar texto - refaz com tool_choice: 'none'
+      // Quando presente, o modelo vazou sintaxe interna em vez de gerar texto ÔÇö refaz com tool_choice: 'none'
       const hasModelArtifacts = (s) => s.includes('<´¢£tool') || s.includes('toolÔûü') || s.includes('<tool_call>');
 
       if (hasModelArtifacts(finalContent)) {
-        console.warn('[QueryEngine] Resposta com artefatos detectada - refor├ºando resposta limpa');
+        console.warn('[QueryEngine] Resposta com artefatos detectada ÔÇö reforçando resposta limpa');
         try {
           const cleanMessages = messages.filter(m => !hasModelArtifacts(m.content || ''));
           cleanMessages.push({
             role: 'user',
-            content: '[SISTEMA: Responda ao usu├írio em portugu├¬s natural e direto. N├âO use sintaxe de ferramentas. Apenas texto simples, sem marca├º├Áes especiais.]',
+            content: '[SISTEMA: Responda ao usuário em português natural e direto. NÃO use sintaxe de ferramentas. Apenas texto simples, sem marcações especiais.]',
           });
           trace.artifact_recovery = true;
           const { response: retryResp, telemetry: retryTelemetry } = await createChatCompletion({
@@ -1573,7 +1573,7 @@ export async function queryEngineLoop(
         }
       }
 
-      // Sanitiza├º├úo final: remove JSON acidental, UUIDs, emojis e datas ISO que escaparam
+      // Sanitização final: remove JSON acidental, UUIDs, emojis e datas ISO que escaparam
       finalContent = finalContent
         .replace(/\{[^}]{20,}\}/g, '') // Remove objetos JSON
         .replace(/\[[^\]]{20,}\]/g, '') // Remove arrays JSON
@@ -1592,13 +1592,13 @@ export async function queryEngineLoop(
       console.error('[QueryEngine] Erro na chamada ao modelo:', err.message);
       trace.error_class = err.error_class || err.code || err.name || 'provider_error';
 
-      // Se for erro de rate limit ou timeout, retorna mensagem amig├ível
+      // Se for erro de rate limit ou timeout, retorna mensagem amigável
       if (err.status === 429) {
-        const content = `${userName}, t├┤ um pouco sobrecarregado agora. Tenta de novo em alguns segundinhos.`;
+        const content = `${userName}, tô um pouco sobrecarregado agora. Tenta de novo em alguns segundinhos.`;
         return returnTelemetry ? { content, telemetry: trace } : content;
       }
       if (err.error_class === 'timeout' || err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT') {
-        const content = `${userName}, parece que t├┤ com probleminhas de conex├úo. Tenta de novo daqui a pouco.`;
+        const content = `${userName}, parece que tô com probleminhas de conexão. Tenta de novo daqui a pouco.`;
         return returnTelemetry ? { content, telemetry: trace } : content;
       }
 
@@ -1608,14 +1608,14 @@ export async function queryEngineLoop(
   }
 }
 
-// Helper inline para sanitiza├º├úo de datas na resposta final
+// Helper inline para sanitização de datas na resposta final
 function humanizeDateInline(isoDate) {
   const todayISO = getTodayISO();
   const spDate = new Date(todayISO + 'T12:00:00-03:00');
   const tomorrow = new Date(spDate); tomorrow.setDate(spDate.getDate() + 1);
 
   if (isoDate === todayISO) return 'hoje';
-  if (isoDate === tomorrow.toISOString().split('T')[0]) return 'amanh├ú';
+  if (isoDate === tomorrow.toISOString().split('T')[0]) return 'amanhã';
 
   const [year, month, day] = isoDate.split('-').map(Number);
   const target = new Date(year, month - 1, day);
