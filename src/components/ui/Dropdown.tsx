@@ -50,24 +50,112 @@ export const Dropdown: React.FC<DropdownProps> = ({ isOpen, onClose, children, c
   )
 }
 
+import NumberFlow from '@number-flow/react'
+
 interface DropdownItemProps {
   icon?: React.ReactNode
   label: string
   onClick?: () => void
   variant?: 'default' | 'danger'
+  holdDuration?: number // Duração em ms para confirmar segurando
 }
 
-export const DropdownItem: React.FC<DropdownItemProps> = ({ icon, label, onClick, variant = 'default' }) => {
+export const DropdownItem: React.FC<DropdownItemProps> = ({ icon, label, onClick, variant = 'default', holdDuration }) => {
+  const [holdProgress, setHoldProgress] = React.useState(0)
+  const [isHolding, setIsHolding] = React.useState(false)
+  const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+  const startTimeRef = React.useRef<number>(0)
+
+  const startHold = (e: React.PointerEvent) => {
+    if (!holdDuration) return
+    e.stopPropagation()
+    setIsHolding(true)
+    startTimeRef.current = Date.now()
+    setHoldProgress(0)
+
+    timerRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTimeRef.current
+      const progress = Math.min((elapsed / holdDuration) * 100, 100)
+      setHoldProgress(progress)
+
+      if (progress >= 100) {
+        if (timerRef.current) clearInterval(timerRef.current)
+        setIsHolding(false)
+        setHoldProgress(0)
+        onClick?.()
+      }
+    }, 16)
+  }
+
+  const cancelHold = () => {
+    if (!holdDuration) return
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    setIsHolding(false)
+    setHoldProgress(0)
+  }
+
+  const secondsRemaining = holdDuration ? Math.max(0, Math.ceil((holdDuration - (holdProgress / 100) * holdDuration) / 1000)) : 0
+
   return (
     <button
-      onClick={(e) => { e.stopPropagation(); onClick?.() }}
-      className={`w-full flex items-center gap-2 px-3 py-2 text-[12.5px] font-medium rounded-[8px] transition-all text-left ${variant === 'danger'
+      onPointerDown={holdDuration ? startHold : undefined}
+      onPointerUp={holdDuration ? cancelHold : undefined}
+      onPointerLeave={holdDuration ? cancelHold : undefined}
+      onClick={!holdDuration ? (e) => { e.stopPropagation(); onClick?.() } : undefined}
+      className={`relative w-full flex items-center gap-2 px-3 py-2 text-[12.5px] font-medium rounded-[8px] transition-all text-left overflow-hidden select-none touch-none ${variant === 'danger'
         ? 'text-[#eb5757] hover:bg-[#eb5757]/[0.05]'
         : 'text-[#37352f] hover:bg-[#000000]/[0.02]'
         }`}
     >
-      {icon && <span className={`flex-shrink-0 ${variant === 'danger' ? 'text-[#eb5757]' : 'text-[#37352f]/40'}`}>{icon}</span>}
-      <span className="truncate">{label}</span>
+      {/* Preenchimento de fundo rítmico e minimalista */}
+      {holdDuration && (
+        <motion.div 
+          initial={false}
+          animate={{ 
+            width: `${Math.ceil(holdProgress / (100 / 5)) * (100 / 5)}%`,
+            opacity: isHolding ? 1 : 0 
+          }}
+          transition={{
+            width: { type: "spring", stiffness: 300, damping: 25 },
+            opacity: { duration: 0.2 }
+          }}
+          className="absolute inset-y-0 left-0 bg-green-500/10 pointer-events-none"
+        />
+      )}
+
+      <AnimatePresence mode="wait">
+        {isHolding ? (
+          <motion.div 
+            key="holding"
+            initial={{ opacity: 0, y: 3 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -3 }}
+            transition={{ duration: 0.15 }}
+            className="flex-1 flex items-center justify-center gap-1 z-10"
+          >
+            <span className="text-[11px] font-semibold text-green-600/80">Segure</span>
+            <NumberFlow 
+              value={secondsRemaining} 
+              className="text-[12px] font-bold text-green-600 tabular-nums"
+            />
+          </motion.div>
+        ) : (
+          <motion.div 
+            key="normal"
+            initial={{ opacity: 0, y: -3 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 3 }}
+            transition={{ duration: 0.15 }}
+            className="flex-1 flex items-center gap-2 min-w-0 z-10"
+          >
+            {icon && <span className={`flex-shrink-0 ${variant === 'danger' ? 'text-[#eb5757]' : 'text-[#37352f]/40'}`}>{icon}</span>}
+            <span className="truncate">{label}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </button>
   )
 }

@@ -910,8 +910,6 @@ const LoginPage: React.FC = () => {
               transparent
             />
           </div>
-          <div className="absolute top-0 right-0 w-full h-full opacity-[0.03]"
-            style={{ backgroundImage: 'radial-gradient(#37352f 1px, transparent 1px)', backgroundSize: '32px 32px' }} />
 
           {/* Máscara de legibilidade para o centro */}
           <div className="absolute inset-0 z-[1] bg-[radial-gradient(circle_at_center,#f7f7f5_20%,transparent_80%)] pointer-events-none opacity-80" />

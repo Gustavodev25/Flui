@@ -21,6 +21,7 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import ThankYouModal from './components/ThankYouModal'
 import WhatsAppOnboardingModal from './components/WhatsAppOnboardingModal'
 import { AdminPanel } from './pages/AdminPanel'
+import { AdminChatSimulator } from './pages/AdminChatSimulator'
 
 function WhatsAppChecker({ onNeedWhatsApp }: { onNeedWhatsApp: () => void }) {
   const { user } = useAuth()
@@ -123,6 +124,7 @@ function App() {
             <WhatsAppChecker onNeedWhatsApp={() => setShowWhatsAppOnboarding(true)} />
             <Routes>
               <Route path="/admin" element={<AdminPanel />} />
+              <Route path="/admin/chat-simulator" element={<AdminChatSimulator />} />
               <Route path="/invite" element={<InvitePage />} />
               <Route path="/login" element={<LoginPage />} />
               

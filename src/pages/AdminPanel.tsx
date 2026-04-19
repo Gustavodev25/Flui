@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
+import { AdminChatSimulator } from './AdminChatSimulator';
 import {
   ShieldAlert, Search, Users, LogOut, ArrowRight, ShieldCheck,
   MessageSquare, CheckSquare, MessageCircle, Bot, User as UserIcon,
@@ -10,6 +11,7 @@ import {
 import logo from '../assets/logo/logo.svg';
 import luiLogo from '../assets/logo/lui.svg';
 import { motion, AnimatePresence } from 'framer-motion';
+import PixelBlast from '../components/ui/PixelBlast';
 
 interface User {
   id: string;
@@ -63,7 +65,7 @@ interface MessagesResponse {
   totalPages: number;
 }
 
-type AdminTab = 'users' | 'messages';
+type AdminTab = 'users' | 'messages' | 'simulator';
 
 export function AdminPanel() {
   const [password, setPassword] = useState('');
@@ -172,18 +174,23 @@ export function AdminPanel() {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-white text-[#37352f] font-sans selection:bg-[#37352f]/10 relative overflow-hidden flex flex-col">
-        {/* Background Grid Moderno */}
-        <div className="absolute top-0 left-0 w-full h-[1000px] pointer-events-none z-0 overflow-hidden opacity-50">
-          <div className="absolute inset-0"
-            style={{
-              backgroundImage: `
-                linear-gradient(to right, rgba(55, 53, 47, 0.05) 1px, transparent 1px),
-                linear-gradient(to bottom, rgba(55, 53, 47, 0.05) 1px, transparent 1px)
-              `,
-              backgroundSize: '40px 40px',
-              maskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)',
-              WebkitMaskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)'
-            }}
+        {/* Background Pixel Blast Moderno no Topo */}
+        <div className="absolute top-0 left-0 w-full h-[800px] pointer-events-none z-0 overflow-hidden opacity-40"
+          style={{
+            maskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)',
+            WebkitMaskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)'
+          }}
+        >
+          <PixelBlast
+            variant="square"
+            pixelSize={3}
+            color="#cdcdc9"
+            patternScale={4}
+            patternDensity={0.6}
+            enableRipples
+            rippleSpeed={0.3}
+            speed={0.3}
+            transparent
           />
         </div>
 
@@ -206,38 +213,39 @@ export function AdminPanel() {
             transition={{ duration: 0.6 }}
             className="w-full max-w-[420px]"
           >
-            <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-10 shadow-sm relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-full h-full opacity-[0.03]"
-                style={{ backgroundImage: 'radial-gradient(#37352f 1px, transparent 1px)', backgroundSize: '16px 16px' }} />
-
-              <div className="flex items-center justify-center mb-6 relative z-10">
-                <div className="w-16 h-16 bg-white border border-[#e9e9e7] rounded-2xl shadow-sm flex items-center justify-center rotate-3">
-                  <ShieldAlert className="text-[#37352f]/80 w-8 h-8" />
-                </div>
+            <div className="relative z-10">
+              <div className="mb-8 p-3 w-14 h-14 bg-white border border-[#e9e9e7] rounded-xl flex items-center justify-center shadow-sm">
+                <ShieldAlert className="text-[#37352f]/40 w-7 h-7" />
               </div>
               
-              <div className="text-center mb-8 relative z-10">
-                <h1 className="text-3xl font-extrabold tracking-tight text-[#202020] mb-2">Painel Restrito</h1>
-                <p className="text-[#37352f]/60 font-medium text-sm">Insira sua senha de administração para gerenciar a plataforma.</p>
+              <div className="mb-6 flex flex-col items-start text-left">
+                <h1 className="text-2xl font-bold tracking-tight mb-2 text-[#202020]">
+                  Painel Restrito
+                </h1>
+                <p className="text-sm text-[#37352f]/40 font-medium leading-relaxed">
+                  Insira sua senha de administração para gerenciar a plataforma com segurança.
+                </p>
               </div>
 
-              <form onSubmit={handleLogin} className="space-y-5 relative z-10">
-                <div>
-                  <label className="block text-sm font-bold text-[#37352f]/80 mb-2">
-                    Senha Administrativa
-                  </label>
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[12px] font-medium text-[#37352f]/40">Senha Administrativa</label>
                   <input
                     type="password"
+                    placeholder="Sua senha segura"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-white border border-[#e9e9e7] rounded-xl px-4 py-3.5 text-[#37352f] font-medium shadow-sm focus:outline-none focus:border-[#202020] focus:ring-1 focus:ring-[#202020] transition-all"
-                    placeholder="Sua senha segura"
+                    className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2.5 px-3.5 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
                     required
                   />
                 </div>
 
                 {error && (
-                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-red-500 text-sm font-medium text-center">
+                  <motion.p 
+                    initial={{ opacity: 0, y: -4 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    className="text-red-500 text-[12px] font-medium"
+                  >
                     {error}
                   </motion.p>
                 )}
@@ -245,10 +253,11 @@ export function AdminPanel() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3.5 bg-[#202020] text-white text-sm font-bold rounded-xl hover:bg-[#30302E] transition-all flex items-center justify-center gap-2 shadow-md shadow-[#202020]/10 hover:shadow-[#202020]/20 disabled:opacity-50"
+                  className="w-full bg-[#202020] hover:bg-[#202020]/90 disabled:opacity-70 text-white font-medium py-2.5 rounded-[6px] transition-all mt-4 shadow-md shadow-black/5 flex items-center justify-center h-[38px] relative overflow-hidden"
                 >
-                  {loading ? 'Acessando...' : 'Entrar na área segura'}
-                  {!loading && <ArrowRight className="w-4 h-4" />}
+                  <span className="text-sm font-medium">
+                    {loading ? 'Acessando...' : 'Acessar Painel'}
+                  </span>
                 </button>
               </form>
             </div>
@@ -303,73 +312,104 @@ export function AdminPanel() {
   };
 
   return (
-    <div className="min-h-screen bg-white text-[#37352f] font-sans selection:bg-[#37352f]/10 relative">
-      
-      {/* Background Decorativo */}
-      <div className="fixed top-0 left-0 w-full h-[600px] pointer-events-none z-0 opacity-30">
-        <div className="absolute inset-0"
-          style={{
-            backgroundImage: `linear-gradient(to bottom, rgba(55, 53, 47, 0.05) 1px, transparent 1px)`,
-            backgroundSize: '100% 40px',
-            maskImage: 'linear-gradient(to bottom, black 0%, transparent 100%)',
-            WebkitMaskImage: 'linear-gradient(to bottom, black 0%, transparent 100%)'
-          }}
+    <div className="h-screen bg-white text-[#37352f] font-sans selection:bg-[#37352f]/10 relative overflow-hidden flex flex-col">
+      {/* Background Decoration - Only at the top */}
+      <div className="absolute inset-x-0 top-0 h-[500px] z-0 pointer-events-none overflow-hidden bg-[#f7f7f5]">
+        <PixelBlast 
+          count={12}
+          color="#202020"
+          size={120}
+          speed={0.2}
+          className="opacity-[0.03]"
         />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#f7f7f5]/50 to-white" />
       </div>
 
       {/* ═══════════ TOP BAR ═══════════ */}
-      <div className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-[#e9e9e7]">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="flex items-center justify-between h-16">
-            {/* Left: Logo + Title */}
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl flex items-center justify-center shadow-sm -rotate-3">
-                <ShieldCheck className="text-[#202020] w-4.5 h-4.5" />
-              </div>
-              <div>
-                <h1 className="text-lg font-extrabold tracking-tight text-[#202020] leading-none">Painel Admin</h1>
-              </div>
+      <header className="sticky top-0 z-50 bg-white/10 backdrop-blur-md border-b border-[#e9e9e7]">
+        <div className={`${activeTab === 'simulator' ? 'w-full px-6' : 'max-w-6xl mx-auto px-6'} py-4 transition-all duration-300`}>
+          <div className="flex items-center justify-between">
+            {/* Left: Logo (Igual LP) */}
+            <div className="flex items-center gap-2">
+              <img src={logo} alt="Flui Logo" className="w-8 h-8 object-contain" />
+              <span className="text-xl font-bold tracking-tight text-[#202020]">flui.</span>
             </div>
 
-            {/* Center: Navigation Tabs */}
-            <nav className="flex items-center gap-1 bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl p-1">
+            {/* Center: Navigation Tabs (Style refined) - More robust than absolute position */}
+            <nav className="hidden lg:flex items-center gap-1 bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl p-1">
               <button
                 onClick={() => setActiveTab('users')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
                   activeTab === 'users'
                     ? 'bg-white text-[#202020] shadow-sm border border-[#e9e9e7]'
                     : 'text-[#37352f]/50 hover:text-[#37352f]/80'
                 }`}
               >
-                <Users size={15} />
+                <Users size={14} />
                 Usuários
               </button>
               <button
                 onClick={() => setActiveTab('messages')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
                   activeTab === 'messages'
                     ? 'bg-white text-[#202020] shadow-sm border border-[#e9e9e7]'
                     : 'text-[#37352f]/50 hover:text-[#37352f]/80'
                 }`}
               >
-                <MessageSquare size={15} />
+                <MessageSquare size={14} />
                 Mensagens
+              </button>
+              <button
+                onClick={() => setActiveTab('simulator')}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeTab === 'simulator'
+                    ? 'bg-white text-[#202020] shadow-sm border border-[#e9e9e7]'
+                    : 'text-[#37352f]/50 hover:text-[#37352f]/80'
+                }`}
+              >
+                <Bot size={14} />
+                Simulador
               </button>
             </nav>
 
-            {/* Right: Logout */}
-            <button 
-              onClick={() => { setIsAuthenticated(false); setPassword(''); }}
-              className="px-4 py-2 bg-white text-[#37352f] text-sm font-bold rounded-xl hover:bg-[#f7f7f5] border border-[#e9e9e7] shadow-sm transition-all flex items-center gap-2"
-            >
-              <LogOut className="w-4 h-4" />
-              Sair
-            </button>
+            {/* Right: Logout & Mobile Menu */}
+            <div className="flex items-center gap-3">
+              {/* Mobile menu (tabs) simplified for admin */}
+              <div className="lg:hidden flex items-center gap-1 bg-[#f7f7f5] border border-[#e9e9e7] rounded-lg p-1 mr-2">
+                <button 
+                  onClick={() => setActiveTab('users')}
+                  className={`p-1.5 rounded-md ${activeTab === 'users' ? 'bg-white shadow-sm' : 'text-[#37352f]/40'}`}
+                >
+                  <Users size={16} />
+                </button>
+                <button 
+                  onClick={() => setActiveTab('messages')}
+                  className={`p-1.5 rounded-md ${activeTab === 'messages' ? 'bg-white shadow-sm' : 'text-[#37352f]/40'}`}
+                >
+                  <MessageSquare size={16} />
+                </button>
+                <button 
+                  onClick={() => setActiveTab('simulator')}
+                  className={`p-1.5 rounded-md ${activeTab === 'simulator' ? 'bg-white shadow-sm' : 'text-[#37352f]/40'}`}
+                >
+                   <Bot size={16} />
+                </button>
+              </div>
+
+              <button 
+                onClick={() => { setIsAuthenticated(false); setPassword(''); }}
+                className="px-4 py-2 bg-[#202020] text-white text-[11px] font-bold uppercase tracking-wider rounded-xl hover:bg-[#30302E] shadow-sm transition-all flex items-center gap-2"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sair
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className="max-w-6xl mx-auto px-6 py-8 relative z-10">
+      {/* Content Area */}
+      <div className={`flex-1 overflow-hidden ${activeTab === 'simulator' ? 'w-full px-0' : 'w-full max-w-6xl mx-auto px-6 py-8 overflow-y-auto custom-scrollbar'} relative z-10 transition-all duration-300`}>
         
         <AnimatePresence mode="wait">
           {/* ═══════════ ABA USUÁRIOS ═══════════ */}
@@ -566,6 +606,20 @@ export function AdminPanel() {
                   </div>
                 </div>
               )}
+            </motion.div>
+          )}
+          
+          {/* ═══════════ ABA SIMULADOR ═══════════ */}
+          {activeTab === 'simulator' && (
+            <motion.div
+              key="simulator"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="w-full h-full"
+            >
+              <AdminChatSimulator isEmbedded={true} />
             </motion.div>
           )}
 

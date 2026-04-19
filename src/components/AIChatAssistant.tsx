@@ -218,7 +218,7 @@ const AIChatAssistant: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-[#37352f]">Assistente IA</h3>
-                  {!isMinimized && <p className="text-[10px] text-[#25D366] font-bold tracking-widest">Kimi K2.5 Ativo</p>}
+                  {!isMinimized && <p className="text-[10px] text-[#25D366] font-bold tracking-widest">Llama 3 70B Ativo</p>}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -307,7 +307,7 @@ const AIChatAssistant: React.FC = () => {
                     </button>
                   </div>
                   <p className="text-[9px] text-center mt-3 text-[#37352f]/30 font-bold tracking-tighter">
-                    Powered by NVIDIA NIM & Kimi-K2.5
+                    Powered by NVIDIA NIM & Llama 3 70B
                   </p>
                 </div>
               </>

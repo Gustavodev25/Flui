@@ -13,6 +13,7 @@ import TaskDetailModal from '../components/TaskDetailModal'
 import { Dropdown, DropdownItem, DropdownDivider } from '../components/ui/Dropdown'
 import DeleteConfirmation from '../components/ui/DeleteConfirmation'
 import { Loading } from '../components/ui/Loading'
+import { InfiniteRibbon } from '../components/ui/infinite-ribbon'
 import swingingDoodle from '../assets/doodles/SwingingDoodle.png'
 import finlozLogo from '../assets/logo/lui.svg'
 import {
@@ -137,30 +138,52 @@ const getPriorityColor = (priority: Task['priority']) => {
 
 // Componente para o Card da Tarefa
 const TaskCardUI = React.forwardRef<HTMLDivElement, {
-  task: Task
-  isDragging?: boolean
-  isOverlay?: boolean
-  dragHandleProps?: any
-  style?: React.CSSProperties
-  onEdit: (task: Task) => void
-  onDelete: (id: string) => void
-  activeDropdownId: string | null
-  setActiveDropdownId: (id: string | null) => void
-  userEmail?: string
-  isPending?: boolean
-  pendingTarget?: Task['status']
-  onConfirm?: () => void
-  onCancel?: () => void
-  onToggleSubtask?: (taskId: string, subtaskId: string) => void
-  onStopTimer?: (taskId: string) => void
-  onCardClick?: (task: Task) => void
-  isWorkspaceView?: boolean
-  onMoveVisibility?: (taskId: string, newVisibility: 'personal' | 'workspace') => void
-  canMoveVisibility?: boolean
-  isExiting?: boolean
-}>(({ task, isDragging, isOverlay, dragHandleProps, style, onEdit, onDelete, activeDropdownId, setActiveDropdownId, userEmail, isPending, pendingTarget, onConfirm, onCancel, onToggleSubtask, onStopTimer, onCardClick, isWorkspaceView, onMoveVisibility, canMoveVisibility, isExiting }, ref) => {
+  task: Task;
+  isDragging?: boolean;
+  isOverlay?: boolean;
+  dragHandleProps?: any;
+  style?: React.CSSProperties;
+  onEdit: (task: Task) => void;
+  onDelete: (id: string) => void;
+  activeDropdownId: string | null;
+  setActiveDropdownId: (id: string | null) => void;
+  userEmail?: string;
+  isPending?: boolean;
+  pendingTarget?: Task['status'];
+  onConfirm?: () => void;
+  onCancel?: () => void;
+  onToggleSubtask?: (taskId: string, subtaskId: string) => void;
+  onStopTimer?: (taskId: string) => void;
+  onCardClick?: (task: Task) => void;
+  isWorkspaceView?: boolean;
+  onMoveVisibility?: (taskId: string, newVisibility: 'personal' | 'workspace') => void;
+  canMoveVisibility?: boolean;
+  isExiting?: boolean;
+}>(({ 
+  task, 
+  isDragging, 
+  isOverlay, 
+  dragHandleProps, 
+  style, 
+  onEdit, 
+  onDelete, 
+  activeDropdownId, 
+  setActiveDropdownId, 
+  userEmail, 
+  isPending, 
+  pendingTarget, 
+  onConfirm, 
+  onCancel, 
+  onToggleSubtask, 
+  onStopTimer, 
+  onCardClick, 
+  isWorkspaceView, 
+  onMoveVisibility, 
+  canMoveVisibility, 
+  isExiting 
+}, ref) => {
 
-  const [isSubtasksExpanded, setIsSubtasksExpanded] = useState(false)
+  const [isSubtasksExpanded, setIsSubtasksExpanded] = useState(false);
 
   // Countdown em tempo real (tick a cada 1s) — apenas para tarefas com timer_at (ex: criadas pelo WhatsApp)
   const effectiveTimerAt = task.timerAt || null;
@@ -241,15 +264,11 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
             ? { duration: 0.18, ease: [0.4, 0, 1, 1] }
             : { duration: 0.28, ease: [0, 0, 0.2, 1] }
         }
-        className={`w-full transition-all duration-300 ${isOverlay ? 'z-50' : ''}`}
+        className={`relative w-full transition-all duration-300 ${isOverlay ? 'z-50' : ''}`}
       >
-        {/* 1. CARD PRINCIPAL */}
-        <div
-          onClick={() => { if (!isDragging && !isOverlay && onCardClick) { onCardClick(task) } }}
-          className={`relative z-10 p-5 rounded-2xl transition-all duration-200 ease-out ${cardStateClasses}`}>
-
-          {/* TAG DE AUTORIA (Lui ou Usuário) - Top Right com estilo inclinado do Recente */}
-          <div className="absolute -top-2.5 -right-2 bg-white border border-[#e9e9e7] px-2 py-0.5 rounded-md shadow-sm z-40 flex items-center gap-1.5 select-none pointer-events-none rotate-[4deg] group-hover:rotate-[6deg] transition-transform duration-300">
+        {/* TAG DE AUTORIA (Lui ou Usuário) - Fora do overflow-hidden */}
+        {!isPlaceholder && (
+          <div className="absolute -top-2.5 -right-2 bg-white border border-[#e9e9e7] px-2 py-0.5 rounded-md shadow-sm z-50 flex items-center gap-1.5 select-none pointer-events-none rotate-[4deg] group-hover:rotate-[6deg] transition-transform duration-300">
             {task.source === 'whatsapp' ? (
               <>
                 <img src={finlozLogo} alt="Finloz" className="w-2.5 h-2.5 object-contain grayscale opacity-70" />
@@ -270,301 +289,289 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
               </>
             )}
           </div>
+        )}
+        {/* 1. CARD PRINCIPAL */}
+        <div
+          onClick={() => { if (!isDragging && !isOverlay && onCardClick) { onCardClick(task) } }}
+          className={`relative z-10 rounded-2xl transition-all duration-200 ease-out ${cardStateClasses}`}>
+          
+          {/* Fundo do card */}
+          <div className="absolute inset-0 bg-white rounded-2xl" />
 
-          {/* Overlay de confirmação de alteração */}
-          {isPending && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="absolute inset-0 z-30 bg-white rounded-2xl flex items-center justify-center gap-6 px-4"
-            >
-              <span className="text-[13px] font-bold text-[#37352f] tracking-tight">
-                {pendingTarget === 'done' ? 'Concluir?' : 'Mudar?'}
-              </span>
-              <div className="flex items-center gap-4">
-                <button
-                  onPointerDown={e => e.stopPropagation()}
-                  onClick={e => { e.stopPropagation(); onCancel?.() }}
-                  className="text-[11px] font-bold text-[#37352f]/30 hover:text-[#37352f]/60 transition-colors"
-                >Não</button>
-                <button
-                  onPointerDown={e => e.stopPropagation()}
-                  onClick={e => { e.stopPropagation(); onConfirm?.() }}
-                  className="px-4 py-1.5 rounded-lg text-[11px] font-bold text-white bg-[#202020] hover:bg-black transition-all"
-                >Sim</button>
-              </div>
-            </motion.div>
-          )}
+          {/* Conteúdo do card - Todo ele será esmaecido se cancelado */}
+          <div className={`relative z-10 p-5 transition-all duration-500 ${task.status === 'canceled' ? 'opacity-[0.05] grayscale-[1] blur-[1px] scale-[0.98]' : ''}`}>
 
-          {/* Cabeçalho */}
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div className="flex items-start gap-2 flex-1 min-w-0">
-              {task.status === 'done' && (
-                <CheckCircle2 size={16} className="text-[#1a1a1a] mt-0.5 flex-shrink-0" strokeWidth={2.5} />
-              )}
-              <h4 className={`text-[15px] font-semibold leading-snug line-clamp-2 transition-all ${task.status === 'done' ? 'text-[#37352f]/40' : 'text-[#37352f]'}`}>
-                {task.title}
-              </h4>
-            </div>
-
-            <div className="flex items-center gap-2 flex-shrink-0 -mt-0.5">
-              <div className="relative -mr-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setActiveDropdownId(activeDropdownId === task.id ? null : task.id)
-                  }}
-                  className="p-1 hover:bg-[#000000]/[0.05] rounded-md transition-colors text-[#37352f]/30 hover:text-[#37352f]"
-                >
-                  <MoreHorizontal size={16} className="flex-shrink-0" />
-                </button>
-
-                <Dropdown
-                  isOpen={activeDropdownId === task.id}
-                  onClose={() => setActiveDropdownId(null)}
-                  className="w-[148px]"
-                >
-                  <DropdownItem
-                    icon={<Edit2 size={12} />}
-                    label="Editar"
-                    onClick={() => onEdit(task)}
-                  />
-                  {canMoveVisibility && task.visibility === 'personal' && (
-                    <DropdownItem
-                      icon={<Users size={12} />}
-                      label="Para Workspace"
-                      onClick={() => onMoveVisibility?.(task.id, 'workspace')}
-                    />
-                  )}
-                  {canMoveVisibility && task.visibility === 'workspace' && (
-                    <DropdownItem
-                      icon={<Lock size={12} />}
-                      label="Para Pessoal"
-                      onClick={() => onMoveVisibility?.(task.id, 'personal')}
-                    />
-                  )}
-                  <DropdownDivider />
-                  <DropdownItem
-                    icon={<Trash2 size={12} />}
-                    label="Excluir"
-                    variant="danger"
-                    onClick={() => onDelete(task.id)}
-                  />
-                </Dropdown>
-              </div>
-            </div>
-          </div>
-
-          {/* Tags e Fonte/Avatar */}
-          <div className="flex items-center justify-between gap-2 mb-1">
-            {/* Workspace badge (esquerda) */}
-            {isWorkspaceView && task.visibility === 'workspace' && (
-              <div className="flex items-center gap-1 opacity-50">
-                <Users size={10} className="text-[#37352f]" />
-                {task.authorName && task.authorEmail !== userEmail && (
-                  <span className="text-[9px] font-semibold text-[#37352f]/60 truncate max-w-[80px]">{task.authorName}</span>
-                )}
-              </div>
-            )}
-            {!isWorkspaceView && task.visibility === 'workspace' && (
-              <div className="flex items-center gap-1 opacity-40" title="Tarefa compartilhada no workspace">
-                <Users size={10} className="text-[#37352f]" />
-              </div>
-            )}
-            {task.visibility === 'personal' && <div />}
-
-            {/* Avatares: responsável (Direita) */}
-            <div className="flex items-center gap-[-4px] flex-shrink-0">
-              {/* Assignee badge */}
-              {task.assignedToId && (
-                <div
-                  className="border-2 border-white rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white z-10"
-                  title={`Responsável: ${task.assignedToName || 'Membro'}`}
-                  style={{ width: 20, height: 20 }}
-                >
-                  {task.assignedToAvatar
-                    ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                    : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={20} style="character" />
-                  }
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 1.1 SUBTAREFAS EXPANDIDAS (Dentro do corpo do card) */}
-          <AnimatePresence>
-            {isSubtasksExpanded && (
+            {/* Overlay de confirmação de alteração */}
+            {isPending && (
               <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-                className="overflow-hidden"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="absolute inset-0 z-30 bg-white rounded-2xl flex items-center justify-center gap-6 px-4"
               >
-                <div className="pt-2 pb-1 space-y-1.5 border-t border-[#e9e9e7]/60 mt-2">
-                  <div className="flex items-center justify-between mb-2 px-1">
-                    <span className="text-[10px] font-bold text-[#37352f]/30 uppercase tracking-widest">Subtarefas</span>
-                    <motion.span
-                      animate={task.subtasks?.every(s => s.completed) ? { scale: [1, 1.15, 1], transition: { duration: 0.4 } } : {}}
-                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md transition-all duration-500 ${task.subtasks?.every(s => s.completed) ? 'text-[#2b8a3e] bg-[#e7f5e9] ring-1 ring-[#2b8a3e]/20 shadow-sm' : 'text-white bg-[#1a1a1a]'}`}
-                    >
-                      {task.subtasks?.filter(s => s.completed).length}/{task.subtasks?.length}
-                    </motion.span>
-                  </div>
-                  <div className="space-y-1">
-                    {task.subtasks?.map((subtask) => (
-                      <motion.div
-                        key={subtask.id}
-                        initial={{ x: -10, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onToggleSubtask?.(task.id, subtask.id)
-                        }}
-                        className="flex items-center gap-2.5 group/sub cursor-pointer p-2 hover:bg-[#f7f7f5] rounded-xl transition-all border border-transparent hover:border-[#e9e9e7]/40"
-                      >
-                        <div className={`transition-all duration-200 flex-shrink-0 ${subtask.completed ? 'text-[#1a1a1a] scale-110' : 'text-[#37352f]/20 group-hover/sub:text-[#37352f]/40'}`}>
-                          {subtask.completed ? <CheckCircle2 size={16} strokeWidth={2.5} /> : <Circle size={16} strokeWidth={2} />}
-                        </div>
-                        <span className={`text-[11px] font-semibold transition-all line-clamp-2 ${subtask.completed ? 'text-[#37352f]/30 line-through font-medium' : 'text-[#37352f]'}`}>
-                          {subtask.title}
-                        </span>
-                      </motion.div>
-                    ))}
-                  </div>
+                <span className="text-[13px] font-bold text-[#37352f] tracking-tight">
+                  {pendingTarget === 'done' ? 'Concluir?' : 'Mudar?'}
+                </span>
+                <div className="flex items-center gap-4">
+                  <button
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); onCancel?.() }}
+                    className="text-[11px] font-bold text-[#37352f]/30 hover:text-[#37352f]/60 transition-colors"
+                  >Não</button>
+                  <button
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); onConfirm?.() }}
+                    className="px-4 py-1.5 rounded-lg text-[11px] font-bold text-white bg-[#202020] hover:bg-black transition-all"
+                  >Sim</button>
                 </div>
               </motion.div>
             )}
-          </AnimatePresence>
 
-          {/* Footer: meta info inside card */}
-          {!isPlaceholder && (() => {
-            const days = getDaysUntilDue(task.dueDate)
-            const isDone = task.status === 'done' || task.status === 'canceled'
-
-            const priorityGlow = task.priority === 'high'
-              ? 'rgba(239,68,68,0.13)'
-              : task.priority === 'medium'
-                ? 'rgba(245,158,11,0.11)'
-                : null
-
-            const dateGlow = isDone || formatDate(task.dueDate) === 'Sem prazo' ? null
-              : days !== null && days < 0  ? 'rgba(239,68,68,0.15)'
-              : days === 0                 ? 'rgba(248,113,113,0.13)'
-              : days === 1                 ? 'rgba(249,115,22,0.13)'
-              : days !== null && days <= 3 ? 'rgba(245,158,11,0.11)'
-              : null
-
-            const dateColor = isDone
-              ? 'text-[#37352f]/25'
-              : days !== null && days < 0  ? 'text-red-500'
-              : days === 0                 ? 'text-red-400'
-              : days === 1                 ? 'text-orange-500'
-              : days !== null && days <= 3 ? 'text-amber-500'
-              : 'text-[#37352f]/30'
-
-            return (
-              <div className="flex items-center -mx-5 -mb-5 mt-3 px-4 py-2 border-t border-[#f1f1f0] rounded-b-2xl relative overflow-hidden">
-
-                {/* Glow canto esquerdo — prioridade */}
-                {priorityGlow && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ 
-                      opacity: [0.4, 0.7, 0.4],
-                      scale: [1, 1.1, 1],
-                      x: [-2, 2, -2]
-                    }}
-                    transition={{ 
-                      duration: 4, 
-                      repeat: Infinity, 
-                      ease: "easeInOut" 
-                    }}
-                    className="absolute left-0 inset-y-0 w-28 pointer-events-none rounded-bl-2xl blur-3xl"
-                    style={{ 
-                      background: priorityGlow.replace('0.13', '0.25').replace('0.11', '0.18'),
-                      maskImage: 'radial-gradient(circle at 0% 50%, black 0%, transparent 65%)',
-                      WebkitMaskImage: 'radial-gradient(circle at 0% 50%, black 0%, transparent 65%)'
-                    }} 
-                  />
+            {/* Cabeçalho */}
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex items-start gap-2 flex-1 min-w-0">
+                {task.status === 'done' && (
+                  <CheckCircle2 size={16} className="text-[#1a1a1a] mt-0.5 flex-shrink-0" strokeWidth={2.5} />
                 )}
+                <h4 className={`text-[15px] font-semibold leading-snug line-clamp-2 transition-all ${task.status === 'done' || task.status === 'canceled' ? 'text-[#37352f]/40' : 'text-[#37352f]'}`}>
+                  {task.title}
+                </h4>
+              </div>
 
-                {/* Glow canto direito — urgência do prazo */}
-                {dateGlow && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ 
-                      opacity: [0.4, 0.6, 0.4],
-                      scale: [1, 1.15, 1],
-                      x: [2, -2, 2]
+              <div className="flex items-center gap-2 flex-shrink-0 -mt-0.5">
+                <div className="relative -mr-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setActiveDropdownId(activeDropdownId === task.id ? null : task.id)
                     }}
-                    transition={{ 
-                      duration: 5, 
-                      repeat: Infinity, 
-                      ease: "easeInOut",
-                      delay: 1
-                    }}
-                    className="absolute right-0 inset-y-0 w-28 pointer-events-none rounded-br-2xl blur-3xl"
-                    style={{ 
-                      background: dateGlow.replace('0.15', '0.25').replace('0.13', '0.2').replace('0.11', '0.18'),
-                      maskImage: 'radial-gradient(circle at 100% 50%, black 0%, transparent 65%)',
-                      WebkitMaskImage: 'radial-gradient(circle at 100% 50%, black 0%, transparent 65%)'
-                    }} 
-                  />
-                )}
+                    className="p-1 hover:bg-[#000000]/[0.05] rounded-md transition-colors text-[#37352f]/30 hover:text-[#37352f]"
+                  >
+                    <MoreHorizontal size={16} className="flex-shrink-0" />
+                  </button>
 
-                {/* Prioridade (esquerda) */}
-                <span className={`relative flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 ${
-                  task.priority === 'high' ? 'text-red-500' : task.priority === 'medium' ? 'text-amber-500' : 'text-[#37352f]/30'
-                }`}>
-                  <Flag size={10} strokeWidth={2.5} />
-                  {task.priority === 'high' ? 'Crítica' : task.priority === 'medium' ? 'Média' : 'Baixa'}
-                </span>
+                  <Dropdown
+                    isOpen={activeDropdownId === task.id}
+                    onClose={() => setActiveDropdownId(null)}
+                    className="w-[130px]"
+                  >
+                    <DropdownItem
+                      icon={<Edit2 size={12} />}
+                      label="Editar"
+                      onClick={() => onEdit(task)}
+                    />
+                    {canMoveVisibility && task.visibility === 'personal' && (
+                      <DropdownItem
+                        icon={<Users size={12} />}
+                        label="Para Workspace"
+                        holdDuration={5000}
+                        onClick={() => onMoveVisibility?.(task.id, 'workspace')}
+                      />
+                    )}
+                    {canMoveVisibility && task.visibility === 'workspace' && (
+                      <DropdownItem
+                        icon={<Lock size={12} />}
+                        label="Para Pessoal"
+                        holdDuration={5000}
+                        onClick={() => onMoveVisibility?.(task.id, 'personal')}
+                      />
+                    )}
+                    <DropdownDivider />
+                    <DropdownItem
+                      icon={<Trash2 size={12} />}
+                      label="Excluir"
+                      variant="danger"
+                      onClick={() => onDelete(task.id)}
+                    />
+                  </Dropdown>
+                </div>
+              </div>
+            </div>
 
-                {/* Centro: subtarefas */}
-                <div className="relative flex items-center gap-1.5 flex-1 justify-center">
-                  {task.subtasks && task.subtasks.length > 0 && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setIsSubtasksExpanded(!isSubtasksExpanded) }}
-                      className={`flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 rounded-md transition-all duration-300 ${
-                        isSubtasksExpanded
-                          ? task.subtasks.every(s => s.completed) ? 'bg-[#f4fcf4] text-[#2b8a3e]' : 'bg-[#f7f7f5] text-[#37352f]'
-                          : 'text-[#37352f]/40 hover:bg-[#f7f7f5]'
-                      }`}
-                    >
-                      <div className="relative w-3 h-3 flex-shrink-0">
-                        <svg className="w-full h-full -rotate-90">
-                          <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="1 1" className="opacity-20" />
-                          <motion.circle
-                            animate={{
-                              strokeDashoffset: 2 * Math.PI * 5 * (1 - task.subtasks.filter(s => s.completed).length / task.subtasks.length),
-                              color: task.subtasks.every(s => s.completed) ? '#40c057' : '#1a1a1a'
-                            }}
-                            cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray={2 * Math.PI * 5} strokeLinecap="round"
-                            className="transition-colors duration-500"
-                          />
-                        </svg>
-                      </div>
-                      <motion.span className="text-[10px] font-semibold" animate={task.subtasks.every(s => s.completed) ? { scale: [1, 1.2, 1] } : {}}>
-                        {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
-                      </motion.span>
-                      <ChevronUp size={9} className={`transition-transform duration-300 ${isSubtasksExpanded ? 'rotate-0' : 'rotate-180'}`} />
-                    </button>
+            {/* Tags e Fonte/Avatar */}
+            <div className="flex items-center justify-between gap-2 mb-1">
+              {/* Workspace badge (esquerda) */}
+              {isWorkspaceView && task.visibility === 'workspace' && (
+                <div className="flex items-center gap-1 opacity-50">
+                  <Users size={10} className="text-[#37352f]" />
+                  {task.authorName && task.authorEmail !== userEmail && (
+                    <span className="text-[9px] font-semibold text-[#37352f]/60 truncate max-w-[80px]">{task.authorName}</span>
                   )}
                 </div>
+              )}
+              {!isWorkspaceView && task.visibility === 'workspace' && (
+                <div className="flex items-center gap-1 opacity-40" title="Tarefa compartilhada no workspace">
+                  <Users size={10} className="text-[#37352f]" />
+                </div>
+              )}
+              {task.visibility === 'personal' && <div />}
 
-                {/* Data (direita) */}
-                {formatDate(task.dueDate) !== 'Sem prazo' && (
-                  <span className={`relative flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 tabular-nums ${dateColor}`}>
-                    <Calendar size={10} strokeWidth={2.5} />
-                    {formatDate(task.dueDate)}
-                  </span>
+              {/* Avatares: responsável (Direita) */}
+              <div className="flex items-center gap-[-4px] flex-shrink-0">
+                {task.assignedToId && (
+                  <div
+                    className="border-2 border-white rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white z-10"
+                    title={`Responsável: ${task.assignedToName || 'Membro'}`}
+                    style={{ width: 20, height: 20 }}
+                  >
+                    {task.assignedToAvatar
+                      ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                      : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={20} style="character" />
+                    }
+                  </div>
                 )}
-
               </div>
-            )
-          })()}
+            </div>
+
+            {/* SUBTAREFAS EXPANDIDAS */}
+            <AnimatePresence>
+              {isSubtasksExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-2 pb-1 space-y-1.5 border-t border-[#e9e9e7]/60 mt-2">
+                    <div className="flex items-center justify-between mb-2 px-1">
+                      <span className="text-[10px] font-bold text-[#37352f]/30 uppercase tracking-widest">Subtarefas</span>
+                      <motion.span
+                        animate={task.subtasks?.every(s => s.completed) ? { scale: [1, 1.15, 1], transition: { duration: 0.4 } } : {}}
+                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md transition-all duration-500 ${task.subtasks?.every(s => s.completed) ? 'text-[#2b8a3e] bg-[#e7f5e9] ring-1 ring-[#2b8a3e]/20 shadow-sm' : 'text-white bg-[#1a1a1a]'}`}
+                      >
+                        {task.subtasks?.filter(s => s.completed).length}/{task.subtasks?.length}
+                      </motion.span>
+                    </div>
+                    <div className="space-y-1">
+                      {task.subtasks?.map((subtask) => (
+                        <motion.div
+                          key={subtask.id}
+                          initial={{ x: -10, opacity: 0 }}
+                          animate={{ x: 0, opacity: 1 }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onToggleSubtask?.(task.id, subtask.id)
+                          }}
+                          className="flex items-center gap-2.5 group/sub cursor-pointer p-2 hover:bg-[#f7f7f5] rounded-xl transition-all border border-transparent hover:border-[#e9e9e7]/40"
+                        >
+                          <div className={`transition-all duration-200 flex-shrink-0 ${subtask.completed ? 'text-[#1a1a1a] scale-110' : 'text-[#37352f]/20 group-hover/sub:text-[#37352f]/40'}`}>
+                            {subtask.completed ? <CheckCircle2 size={16} strokeWidth={2.5} /> : <Circle size={16} strokeWidth={2} />}
+                          </div>
+                          <span className={`text-[11px] font-semibold transition-all line-clamp-2 ${subtask.completed ? 'text-[#37352f]/30 line-through font-medium' : 'text-[#37352f]'}`}>
+                            {subtask.title}
+                          </span>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Footer */}
+            {!isPlaceholder && (() => {
+              const days = getDaysUntilDue(task.dueDate)
+              const isDone = task.status === 'done' || task.status === 'canceled'
+
+              const priorityGlow = task.priority === 'high'
+                ? 'rgba(239,68,68,0.13)'
+                : task.priority === 'medium'
+                  ? 'rgba(245,158,11,0.11)'
+                  : null
+
+              const dateGlow = isDone || formatDate(task.dueDate) === 'Sem prazo' ? null
+                : days !== null && days < 0  ? 'rgba(239,68,68,0.15)'
+                : days === 0                 ? 'rgba(248,113,113,0.13)'
+                : days === 1                 ? 'rgba(249,115,22,0.13)'
+                : days !== null && days <= 3 ? 'rgba(245,158,11,0.11)'
+                : null
+
+              const dateColor = isDone
+                ? 'text-[#37352f]/25'
+                : days !== null && days < 0  ? 'text-red-500'
+                : days === 0                 ? 'text-red-400'
+                : days === 1                 ? 'text-orange-500'
+                : days !== null && days <= 3 ? 'text-amber-500'
+                : 'text-[#37352f]/30'
+
+              return (
+                <div className="flex items-center -mx-5 -mb-5 mt-3 px-4 py-2 border-t border-[#f1f1f0] rounded-b-2xl relative overflow-hidden">
+                  {priorityGlow && (
+                    <motion.div
+                      animate={{ opacity: [0.4, 0.7, 0.4], scale: [1, 1.1, 1] }}
+                      transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                      className="absolute left-0 inset-y-0 w-28 pointer-events-none rounded-bl-2xl blur-3xl opacity-50"
+                      style={{ background: priorityGlow.replace('0.1', '0.2') }} 
+                    />
+                  )}
+                  {dateGlow && (
+                    <motion.div
+                      animate={{ opacity: [0.4, 0.6, 0.4], scale: [1, 1.15, 1] }}
+                      transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+                      className="absolute right-0 inset-y-0 w-28 pointer-events-none rounded-br-2xl blur-3xl opacity-50"
+                      style={{ background: dateGlow.replace('0.1', '0.2') }} 
+                    />
+                  )}
+                  <span className={`relative flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 ${
+                    task.priority === 'high' ? 'text-red-500' : task.priority === 'medium' ? 'text-amber-500' : 'text-[#37352f]/30'
+                  }`}>
+                    <Flag size={10} strokeWidth={2.5} />
+                    {task.priority === 'high' ? 'Crítica' : task.priority === 'medium' ? 'Média' : 'Baixa'}
+                  </span>
+                  <div className="relative flex items-center gap-1.5 flex-1 justify-center">
+                    {task.subtasks && task.subtasks.length > 0 && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setIsSubtasksExpanded(!isSubtasksExpanded) }}
+                        className={`flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 rounded-md transition-all duration-300 ${isSubtasksExpanded ? 'bg-[#f7f7f5]' : 'text-[#37352f]/40 hover:bg-[#f7f7f5]'}`}
+                      >
+                        <motion.span className="text-[10px] font-semibold">{task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}</motion.span>
+                        <ChevronUp size={9} className={`transition-transform duration-300 ${isSubtasksExpanded ? 'rotate-0' : 'rotate-180'}`} />
+                      </button>
+                    )}
+                  </div>
+                  {formatDate(task.dueDate) !== 'Sem prazo' && (
+                    <span className={`relative flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 tabular-nums ${dateColor}`}>
+                      <Calendar size={10} strokeWidth={2.5} />
+                      {formatDate(task.dueDate)}
+                    </span>
+                  )}
+                </div>
+              )
+            })()}
+          </div>
+
+          {/* Efeito de Cancelado: Fitas Infinitas Minimalistas */}
+          {task.status === 'canceled' && (
+            <div className="absolute inset-0 z-[20] flex flex-col items-center justify-center pointer-events-none overflow-hidden rounded-2xl">
+              <div className="absolute inset-0 bg-white/60 backdrop-blur-[4px] z-0" />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <InfiniteRibbon 
+                  rotation={7} 
+                  className="w-[140%] py-2 bg-white/60 border-y border-[#37352f]/5 shadow-sm"
+                  speed={600}
+                  backgroundColor="bg-white/60"
+                  textColor="text-[#37352f]/40"
+                >
+                  Tarefa Cancelada • Registro Interrompido • Cancelado • Arquivo Interno
+                </InfiniteRibbon>
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <InfiniteRibbon 
+                  reverse={true} 
+                  rotation={-7} 
+                  className="w-[140%] py-2 bg-slate-50/50 border-y border-[#37352f]/5 shadow-sm"
+                  speed={900}
+                  backgroundColor="bg-slate-50/50"
+                  textColor="text-[#37352f]/30"
+                >
+                  Suspenso Temporariamente • Aguardando Revisão • Fluxo Detido • Suspenso
+                </InfiniteRibbon>
+              </div>
+            </div>
+          )}
         </div>
+
+
 
         {/* Timer pendurado abaixo do card */}
         {!isPlaceholder && timerParts && (
