@@ -143,35 +143,21 @@ REGRAS:
 }
 
 // ── Processa um único usuário ─────────────────────────────────────────────────
+// phone e userId já vêm da query batch — sem re-fetch de channel_bindings
 
-async function processUserReminder(userId, userName, period, sendMessage) {
+async function processUserReminder(userId, userName, phone, period, sendMessage) {
   try {
-    // 1. Verifica janela de 24h (regra Meta: só pode enviar se usuário mandou msg nas últimas 24h)
-    const { data: binding } = await supabase
-      .from('channel_bindings')
-      .select('last_inbound_at, external_user_id')
-      .eq('user_id', userId)
-      .eq('channel', 'whatsapp')
-      .maybeSingle();
-
-    const phone = binding?.external_user_id;
-    if (!phone) return;
-
-    const lastInbound = binding?.last_inbound_at ? new Date(binding.last_inbound_at) : null;
-    const windowOpen = lastInbound && (Date.now() - lastInbound.getTime()) < 24 * 60 * 60 * 1000;
-    if (!windowOpen) return;
-
-    // 2. Verifica se já enviou hoje para este período (DB-backed — funciona com múltiplas instâncias)
+    // 1. Verifica se já enviou hoje para este período (DB-backed)
     const alreadySent = await wasPeriodSentToday(userId, period);
     if (alreadySent) return;
 
-    // 3. Lógica de accountability: tarde e noite só saem se manhã foi enviada
+    // 2. Tarde e noite só saem se manhã foi enviada
     if (period === 'afternoon' || period === 'evening') {
       const commitment = await getTodayCommitment(userId);
       if (!commitment?.morning_sent_at) return;
     }
 
-    // 4. Gera mensagem conforme período
+    // 3. Gera mensagem conforme período
     let message = null;
     if (period === 'weekly') {
       message = await buildWeeklySummary(userId, userName);
@@ -183,16 +169,16 @@ async function processUserReminder(userId, userName, period, sendMessage) {
       message = await buildEveningSummary(userId, userName);
     }
 
-    // 5. Envia e registra no Supabase (não em memória)
+    // 4. Envia e registra no Supabase
     if (message) {
-      const sent = await sendMessage(phone, message);
+      const sent = await sendMessage(userId, phone, message);
       if (sent) {
-        await markPeriodSent(userId, period === 'weekly' ? 'morning' : period);
+        await markPeriodSent(userId, period);
         console.log(`[Reminders] Enviado ${period} → ${phone}`);
       }
     } else {
       // Nada relevante para dizer — marca como enviado para não tentar novamente
-      await markPeriodSent(userId, period === 'weekly' ? 'morning' : period);
+      await markPeriodSent(userId, period);
     }
   } catch (err) {
     console.error(`[Reminders] Erro ao processar userId=${userId}:`, err.message);
@@ -201,37 +187,50 @@ async function processUserReminder(userId, userName, period, sendMessage) {
 
 // ── Engine principal ──────────────────────────────────────────────────────────
 
-const BATCH_SIZE = 10; // usuários processados em paralelo por batch
+const BATCH_SIZE = 10;
 
 /**
  * Executa o ciclo de lembretes.
  * Chamado pelo servidor a cada 15 minutos.
  *
- * Melhorias vs versão anterior:
- * - sentReminders sai da memória → vai para daily_commitments no Supabase
- * - Tarde/noite só dispara se manhã foi enviada (economia de LLM ~60%)
- * - Usuários processados em paralelo (batches de 10) em vez de sequencialmente
+ * Plano B: busca usuários elegíveis direto no Supabase com filtro de janela 24h
+ * (regra Meta) — não depende de sessões WebSocket ativas nem de buildReminderSessions.
+ * Elimina o re-fetch de channel_bindings por usuário que existia antes.
  */
-export async function runReminderCycle(sessions, sendMessage) {
+export async function runReminderCycle(sendMessage) {
   const period = getCurrentPeriod();
   if (!period) return;
 
-  const users = Object.values(sessions).filter(s => s.authenticated && s.userId);
-  if (users.length === 0) return;
+  const windowCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  console.log(`[Reminders] Ciclo ${period} — ${users.length} usuário(s)`);
+  const { data: bindings, error } = await supabase
+    .from('channel_bindings')
+    .select('user_id, external_user_id, display_name')
+    .eq('channel', 'whatsapp')
+    .eq('authenticated', true)
+    .gte('last_inbound_at', windowCutoff);
 
-  // Expira insights antigos (fire-and-forget)
+  if (error) {
+    console.error('[Reminders] Erro ao buscar bindings:', error.message);
+    return;
+  }
+  if (!bindings?.length) return;
+
+  console.log(`[Reminders] Ciclo ${period} — ${bindings.length} usuário(s) elegíveis`);
+
   expireOldInsights().catch(() => {});
+  bindings.forEach(b => generateInsights(b.user_id, b.display_name || 'você').catch(() => {}));
 
-  // Gera insights proativos para todos em paralelo (fire-and-forget)
-  users.forEach(s => generateInsights(s.userId, s.userName).catch(() => {}));
-
-  // Processa lembretes em batches paralelos
-  for (let i = 0; i < users.length; i += BATCH_SIZE) {
-    const batch = users.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < bindings.length; i += BATCH_SIZE) {
+    const batch = bindings.slice(i, i + BATCH_SIZE);
     await Promise.allSettled(
-      batch.map(s => processUserReminder(s.userId, s.userName, period, sendMessage))
+      batch.map(b => processUserReminder(
+        b.user_id,
+        b.display_name || 'você',
+        b.external_user_id,
+        period,
+        sendMessage
+      ))
     );
   }
 }

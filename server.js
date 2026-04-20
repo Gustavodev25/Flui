@@ -2716,30 +2716,18 @@ app.post('/api/whatsapp/send', async (req, res) => {
 const REMINDER_INTERVAL_MS = 15 * 60 * 1000; // 15 min
 
 setInterval(() => {
-  buildReminderSessions()
-    .then((sessions) => runReminderCycle(sessions, async (phone, message) => {
-      const binding = await findBindingByExternalUserId('whatsapp', phone);
-      if (binding?.user_id) {
-        lastProactiveMessageAt.set(binding.user_id, Date.now());
-        return enqueueSystemWhatsAppMessage(binding.user_id, message, 'assistant_text');
-      }
-      return sendWhatsAppMessage(phone, message);
-    }))
-    .catch((error) => console.error('[Reminders] Worker error:', error.message));
+  runReminderCycle(async (userId, phone, message) => {
+    lastProactiveMessageAt.set(userId, Date.now());
+    return enqueueSystemWhatsAppMessage(userId, message, 'assistant_text');
+  }).catch((error) => console.error('[Reminders] Worker error:', error.message));
 }, REMINDER_INTERVAL_MS);
 
-// Roda uma vez ao iniciar (depois de 30s pra dar tempo de carregar sessões)
+// Roda uma vez ao iniciar
 setTimeout(() => {
   console.log('📋 Sistema de lembretes ativo (verifica a cada 15 min)');
-  buildReminderSessions()
-    .then((sessions) => runReminderCycle(sessions, async (phone, message) => {
-      const binding = await findBindingByExternalUserId('whatsapp', phone);
-      if (binding?.user_id) {
-        return enqueueSystemWhatsAppMessage(binding.user_id, message, 'assistant_text');
-      }
-      return sendWhatsAppMessage(phone, message);
-    }))
-    .catch((error) => console.error('[Reminders] Worker error:', error.message));
+  runReminderCycle(async (userId, phone, message) => {
+    return enqueueSystemWhatsAppMessage(userId, message, 'assistant_text');
+  }).catch((error) => console.error('[Reminders] Worker error:', error.message));
 }, 30_000);
 
 // ── Behavioral Profile: atualiza perfis 1x por dia (3h da manhã SP) ─────────
