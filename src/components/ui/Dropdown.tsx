@@ -36,12 +36,12 @@ export const Dropdown: React.FC<DropdownProps> = ({ isOpen, onClose, children, c
       {isOpen && (
         <motion.div
           ref={dropdownRef}
-          initial={{ opacity: 0, y: -8, scale: 0.95, filter: 'blur(4px)' }}
-          animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-          exit={{ opacity: 0, y: -4, scale: 0.95, filter: 'blur(4px)' }}
-          transition={{ type: 'spring', stiffness: 350, damping: 25, mass: 0.8 }}
-          style={{ originX: 1, originY: 0 }}
-          className={`absolute right-0 top-full mt-2 w-[220px] bg-white rounded-xl border border-[#e9e9e7] shadow-[0_10px_30px_rgba(0,0,0,0.08),0_4px_8px_rgba(0,0,0,0.04)] z-[100] p-1 overflow-hidden ${className || ''}`}
+          initial={{ opacity: 0, y: -25, scale: 0.8, filter: 'blur(12px)', rotate: -4 }}
+          animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)', rotate: 0 }}
+          exit={{ opacity: 0, y: -15, scale: 0.9, filter: 'blur(8px)', rotate: -2 }}
+          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }} // Curva super fluida estilo "Apple/Stripe"
+          style={{ transformOrigin: 'top right' }}
+          className={`absolute right-0 top-full mt-2 w-[220px] bg-white rounded-xl border border-[#e9e9e7] shadow-[0_10px_40px_rgba(0,0,0,0.12),0_4px_8px_rgba(0,0,0,0.04)] z-[100] p-1 overflow-hidden ${className || ''}`}
         >
           {children}
         </motion.div>
@@ -112,11 +112,11 @@ export const DropdownItem: React.FC<DropdownItemProps> = ({ icon, label, onClick
     >
       {/* Preenchimento de fundo rítmico e minimalista */}
       {holdDuration && (
-        <motion.div 
+        <motion.div
           initial={false}
-          animate={{ 
+          animate={{
             width: `${Math.ceil(holdProgress / (100 / 5)) * (100 / 5)}%`,
-            opacity: isHolding ? 1 : 0 
+            opacity: isHolding ? 1 : 0
           }}
           transition={{
             width: { type: "spring", stiffness: 300, damping: 25 },
@@ -128,7 +128,7 @@ export const DropdownItem: React.FC<DropdownItemProps> = ({ icon, label, onClick
 
       <AnimatePresence mode="wait">
         {isHolding ? (
-          <motion.div 
+          <motion.div
             key="holding"
             initial={{ opacity: 0, y: 3 }}
             animate={{ opacity: 1, y: 0 }}
@@ -137,13 +137,13 @@ export const DropdownItem: React.FC<DropdownItemProps> = ({ icon, label, onClick
             className="flex-1 flex items-center justify-center gap-1 z-10"
           >
             <span className="text-[11px] font-semibold text-green-600/80">Segure</span>
-            <NumberFlow 
-              value={secondsRemaining} 
+            <NumberFlow
+              value={secondsRemaining}
               className="text-[12px] font-bold text-green-600 tabular-nums"
             />
           </motion.div>
         ) : (
-          <motion.div 
+          <motion.div
             key="normal"
             initial={{ opacity: 0, y: -3 }}
             animate={{ opacity: 1, y: 0 }}

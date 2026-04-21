@@ -17,31 +17,33 @@ const DeleteConfirmation: React.FC<DeleteConfirmationProps> = ({
     <AnimatePresence>
       {isOpen && (
         <Portal>
-          <div className="fixed inset-0 z-[9998]" onClick={onCancel} />
+          <div className="fixed inset-0 z-[9998] bg-[#37352f]/05" onClick={onCancel} />
           <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.95, x: '-50%' }}
-            animate={{ opacity: 1, y: 0, scale: 1, x: '-50%' }}
-            exit={{ opacity: 0, y: 20, scale: 0.95, x: '-50%' }}
-            transition={{ type: "spring", stiffness: 400, damping: 25 }}
-            className="fixed bottom-8 left-1/2 z-[9999] bg-white border border-[#e9e9e7] rounded-xl shadow-[0_20px_40px_rgba(0,0,0,0.12)] flex flex-col p-5 w-[90vw] max-w-[320px]"
+            initial={{ opacity: 0, scale: 0.95, y: 20, x: '-50%' }}
+            animate={{ opacity: 1, scale: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, scale: 0.95, y: 10, x: '-50%' }}
+            transition={{ type: "spring", stiffness: 450, damping: 30 }}
+            className="fixed bottom-10 left-1/2 z-[9999] bg-white border border-[#e9e9e7] rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.12)] w-[260px] overflow-hidden"
           >
-            <div className="mb-5">
+            <div className="p-5 pb-4">
               <h3 className="text-[13px] font-bold text-[#37352f] mb-1.5">Excluir esta tarefa?</h3>
-              <p className="text-[11px] text-[#37352f]/50 leading-relaxed font-medium">
+              <p className="text-[11px] text-[#37352f]/45 leading-relaxed font-medium">
                 Esta ação apagará os dados permanentemente e não poderá ser desfeita.
               </p>
             </div>
             
-            <div className="flex items-center gap-2 justify-end pt-1">
+            <div className="h-[1px] bg-[#f1f1f0]" />
+            
+            <div className="p-3 flex items-center justify-end gap-2">
               <button
                 onClick={onCancel}
-                className="px-4 py-1.5 rounded-md text-[11px] font-bold text-[#37352f]/60 hover:text-[#37352f] hover:bg-[#000000]/[0.03] transition-colors"
+                className="px-4 py-1.5 rounded-lg text-[11px] font-bold text-[#37352f]/40 hover:text-[#37352f] hover:bg-[#f7f7f5] transition-all"
               >
                 Cancelar
               </button>
               <button
                 onClick={onConfirm}
-                className="px-4 py-1.5 rounded-md text-[11px] font-bold text-[#eb5757] bg-[#eb5757]/10 hover:bg-[#eb5757]/20 transition-colors"
+                className="px-4 py-1.5 rounded-lg text-[11px] font-bold text-[#eb5757] hover:bg-[#fff5f5] active:bg-[#ffebeb] transition-all"
               >
                 Excluir
               </button>

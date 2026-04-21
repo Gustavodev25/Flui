@@ -170,25 +170,43 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           {isWorkspace && (
             <DetailRow label="Responsável">
               <div className="relative">
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => activeMembers.length > 0 && setTransferOpen(v => !v)}
-                  className={`flex items-center gap-1.5 text-[13px] text-[#37352f] ${activeMembers.length > 0 ? 'hover:opacity-70 cursor-pointer' : 'cursor-default'} transition-opacity`}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all duration-300 ${
+                    task.assignedToId
+                      ? 'bg-[#37352f]/5 border-[#37352f]/10 text-[#37352f] shadow-sm'
+                      : 'bg-[#f7f7f5] border-[#e9e9e7] text-[#37352f]/35'
+                  } ${activeMembers.length > 0 ? 'hover:bg-[#f1f1f0] cursor-pointer' : 'cursor-default'}`}
                 >
                   {task.assignedToId ? (
-                    <>
-                      <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 border border-[#e9e9e7]">
+                    <motion.div 
+                      initial={{ opacity: 0, x: -4 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="flex items-center gap-1.5"
+                    >
+                      <div className="w-4 h-4 rounded-full overflow-hidden flex-shrink-0 border border-white shadow-sm ring-1 ring-black/[0.03]">
                         {task.assignedToAvatar
                           ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" />
-                          : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={20} style="character" />
+                          : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={16} style="character" />
                         }
                       </div>
-                      <span>{task.assignedToName?.split(' ')[0] || 'Membro'}</span>
-                    </>
+                      <span className="text-[12px] font-bold tracking-tight">{task.assignedToName?.split(' ')[0] || 'Membro'}</span>
+                    </motion.div>
                   ) : (
-                    <span className="text-[#37352f]/35">Ninguém</span>
+                    <span className="text-[12px] font-medium px-1">Ninguém</span>
                   )}
-                  {activeMembers.length > 0 && <ChevronDown size={11} className="text-[#37352f]/30" />}
-                </button>
+                  {activeMembers.length > 0 && (
+                    <motion.div
+                      animate={{ rotate: transferOpen ? 180 : 0 }}
+                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                      className="flex items-center ml-0.5"
+                    >
+                      <ChevronDown size={11} className="text-[#37352f]/30" />
+                    </motion.div>
+                   )}
+                </motion.button>
 
                 <AnimatePresence>
                   {transferOpen && (

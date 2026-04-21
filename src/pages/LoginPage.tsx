@@ -435,14 +435,14 @@ const ForgotMockup: React.FC = () => (
 
 const LoginPage: React.FC = () => {
   const { user, isLoading: authLoading } = useAuth()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [name, setName] = useState('')
+  const [email, setEmail] = useState(() => sessionStorage.getItem('flui_signup_email') || '')
+  const [password, setPassword] = useState(() => sessionStorage.getItem('flui_signup_password') || '')
+  const [confirmPassword, setConfirmPassword] = useState(() => sessionStorage.getItem('flui_signup_confirmPassword') || '')
+  const [name, setName] = useState(() => sessionStorage.getItem('flui_signup_name') || '')
   const [isLogin, setIsLogin] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
-  const [isAgreed, setIsAgreed] = useState(false)
+  const [isAgreed, setIsAgreed] = useState(() => sessionStorage.getItem('flui_signup_isAgreed') === 'true')
   const [isTermsOpen, setIsTermsOpen] = useState(false)
   const [isForgotPassword, setIsForgotPassword] = useState(false)
   const [searchParams] = useSearchParams()
@@ -452,7 +452,25 @@ const LoginPage: React.FC = () => {
   React.useEffect(() => {
     const saved = localStorage.getItem('lastLoginMethod')
     if (saved) setLastLoginMethod(saved)
-  }, [])
+
+    // Check for mode parameter to switch between login and signup
+    const mode = searchParams.get('mode')
+    if (mode === 'signup') {
+      setIsLogin(false)
+    } else if (mode === 'login') {
+      setIsLogin(true)
+    }
+  }, [searchParams])
+
+  React.useEffect(() => {
+    if (!isLogin) {
+      sessionStorage.setItem('flui_signup_email', email)
+      sessionStorage.setItem('flui_signup_password', password)
+      sessionStorage.setItem('flui_signup_confirmPassword', confirmPassword)
+      sessionStorage.setItem('flui_signup_name', name)
+      sessionStorage.setItem('flui_signup_isAgreed', String(isAgreed))
+    }
+  }, [isLogin, email, password, confirmPassword, name, isAgreed])
 
 
   if (authLoading) {
@@ -549,11 +567,17 @@ const LoginPage: React.FC = () => {
           }
         }
 
-        toaster.create({
-          title: 'Conta criada com sucesso!',
-          description: 'Bem-vindo ao Flui. Acesse para continuar.',
-          type: 'success',
-        })
+      toaster.create({
+        title: 'Conta criada com sucesso!',
+        description: 'Bem-vindo ao Flui. Acesse para continuar.',
+        type: 'success',
+      })
+
+      sessionStorage.removeItem('flui_signup_email')
+      sessionStorage.removeItem('flui_signup_password')
+      sessionStorage.removeItem('flui_signup_confirmPassword')
+      sessionStorage.removeItem('flui_signup_name')
+      sessionStorage.removeItem('flui_signup_isAgreed')
 
         setIsLogin(true)
       }

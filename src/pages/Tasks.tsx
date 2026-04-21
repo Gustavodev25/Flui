@@ -72,6 +72,7 @@ interface Task {
   assignedToName?: string
   assignedToAvatar?: string
   assignedToEmail?: string
+  isNew?: boolean
 }
 
 interface WorkspaceMember {
@@ -137,7 +138,7 @@ const getPriorityColor = (priority: Task['priority']) => {
 
 
 // Componente para o Card da Tarefa
-const TaskCardUI = React.forwardRef<HTMLDivElement, {
+interface TaskCardProps {
   task: Task;
   isDragging?: boolean;
   isOverlay?: boolean;
@@ -159,29 +160,35 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
   onMoveVisibility?: (taskId: string, newVisibility: 'personal' | 'workspace') => void;
   canMoveVisibility?: boolean;
   isExiting?: boolean;
-}>(({ 
-  task, 
-  isDragging, 
-  isOverlay, 
-  dragHandleProps, 
-  style, 
-  onEdit, 
-  onDelete, 
-  activeDropdownId, 
-  setActiveDropdownId, 
-  userEmail, 
-  isPending, 
-  pendingTarget, 
-  onConfirm, 
-  onCancel, 
-  onToggleSubtask, 
-  onStopTimer, 
-  onCardClick, 
-  isWorkspaceView, 
-  onMoveVisibility, 
-  canMoveVisibility, 
-  isExiting 
-}, ref) => {
+}
+
+const TaskCardUI = React.forwardRef<
+  HTMLDivElement,
+  TaskCardProps
+>((props, ref) => {
+  const {
+    task,
+    isDragging,
+    isOverlay,
+    dragHandleProps,
+    style,
+    onEdit,
+    onDelete,
+    activeDropdownId,
+    setActiveDropdownId,
+    userEmail,
+    isPending,
+    pendingTarget,
+    onConfirm,
+    onCancel,
+    onToggleSubtask,
+    onStopTimer,
+    onCardClick,
+    isWorkspaceView,
+    onMoveVisibility,
+    canMoveVisibility,
+    isExiting,
+  } = props;
 
   const [isSubtasksExpanded, setIsSubtasksExpanded] = useState(false);
 
@@ -406,18 +413,25 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
               {task.visibility === 'personal' && <div />}
 
               {/* Avatares: responsável (Direita) */}
-              <div className="flex items-center gap-[-4px] flex-shrink-0">
+              <div className="flex items-center flex-shrink-0">
                 {task.assignedToId && (
-                  <div
-                    className="border-2 border-white rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white z-10"
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    whileHover={{ scale: 1.05, y: -1 }}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-[#f7f7f5] border border-[#e9e9e7]/50 shadow-sm transition-all group-hover:border-[#37352f]/10 cursor-default"
                     title={`Responsável: ${task.assignedToName || 'Membro'}`}
-                    style={{ width: 20, height: 20 }}
                   >
-                    {task.assignedToAvatar
-                      ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                      : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={20} style="character" />
-                    }
-                  </div>
+                    <div className="w-3.5 h-3.5 rounded-full overflow-hidden flex-shrink-0 border border-white shadow-sm ring-1 ring-black/[0.05]">
+                      {task.assignedToAvatar
+                        ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                        : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={14} style="character" />
+                      }
+                    </div>
+                    <span className="text-[9px] font-bold text-[#37352f]/60 truncate max-w-[60px] tracking-tight">
+                      {task.assignedToName?.split(' ')[0] || 'Membro'}
+                    </span>
+                  </motion.div>
                 )}
               </div>
             </div>
@@ -716,6 +730,12 @@ const Tasks: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [loading, setLoading] = useState(lastTaskView === initialView ? cachedTasks.length === 0 : true)
   const [tasks, setTasks] = useState<Task[]>(lastTaskView === initialView ? cachedTasks : [])
+  const [personalCount, setPersonalCount] = useState(0)
+  const [workspaceCount, setWorkspaceCount] = useState(0)
+  const [personalHighlighted, setPersonalHighlighted] = useState(false)
+  const [workspaceHighlighted, setWorkspaceHighlighted] = useState(false)
+  const prevPersonalCount = useRef(0)
+  const prevWorkspaceCount = useRef(0)
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -803,6 +823,8 @@ const Tasks: React.FC = () => {
         )
         const mappedTasks = (result.tasks || []).map(mapDbTask)
         setTasks(mappedTasks)
+        setWorkspaceCount(mappedTasks.length)
+        prevWorkspaceCount.current = mappedTasks.length
       } else {
         // Busca tarefas pessoais do usuário
         const { data, error } = await supabase
@@ -816,6 +838,8 @@ const Tasks: React.FC = () => {
 
         const mappedTasks = (data || []).map(mapDbTask)
         setTasks(mappedTasks)
+        setPersonalCount(mappedTasks.length)
+        prevPersonalCount.current = mappedTasks.length
       }
     } catch (error) {
       console.error('Erro ao buscar tarefas:', error)
@@ -827,8 +851,76 @@ const Tasks: React.FC = () => {
 
   // Sincroniza a view de tarefas com o modo ativo (workspace ou plano próprio)
   useEffect(() => {
-    setTaskView(workspaceModeActive ? 'workspace' : 'personal')
+    const targetView = workspaceModeActive ? 'workspace' : 'personal'
+    setTaskView(targetView)
+    
+    // Limpa o destaque da aba que está sendo aberta
+    if (targetView === 'personal') setPersonalHighlighted(false)
+    else setWorkspaceHighlighted(false)
   }, [workspaceModeActive])
+
+  // Limpa o destaque da aba ao alternar manualmente
+  useEffect(() => {
+    if (taskView === 'personal') setPersonalHighlighted(false)
+    else setWorkspaceHighlighted(false)
+  }, [taskView])
+
+
+  // Dispara o destaque quando o número de tarefas aumenta
+  useEffect(() => {
+    if (personalCount > prevPersonalCount.current) {
+      setPersonalHighlighted(true)
+      // Se já estiver na aba, limpa após 5s. Se não, fica pra sempre até clicar.
+      if (taskView === 'personal') {
+        setTimeout(() => setPersonalHighlighted(false), 5000)
+      }
+    }
+    if (workspaceCount > prevWorkspaceCount.current) {
+      setWorkspaceHighlighted(true)
+      // Se já estiver na aba, limpa após 5s. Se não, fica pra sempre até clicar.
+      if (taskView === 'workspace') {
+        setTimeout(() => setWorkspaceHighlighted(false), 5000)
+      }
+    }
+    
+    prevPersonalCount.current = personalCount
+    prevWorkspaceCount.current = workspaceCount
+  }, [personalCount, workspaceCount])
+
+  // Busca a contagem da visualização "oposta" ao trocar de view ou montar
+  useEffect(() => {
+    if (!user) return
+    if (taskView === 'personal') {
+      apiFetch<{ tasks: any[] }>('/api/workspace/shared-tasks', undefined, { userId: user.id })
+        .then(r => {
+          const count = r.tasks?.length || 0
+          setWorkspaceCount(count)
+          prevWorkspaceCount.current = count
+        })
+        .catch(() => { })
+    } else {
+      supabase.from('tasks')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('visibility', 'personal')
+        .then(({ count }) => {
+          const c = count || 0
+          setPersonalCount(c)
+          prevPersonalCount.current = c
+        })
+        .catch(() => { })
+    }
+  }, [taskView, user])
+
+  // Limpa o estado 'isNew' após um tempo para parar a animação
+  useEffect(() => {
+    const hasNewTasks = tasks.some(t => t.isNew)
+    if (!hasNewTasks) return
+    const timer = setTimeout(() => {
+      setTasks(prev => prev.map(t => t.isNew ? { ...t, isNew: false } : t))
+    }, 15000)
+    return () => clearTimeout(timer)
+  }, [tasks])
 
   // Recarrega quando muda de view
   useEffect(() => {
@@ -854,11 +946,18 @@ const Tasks: React.FC = () => {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'tasks' },
         (payload) => {
-          const newTask = mapDbTask(payload.new)
-          // Lê o valor atualizado via ref (sem closure stale)
+          const newTask = { ...mapDbTask(payload.new), isNew: true }
           const isPersonalView = taskViewRef.current === 'personal'
-          const taskIsPersonal = !newTask.visibility || newTask.visibility === 'personal'
-          const taskIsWorkspace = newTask.visibility === 'workspace'
+          const taskIsPersonal = payload.new.visibility === 'personal' || !payload.new.visibility
+          const taskIsWorkspace = payload.new.visibility === 'workspace'
+
+          // Atualiza as contagens apenas se a mudança veio de OUTRO usuário
+          // Pois mudanças locais já são tratadas instantaneamente nas funções handle...
+          if (payload.new.user_id !== userIdRef.current) {
+            if (taskIsWorkspace) setWorkspaceCount(prev => prev + 1)
+            else if (taskIsPersonal) setPersonalCount(prev => prev + 1)
+          }
+
           if (isPersonalView && taskIsPersonal && payload.new.user_id === userIdRef.current) {
             setTasks(prev => {
               if (prev.some(t => t.id === newTask.id)) return prev
@@ -885,7 +984,16 @@ const Tasks: React.FC = () => {
         { event: 'DELETE', schema: 'public', table: 'tasks' },
         (payload) => {
           const deletedId = (payload.old as any).id
-          setTasks(prev => prev.filter(t => t.id !== deletedId))
+          // Decrementa contagem se veio de outro usuário (nós já decrementamos localmente)
+          // Nota: DELETE payload.old pode não ter visibility, então tentamos achar na lista
+          setTasks(prev => {
+            const taskToRemove = prev.find(t => t.id === deletedId)
+            if (taskToRemove && (payload.old as any).user_id !== userIdRef.current) {
+              if (taskToRemove.visibility === 'workspace') setWorkspaceCount(p => Math.max(0, p - 1))
+              else setPersonalCount(p => Math.max(0, p - 1))
+            }
+            return prev.filter(t => t.id !== deletedId)
+          })
         }
       )
       .subscribe()
@@ -982,8 +1090,9 @@ const Tasks: React.FC = () => {
           body: JSON.stringify({ userId: user?.id, task: newTask }),
         })
         if (result.task) {
-          const newTaskWithId = { ...mapDbTask(result.task), authorName: user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0], authorEmail: user?.email }
+          const newTaskWithId = { ...mapDbTask(result.task), isNew: true, authorName: user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0], authorEmail: user?.email }
           setTasks([newTaskWithId, ...tasks])
+          setWorkspaceCount(prev => prev + 1)
         }
       } else {
         const { id, ...taskData } = newTask
@@ -991,18 +1100,20 @@ const Tasks: React.FC = () => {
           .from('tasks')
           .insert([{
             user_id: user?.id,
-            title: taskData.title, status: taskData.status, priority: taskData.priority,
-            due_date: (taskData.dueDate && taskData.dueDate !== 'Sem prazo') ? taskData.dueDate : null, source: taskData.source, progress: taskData.progress,
-            description: taskData.description, subtasks: taskData.subtasks,
-            timer_at: taskData.timerAt || null,
+            title: newTask.title, status: newTask.status, priority: newTask.priority,
+            due_date: (newTask.dueDate && newTask.dueDate !== 'Sem prazo') ? newTask.dueDate : null,
+            source: newTask.source, progress: newTask.progress,
+            description: newTask.description, subtasks: newTask.subtasks,
+            timer_at: newTask.timerAt || null,
             timer_fired: false,
             visibility: 'personal',
           }]).select()
 
         if (error) throw error
         if (data && data[0]) {
-          const newTaskWithId = { ...newTask, id: data[0].id, visibility: 'personal' }
+          const newTaskWithId = { ...mapDbTask(data[0]), isNew: true }
           setTasks([newTaskWithId, ...tasks])
+          setPersonalCount(prev => prev + 1)
         }
       }
       setIsModalOpen(false)
@@ -1046,6 +1157,11 @@ const Tasks: React.FC = () => {
 
       // Usar forma funcional do setState para evitar stale closure e remover a tarefa imediatamente.
       setTasks(prev => {
+        const task = prev.find(t => t.id === id)
+        if (task) {
+          if (task.visibility === 'workspace') setWorkspaceCount(p => Math.max(0, p - 1))
+          else setPersonalCount(p => Math.max(0, p - 1))
+        }
         const filtered = prev.filter(t => t.id !== id);
         // Atualiza o cache também para evitar que volte localmente
         cachedTasks = filtered;
@@ -1395,13 +1511,27 @@ const Tasks: React.FC = () => {
                   <div className="flex items-center bg-[#f7f7f5] border border-[#e9e9e7]/50 rounded-full p-0.5 shadow-sm">
                     <button
                       onClick={() => setTaskView('personal')}
-                      className={`relative z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold transition-colors duration-300 ${taskView === 'personal'
+                      className={`relative z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] font-bold transition-colors duration-300 ${taskView === 'personal'
                         ? 'text-[#37352f]'
                         : 'text-[#37352f]/30 hover:text-[#37352f]/50'
                         }`}
                     >
                       <Lock size={10} strokeWidth={2.5} />
                       <span className="hidden sm:inline">Pessoal</span>
+                      <motion.div 
+                        animate={personalHighlighted ? { backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#ef4444' } : {}}
+                        className={`ml-1 px-1.5 py-0.5 rounded-full relative overflow-hidden transition-colors ${taskView === 'personal' && !personalHighlighted ? 'bg-[#37352f]/10 text-[#37352f]' : 'bg-[#37352f]/5 text-[#37352f]/30'}`}
+                      >
+                        <NumberFlow value={personalCount} />
+                        {personalHighlighted && (
+                          <motion.div
+                            initial={{ x: '-100%' }}
+                            animate={{ x: '100%' }}
+                            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent"
+                          />
+                        )}
+                      </motion.div>
                       {taskView === 'personal' && (
                         <motion.div
                           layoutId="task-view-active"
@@ -1412,13 +1542,27 @@ const Tasks: React.FC = () => {
                     </button>
                     <button
                       onClick={() => setTaskView('workspace')}
-                      className={`relative z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold transition-colors duration-300 ${taskView === 'workspace'
+                      className={`relative z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] font-bold transition-colors duration-300 ${taskView === 'workspace'
                         ? 'text-[#37352f]'
                         : 'text-[#37352f]/30 hover:text-[#37352f]/50'
                         }`}
                     >
                       <Users size={10} strokeWidth={2.5} />
                       <span className="hidden sm:inline">Workspace</span>
+                      <motion.div
+                        animate={workspaceHighlighted ? { backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#ef4444' } : {}}
+                        className={`ml-1 px-1.5 py-0.5 rounded-full relative overflow-hidden transition-colors ${taskView === 'workspace' && !workspaceHighlighted ? 'bg-[#37352f]/10 text-[#37352f]' : 'bg-[#37352f]/5 text-[#37352f]/30'}`}
+                      >
+                        <NumberFlow value={workspaceCount} />
+                        {workspaceHighlighted && (
+                          <motion.div
+                            initial={{ x: '-100%' }}
+                            animate={{ x: '100%' }}
+                            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent"
+                          />
+                        )}
+                      </motion.div>
                       {taskView === 'workspace' && (
                         <motion.div
                           layoutId="task-view-active"
@@ -1432,6 +1576,20 @@ const Tasks: React.FC = () => {
                   <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f7f7f5] border border-[#e9e9e7] text-[10px] font-bold text-[#37352f]/50">
                     <Users size={10} strokeWidth={2.5} />
                     <span>Workspace</span>
+                    <motion.div
+                      animate={workspaceHighlighted ? { backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#ef4444' } : {}}
+                      className="ml-1 px-1.5 py-0.5 rounded-full relative overflow-hidden bg-[#37352f]/5 text-[#37352f]/30"
+                    >
+                      <NumberFlow value={workspaceCount} />
+                      {workspaceHighlighted && (
+                        <motion.div
+                          initial={{ x: '-100%' }}
+                          animate={{ x: '100%' }}
+                          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent"
+                        />
+                      )}
+                    </motion.div>
                   </div>
                 )}
               </div>
@@ -1487,7 +1645,7 @@ const Tasks: React.FC = () => {
                 onDragEnd={handleDragEnd}
                 onDragCancel={resetDragTilt}
               >
-                <div className="p-4 sm:p-6 lg:p-10 flex flex-col lg:flex-row gap-6 lg:gap-6 w-full lg:w-auto lg:min-w-max lg:h-full lg:items-stretch items-stretch lg:items-start">
+                <div className="px-4 sm:px-6 lg:px-10 pt-2 sm:pt-4 lg:pt-5 pb-4 sm:pb-6 lg:pb-10 flex flex-col lg:flex-row gap-6 lg:gap-6 w-full lg:w-auto lg:min-w-max lg:h-full lg:items-stretch items-stretch lg:items-start">
                   {columns.map((column) => {
                     const columnTasks = tasks.filter(t => t.status === column.id)
                     return (
@@ -1560,7 +1718,7 @@ const Tasks: React.FC = () => {
             )}
 
             {viewMode === 'table' && (
-              <div className="p-4 sm:p-6 lg:p-10 max-w-full space-y-8 sm:space-y-12 pb-20">
+              <div className="px-4 sm:px-6 lg:px-10 pt-2 sm:pt-4 lg:pt-5 pb-20 max-w-full space-y-8 sm:space-y-12">
                 {columns.map((column) => {
                   const columnTasks = tasks.filter(t => t.status === column.id)
                   if (columnTasks.length === 0) return null

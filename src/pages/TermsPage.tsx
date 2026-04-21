@@ -18,14 +18,10 @@ const TermsPage: React.FC = () => {
             <span className="text-xl font-bold tracking-tight">flui.</span>
           </Link>
 
-          <div className="flex items-center gap-4">
-            <Link to="/login" className="text-sm font-semibold text-[#37352f]/60 hover:text-[#202020] transition-colors">
-              Fazer login
-            </Link>
-            <Link to="/login" className="bg-[#202020] text-white text-xs font-bold px-4 py-2 rounded-[6px] shadow-sm hover:bg-[#202020]/90 transition-all">
-              Criar conta
-            </Link>
-          </div>
+        <Link to="/login?mode=signup" className="text-sm font-semibold text-[#37352f]/60 hover:text-[#202020] transition-colors flex items-center gap-1">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Voltar
+        </Link>
         </div>
       </header>
 

@@ -9,6 +9,9 @@ import { useLocation, Link } from 'react-router-dom'
 import { useSidebar } from '../contexts/SidebarContext'
 import { motion } from 'framer-motion'
 import { FeedbackWidget } from './FeedbackWidget'
+import flowLogo from '../assets/logo/flow.svg'
+import pulseLogo from '../assets/logo/pulse.svg'
+import gratisLogo from '../assets/logo/gratis.svg'
 
 export const Topbar: React.FC = () => {
   const { user, signOut } = useAuth()
@@ -75,35 +78,23 @@ export const Topbar: React.FC = () => {
         <div className="relative" ref={profileRef}>
           <div 
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="flex items-center gap-3 cursor-pointer group py-1.5 px-3 rounded-full hover:bg-[#f1f1f0] transition-all duration-200 active:scale-95 select-none"
+            className="flex items-center justify-center cursor-pointer group w-11 h-11 rounded-full hover:bg-[#e9e9e7]/60 transition-all duration-200 active:scale-95 select-none"
           >
-            <div className="flex flex-col items-end hidden xs:flex">
-                <span className="text-[13px] font-bold leading-tight text-[#37352f] truncate max-w-[80px] sm:max-w-[120px]">
-                  {firstName}
-                </span>
-                <div className="flex items-center gap-1">
-                <span className="text-[10px] text-[#37352f]/40 font-bold tracking-wider group-hover:text-[#37352f] transition-colors leading-none">
-                  {workspaceModeActive
-                    ? `Workspace · ${planId === 'pulse' ? 'Pulse' : 'Flow'}`
-                    : hasFlow
-                      ? (planId === 'pulse' ? 'Pulse' : 'Flow')
-                      : 'Gratuito'}
-                  </span>
-                </div>
-            </div>
-            <div className="w-9 h-9 rounded-full border-2 border-white shadow-md overflow-hidden flex-shrink-0 relative transition-transform duration-300 group-hover:scale-105">
-               {user?.user_metadata?.avatar_url && !avatarError ? (
+            <div className="w-9 h-9 rounded-full border-2 border-white shadow-md overflow-hidden flex-shrink-0 relative">
+               {user?.user_metadata?.avatar_url ? (
                  <img
                     src={user.user_metadata.avatar_url}
                     alt="Profile"
                     className="w-full h-full object-cover"
-                    onError={() => setAvatarError(true)}
                  />
                ) : (
                  <div className="w-full h-full flex items-center justify-center">
                    <Avvvatars value={user?.email || 'guest'} size={36} style="character" />
                  </div>
                )}
+               <div className="absolute inset-0 overflow-hidden rounded-full pointer-events-none">
+                 <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+               </div>
             </div>
           </div>
 
@@ -113,30 +104,21 @@ export const Topbar: React.FC = () => {
             anchor={profileRef}
             className="mt-2"
           >
-            <div className="px-3 py-2.5 mb-1 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0">
-                {user?.user_metadata?.avatar_url && !avatarError ? (
-                  <img
-                    src={user.user_metadata.avatar_url}
-                    alt="Profile"
-                    className="w-full h-full object-cover"
-                    onError={() => setAvatarError(true)}
+            <div className="px-3 pt-3 pb-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[13px] font-semibold text-[#37352f] truncate leading-snug">{fullName}</p>
+                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#f7f7f5] border border-[#e9e9e7] shadow-sm flex-shrink-0">
+                  <img 
+                    src={planId === 'pulse' ? pulseLogo : (planId === 'flow' ? flowLogo : gratisLogo)} 
+                    alt="" 
+                    className="w-2.5 h-2.5 object-contain"
                   />
-                ) : (
-                  <Avvvatars value={user?.email || 'guest'} size={36} style="character" />
-                )}
+                  <span className="text-[8.5px] font-bold text-[#37352f]/50 uppercase tracking-tight">
+                    {planId || 'Starter'}
+                  </span>
+                </div>
               </div>
-              <div className="flex flex-col min-w-0 flex-1">
-                <span className="text-sm font-bold text-[#37352f] leading-none truncate">{fullName}</span>
-                <span className="text-[11px] text-[#37352f]/50 truncate mt-0.5">{user?.email}</span>
-                <span className="text-[10px] font-bold text-[#37352f]/30 tracking-widest mt-0.5">
-                  {workspaceModeActive
-                    ? `Workspace de ${workspaceMembership?.ownerName}`
-                    : hasFlow
-                      ? 'Assinatura Ativa'
-                      : 'Conta Gratuita'}
-                </span>
-              </div>
+              <p className="text-[11px] text-[#37352f]/40 truncate mt-0.5">{user?.email}</p>
             </div>
             
             {/* Switch de modo: próprio plano vs workspace */}

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import NumberFlow from '@number-flow/react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   ClipboardList,
   CheckCircle2,
@@ -86,6 +86,7 @@ const Dashboard: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats>({ todo: 0, doing: 0, done: 0 })
   const [loadingRecent, setLoadingRecent] = useState(true)
   const [recentTasks, setRecentTasks] = useState<any[]>([])
+  const [showAllTasks, setShowAllTasks] = useState(false)
   const [dailyQuote, setDailyQuote] = useState<string>(() => {
     const today = new Date().toISOString().split('T')[0]
     const cachedDate = localStorage.getItem('dailyQuoteDate')
@@ -102,7 +103,9 @@ const Dashboard: React.FC = () => {
   })
   const [isLoadingQuote, setIsLoadingQuote] = useState<boolean>(() => {
     const today = new Date().toISOString().split('T')[0]
-    return localStorage.getItem('dailyQuoteDate') !== today
+    const dateMatch = localStorage.getItem('dailyQuoteDate') === today
+    const hasQuote = !!(localStorage.getItem('dailyQuote') || '').trim()
+    return !dateMatch || !hasQuote
   })
 
   const fullName = user?.user_metadata?.name || 'Companheiro(a) de Equipe'
@@ -172,7 +175,7 @@ const Dashboard: React.FC = () => {
           return dateB - dateA
         })
 
-        setRecentTasks(mappedTasks.slice(0, 4))
+        setRecentTasks(mappedTasks)
       } catch (err) {
         console.error('Erro no Dashboard:', err)
       } finally {
@@ -184,9 +187,29 @@ const Dashboard: React.FC = () => {
   }, [user])
 
   useEffect(() => {
+    const FALLBACK_QUOTES = [
+      'Foco hoje, sucesso amanhã',
+      'Disciplina transforma sonhos em realidade',
+      'Pequenos passos constantes constroem grandes conquistas',
+      'Sua determinação é o seu maior recurso',
+      'Cada dia é uma nova oportunidade de crescer',
+      'Consistência supera intensidade',
+      'O sucesso começa com a decisão de tentar',
+    ]
+
+    const saveFallback = (today: string) => {
+      const quote = FALLBACK_QUOTES[Math.floor(Math.random() * FALLBACK_QUOTES.length)]
+      setDailyQuote(quote)
+      localStorage.setItem('dailyQuote', quote)
+      localStorage.setItem('dailyQuoteDate', today)
+    }
+
     const fetchAIGeneratedQuote = async () => {
       const today = new Date().toISOString().split('T')[0]
-      if (localStorage.getItem('dailyQuoteDate') === today) {
+      const cachedQuote = (localStorage.getItem('dailyQuote') || '').trim()
+      if (localStorage.getItem('dailyQuoteDate') === today && cachedQuote) {
+        setDailyQuote(cachedQuote)
+        setIsLoadingQuote(false)
         return
       }
 
@@ -213,23 +236,23 @@ const Dashboard: React.FC = () => {
         })
         if (data.choices && data.choices[0]) {
           let raw: string = data.choices[0].message.content || ''
-          // Remove prefácios como "Aqui está:", "Claro:", "Minha resposta:", etc.
           raw = raw.replace(/^[^:：]+[:：]\s*/u, '').trim()
-          // Remove aspas ao redor
-          raw = raw.replace(/^["'"'«»]|["'"'«»]$/g, '').trim()
-          // Pega apenas a primeira linha/frase
-          raw = raw.split('\n')[0].split('. ')[0].trim()
-          // Se ficou muito longo ou vazio, descarta
-          if (!raw || raw.length > 120) {
-            setIsLoadingQuote(false)
-            return
+          raw = raw.split('\n')[0].trim()
+          raw = raw.replace(/["'"'«»]/g, '').trim()
+          raw = raw.split('. ')[0].trim()
+          raw = raw.replace(/[.!?]+$/, '').trim()
+          if (raw && raw.length <= 120) {
+            setDailyQuote(raw)
+            localStorage.setItem('dailyQuote', raw)
+            localStorage.setItem('dailyQuoteDate', today)
+          } else {
+            saveFallback(today)
           }
-          setDailyQuote(raw)
-          localStorage.setItem('dailyQuote', raw)
-          localStorage.setItem('dailyQuoteDate', today)
+        } else {
+          saveFallback(today)
         }
-      } catch (error) {
-        console.error('Erro ao gerar frase com IA:', error)
+      } catch {
+        saveFallback(today)
       } finally {
         setIsLoadingQuote(false)
       }
@@ -254,6 +277,7 @@ const Dashboard: React.FC = () => {
   }
 
   return (
+    <>
     <div className="flex-1 overflow-y-auto bg-white p-4 sm:p-8 lg:p-12 xl:px-20">
       <div className="max-w-[1400px] mx-auto space-y-8 sm:space-y-12">
 
@@ -432,8 +456,10 @@ const Dashboard: React.FC = () => {
               <h3 className="text-[13px] font-semibold text-[#37352f]/80 leading-relaxed min-h-[40px]">
                 {isLoadingQuote ? (
                   <span className="animate-pulse text-[#37352f]/40 flex items-center h-full">Gerando IA...</span>
-                ) : (
+                ) : dailyQuote ? (
                   `"${dailyQuote}"`
+                ) : (
+                  <span className="text-[#37352f]/30">—</span>
                 )}
               </h3>
             </div>
@@ -515,67 +541,57 @@ const Dashboard: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-6 sm:p-8 flex flex-col"
+            className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl overflow-hidden flex flex-col"
           >
-            <div className="flex items-center justify-between mb-8">
-              <h2 className="text-lg font-bold text-[#37352f] tracking-tight">Itens Recentes</h2>
+            <div className="flex items-center justify-between px-5 pt-5 pb-4">
+              <p className="text-[10px] font-medium text-[#37352f]/50 tracking-widest uppercase">Itens Recentes</p>
               <button
                 onClick={() => navigate('/tasks')}
-                className="text-[11px] font-bold text-[#37352f]/40 hover:text-[#37352f] tracking-wider transition-colors"
+                className="text-[10px] text-[#37352f]/35 hover:text-[#37352f]/70 transition-colors"
               >
-                Ver tudo
+                ver tudo
               </button>
             </div>
 
-            <div className="space-y-2">
+            <div className="border-t border-[#e9e9e7]" />
+
+            <div className="pb-2">
               {loadingRecent ? (
                 [0, 1, 2, 3].map(i => (
-                  <div key={i} className="flex gap-4 items-center">
-                    <div className="w-2 h-2 rounded-full bg-[#e9e9e7] flex-shrink-0" />
-                    <div className="flex-1 space-y-1.5">
-                      <div className="h-3 bg-[#e9e9e7] rounded animate-pulse w-4/5" />
-                      <div className="h-2.5 bg-[#e9e9e7] rounded animate-pulse w-1/3" />
-                    </div>
+                  <div key={i} className="px-5 py-3 border-b border-[#e9e9e7]">
+                    <div className="h-2.5 bg-[#e9e9e7] rounded animate-pulse w-3/4" />
                   </div>
                 ))
               ) : recentTasks.length === 0 ? (
-                <div className="text-center py-10 space-y-1.5">
-                  <p className="text-xs font-semibold text-[#37352f]/70">Nada por aqui</p>
-                  <p className="text-[11px] text-[#37352f]/50">Suas atividades aparecerão aqui.</p>
+                <div className="py-8 text-center">
+                  <p className="text-[11px] text-[#37352f]/35">Nenhuma atividade ainda.</p>
                 </div>
               ) : (
-                recentTasks.map((task, i) => (
-                  <div key={task.id || i} className="flex gap-4 items-center group cursor-pointer" onClick={() => navigate('/tasks')}>
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1 self-start ${task.status === 'done' ? 'bg-[#25D366]' :
-                        task.status === 'doing' ? 'bg-[#2383e2]' : 'bg-slate-300'
+                <>
+                  {recentTasks.slice(0, 5).map((task, i) => (
+                    <div
+                      key={task.id || i}
+                      className="flex items-center gap-2.5 px-5 py-3 border-b border-[#e9e9e7] last:border-0 cursor-pointer group"
+                      onClick={() => navigate('/tasks')}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                        task.status === 'done' ? 'bg-[#25D366]' :
+                        task.status === 'doing' ? 'bg-[#2383e2]' : 'bg-[#d3d3cf]'
                       }`} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-[#37352f] line-clamp-1 group-hover:underline">
+                      <p className="text-[13px] text-[#37352f]/70 group-hover:text-[#37352f] line-clamp-1 transition-colors flex-1">
                         {task.title}
                       </p>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                        <span className="text-[10px] font-semibold text-[#37352f]/40 tracking-tight uppercase">
-                          {task.visibility === 'workspace' ? 'Workspace' : 'Pessoal'}
-                        </span>
-                        
-                        {task.assignedToId && (
-                          <div className="flex items-center gap-1.5 pl-1.5 border-l border-[#e9e9e7]">
-                            <div className="w-3.5 h-3.5 rounded-full overflow-hidden flex-shrink-0 border border-[#e9e9e7]/50">
-                              {task.assignedToAvatar ? (
-                                <img src={task.assignedToAvatar} className="w-full h-full object-cover" alt="" onError={(e) => { (e.target as HTMLImageElement).style.display='none' }} />
-                              ) : (
-                                <Avvvatars value={task.assignedToEmail || task.assignedToId} size={14} style="character" />
-                              )}
-                            </div>
-                            <span className="text-[10px] font-semibold text-[#37352f]/60 truncate max-w-[80px]">
-                              {task.assignedToName?.split(' ')[0] || 'Membro'}
-                            </span>
-                          </div>
-                        )}
-                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                    {recentTasks.length > 5 && (
+                      <button
+                        onClick={() => setShowAllTasks(true)}
+                        className="w-full px-5 py-3 text-[11px] text-[#37352f]/40 hover:text-[#37352f]/70 transition-colors text-left"
+                      >
+                        ver mais {recentTasks.length - 5}
+                      </button>
+                    )}
+                </>
               )}
             </div>
           </motion.div>
@@ -583,6 +599,58 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
     </div>
+
+    {/* Modal — todos os itens recentes */}
+    <AnimatePresence>
+      {showAllTasks && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setShowAllTasks(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ duration: 0.18 }}
+            className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 pt-5 pb-4">
+              <p className="text-[10px] font-medium text-[#37352f]/50 tracking-widest uppercase">Todos os Itens</p>
+              <button
+                onClick={() => setShowAllTasks(false)}
+                className="text-[10px] text-[#37352f]/35 hover:text-[#37352f]/70 transition-colors"
+              >
+                fechar
+              </button>
+            </div>
+            <div className="border-t border-[#e9e9e7]" />
+            <div className="overflow-y-auto max-h-[60vh]">
+              {recentTasks.map((task, i) => (
+                <div
+                  key={task.id || i}
+                  className="flex items-center gap-2.5 px-5 py-3 border-b border-[#e9e9e7] last:border-0 cursor-pointer group"
+                  onClick={() => { setShowAllTasks(false); navigate('/tasks') }}
+                >
+                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                    task.status === 'done' ? 'bg-[#25D366]' :
+                    task.status === 'doing' ? 'bg-[#2383e2]' : 'bg-[#d3d3cf]'
+                  }`} />
+                  <p className="text-[13px] text-[#37352f]/70 group-hover:text-[#37352f] line-clamp-1 transition-colors flex-1">
+                    {task.title}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+    </>
   )
 }
 

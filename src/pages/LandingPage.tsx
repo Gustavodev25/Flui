@@ -8,6 +8,7 @@ import finloz from '../assets/logo/lui.svg'
 import flowIcon from '../assets/logo/flow.svg'
 import gratisIcon from '../assets/logo/gratis.svg'
 import pulseIcon from '../assets/logo/pulse.svg'
+import { Instagram, Linkedin } from 'lucide-react'
 import DeepSeekLandingChat from '../components/DeepSeekLandingChat'
 import PixelBlast from '../components/ui/PixelBlast'
 
@@ -162,10 +163,10 @@ const LandingPage: React.FC = () => {
             </Link>
           ) : (
             <>
-              <Link to="/login" className="text-sm font-semibold text-[#37352f]/60 hover:text-[#202020] transition-colors hidden sm:block">
+              <Link to="/login?mode=login" className="text-sm font-semibold text-[#37352f]/60 hover:text-[#202020] transition-colors hidden sm:block">
                 Fazer login
               </Link>
-              <Link to="/login" className="bg-[#202020] text-white text-sm font-medium px-4 py-2 rounded-[6px] shadow-md shadow-black/5 hover:bg-[#202020]/90 transition-all">
+              <Link to="/login?mode=signup" className="bg-[#202020] text-white text-sm font-medium px-4 py-2 rounded-[6px] shadow-md shadow-black/5 hover:bg-[#202020]/90 transition-all">
                 Criar conta
               </Link>
             </>
@@ -242,7 +243,7 @@ const LandingPage: React.FC = () => {
               className="mt-8"
             >
               <Link
-                to={user ? "/dashboard" : "/login"}
+                to={user ? "/dashboard" : "/login?mode=signup"}
                 className="relative inline-block overflow-hidden bg-[#202020] text-white font-semibold text-base px-8 py-4 rounded-2xl shadow-lg shadow-black/10 hover:bg-[#30302E] transition-colors"
               >
                 <motion.span
@@ -627,7 +628,7 @@ const LandingPage: React.FC = () => {
             </div>
 
             <div className="relative z-10 shrink-0">
-              <Link to={user ? "/checkout-preview" : "/login"} className="bg-[#202020] text-white text-sm font-semibold px-6 py-3 rounded-xl shadow-md shadow-[#202020]/10 hover:bg-[#30302E] hover:scale-[1.02] transition-all inline-block">
+              <Link to={user ? "/checkout-preview" : "/login?mode=signup"} className="bg-[#202020] text-white text-sm font-semibold px-6 py-3 rounded-xl shadow-md shadow-[#202020]/10 hover:bg-[#30302E] hover:scale-[1.02] transition-all inline-block">
                 {user ? "Acessar Painel" : "Criar conta"}
               </Link>
             </div>
@@ -704,7 +705,7 @@ const LandingPage: React.FC = () => {
               </div>
 
               <Link
-                to={user ? "/dashboard" : "/login"}
+                to={user ? "/dashboard" : "/login?mode=signup"}
                 className="w-full py-3.5 border border-[#e9e9e7] bg-white text-[#37352f]/60 text-sm font-bold rounded-xl hover:bg-[#f7f7f5] hover:text-[#37352f] transition-all flex items-center justify-center gap-2 relative z-10"
               >
                 {user ? "Acessar painel" : "Começar grátis"}
@@ -776,7 +777,7 @@ const LandingPage: React.FC = () => {
                 </p>
 
                 <Link
-                  to={user ? "/checkout-preview" : "/login"}
+                  to={user ? "/checkout-preview" : "/login?mode=signup"}
                   className="w-full py-3.5 bg-[#202020] text-white text-sm font-bold rounded-xl hover:bg-[#30302E] transition-all flex items-center justify-center gap-2 shadow-xl shadow-[#202020]/10 hover:shadow-[#202020]/20 transform hover:-translate-y-0.5 relative z-10"
                 >
                   Assinar agora
@@ -861,7 +862,7 @@ const LandingPage: React.FC = () => {
                 </div>
 
                 <Link
-                  to={user ? "/checkout-preview" : "/login"}
+                  to={user ? "/checkout-preview" : "/login?mode=signup"}
                   className="w-full py-3.5 bg-[#202020] text-white text-sm font-bold rounded-xl hover:bg-[#303030] transition-all flex items-center justify-center gap-2 transform hover:-translate-y-0.5 relative z-10 shadow-sm"
                 >
                   Assinar agora
@@ -893,7 +894,7 @@ const LandingPage: React.FC = () => {
               </p>
             </div>
 
-            <Link to={user ? "/checkout-preview" : "/login"} className="bg-[#202020] text-white text-sm font-bold px-6 py-3 rounded-xl hover:bg-[#30302E] hover:scale-[1.02] transition-all flex items-center shrink-0 gap-2 shadow-sm">
+            <Link to={user ? "/checkout-preview" : "/login?mode=signup"} className="bg-[#202020] text-white text-sm font-bold px-6 py-3 rounded-xl hover:bg-[#30302E] hover:scale-[1.02] transition-all flex items-center shrink-0 gap-2 shadow-sm">
               {user ? "Acessar meu painel" : "Criar conta"}
               <svg className="w-4 h-4 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
             </Link>
@@ -902,14 +903,56 @@ const LandingPage: React.FC = () => {
 
       </main>
 
-      {/* Footer Minimalista */}
-      <footer className="w-full border-t border-[#e9e9e7] bg-[#f7f7f5] py-8 relative z-10">
-        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="text-base font-bold text-[#37352f] tracking-tight flex items-center gap-2">
-            <img src={logo} alt="Flui Logo" className="w-6 h-6 object-contain opacity-80" />
-            flui.
+      {/* Footer Ultra-Minimalista */}
+      <footer className="w-full border-t border-[#f1f1f0] bg-white py-12 relative z-10">
+        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex flex-col items-center md:items-start gap-2">
+            <div className="text-sm font-bold text-[#37352f] tracking-tight flex items-center gap-2 opacity-80">
+              <img src={logo} alt="Flui Logo" className="w-5 h-5 object-contain grayscale" />
+              flui.
+            </div>
+            <p className="text-[11px] font-medium text-[#37352f]/40">© {new Date().getFullYear()} Flui • Extrema clareza</p>
           </div>
-          <p className="text-xs font-medium text-[#37352f]/40">© {new Date().getFullYear()} Flui. Feito com extrema clareza.</p>
+
+          <div className="flex items-center gap-8">
+            <a 
+              href="https://instagram.com" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-[#37352f]/30 hover:text-[#37352f] transition-all duration-300"
+              aria-label="Instagram"
+            >
+              <Instagram size={16} strokeWidth={2} />
+            </a>
+            <a 
+              href="https://linkedin.com" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-[#37352f]/30 hover:text-[#37352f] transition-all duration-300"
+              aria-label="LinkedIn"
+            >
+              <Linkedin size={16} strokeWidth={2} />
+            </a>
+            <a 
+              href="https://tiktok.com" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-[#37352f]/30 hover:text-[#37352f] transition-all duration-300"
+              aria-label="TikTok"
+            >
+              <svg 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className="w-4 h-4"
+              >
+                <path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5" />
+              </svg>
+            </a>
+          </div>
         </div>
       </footer>
       <DeepSeekLandingChat />

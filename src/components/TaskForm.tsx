@@ -501,7 +501,7 @@ REGRAS:
         return (
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-[#37352f]/30 flex items-center h-4 uppercase tracking-tight">Responsáveis</label>
-            <motion.div layout transition={{ type: 'spring', stiffness: 400, damping: 30 }} className="flex items-center gap-2">
+            <motion.div layout className="flex flex-wrap items-center gap-2 pt-1">
               {sorted.map(m => {
                 const isSelected = assignedTo.includes(m.id)
                 return (
@@ -509,45 +509,43 @@ REGRAS:
                     key={m.id}
                     type="button"
                     layout
-                    whileTap={{ scale: 0.9 }}
+                    initial={false}
+                    animate={{
+                      scale: isSelected ? 1 : 0.98,
+                    }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.95 }}
                     onClick={() => {
                       setAssignedTo(prev =>
                         prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id]
                       )
                     }}
-                    className="relative"
-                    title={m.name}
-                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 35, mass: 0.8 }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition-colors duration-300 ${
+                      isSelected
+                        ? 'bg-[#37352f] border-[#37352f] text-white shadow-sm'
+                        : 'bg-[#f7f7f5]/60 border-[#e9e9e7]/50 text-[#37352f]/40 hover:border-[#d3d3d1]'
+                    }`}
                   >
-                    <motion.div
-                      layout
-                      animate={{
-                        scale: isSelected ? 1 : 0.85,
-                        opacity: isSelected ? 1 : 0.4,
-                      }}
-                      whileHover={{ opacity: isSelected ? 1 : 0.7, scale: isSelected ? 1.05 : 0.92 }}
-                      transition={{ type: 'spring', stiffness: 500, damping: 28 }}
-                      className={`w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ${
-                        isSelected
-                          ? 'ring-2 ring-[#37352f] ring-offset-1'
-                          : 'ring-1 ring-[#e9e9e7]'
-                      }`}
-                    >
+                    <div className={`w-3.5 h-3.5 rounded-full overflow-hidden flex-shrink-0 transition-all duration-300 ${isSelected ? 'ring-1 ring-white/30' : 'grayscale opacity-70'}`}>
                       {m.avatar
                         ? <img src={m.avatar} alt="" className="w-full h-full object-cover" />
-                        : <Avvvatars value={m.email} size={32} style="character" />
+                        : <Avvvatars value={m.email} size={14} style="character" />
                       }
-                    </motion.div>
+                    </div>
+                    <span className={`text-[10px] font-bold truncate max-w-[90px] tracking-tight transition-colors duration-300 ${isSelected ? 'text-white' : 'text-[#37352f]/60'}`}>
+                      {m.name}
+                    </span>
                     <AnimatePresence>
                       {isSelected && (
                         <motion.div
-                          initial={{ scale: 0, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          exit={{ scale: 0, opacity: 0 }}
-                          transition={{ type: 'spring', stiffness: 600, damping: 25 }}
-                          className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-[#37352f] rounded-full flex items-center justify-center"
+                          initial={{ scale: 0, width: 0, opacity: 0 }}
+                          animate={{ scale: 1, width: 'auto', opacity: 1 }}
+                          exit={{ scale: 0, width: 0, opacity: 0 }}
+                          transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                          className="ml-0.5 overflow-hidden flex items-center"
                         >
-                          <Check size={8} strokeWidth={3} className="text-white" />
+                          <Check size={10} strokeWidth={4} />
                         </motion.div>
                       )}
                     </AnimatePresence>
