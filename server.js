@@ -1731,12 +1731,21 @@ app.patch('/api/workspace/sync-profile', async (req, res) => {
     if (name !== undefined) updates.member_name = name;
     if (avatar !== undefined) updates.member_avatar = avatar;
 
-    if (Object.keys(updates).length === 0) return res.json({ success: true });
+    if (Object.keys(updates).length > 0) {
+      await supabaseAdmin
+        .from('workspace_members')
+        .update(updates)
+        .eq('member_user_id', userId);
+    }
 
-    await supabaseAdmin
-      .from('workspace_members')
-      .update(updates)
-      .eq('member_user_id', userId);
+    // Atualiza display_name no binding do WhatsApp para que lembretes usem o nome novo
+    if (name !== undefined) {
+      await supabaseAdmin
+        .from('channel_bindings')
+        .update({ display_name: name })
+        .eq('user_id', userId)
+        .eq('channel', 'whatsapp');
+    }
 
     res.json({ success: true });
   } catch (err) {
