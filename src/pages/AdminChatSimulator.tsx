@@ -154,20 +154,17 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
             <div className="w-8 h-8 rounded-lg bg-[#202020] flex items-center justify-center">
               <Terminal className="w-4 h-4 text-white" />
             </div>
-            <h2 className="font-bold text-[11px] uppercase tracking-widest text-[#202020]">Engine Monitor</h2>
+            <h2 className="font-bold text-[11px] tracking-tight text-[#202020]">Engine Monitor</h2>
           </div>
           <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-white border border-[#e9e9e7] shadow-sm">
              <div className="w-1.5 h-1.5 rounded-full bg-[#C8FF00]" />
-             <span className="text-[9px] font-black uppercase tracking-tighter opacity-40">Live</span>
+             <span className="text-[9px] font-semibold opacity-40">Live</span>
           </div>
         </div>
         
         <div ref={logScrollRef} className="flex-1 overflow-y-auto px-6 py-4 space-y-0 custom-scrollbar">
           {logs.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center opacity-10 text-center px-8 mt-20">
-               <Terminal className="w-12 h-12 mb-4" />
-               <p className="text-[10px] font-bold uppercase tracking-[0.2em]">Idle Engine</p>
-            </div>
+            <p className="text-[10px] font-semibold opacity-30 px-2">Motor inativo</p>
           )}
           {logs.map((log, i) => (
             <motion.div 
@@ -183,7 +180,7 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
                 </div>
                 <div className="flex-1">
                   <div className="flex justify-between items-center mb-1.5">
-                     <span className="text-[8px] font-black uppercase tracking-[0.2em] text-[#202020]/30">{log.type}</span>
+                     <span className="text-[8px] font-semibold text-[#202020]/30">{log.type}</span>
                      <span className="text-[8px] font-medium opacity-20 tracking-tighter">
                        {new Date(log.data?.timestamp || Date.now()).toLocaleTimeString()}
                      </span>
@@ -193,14 +190,14 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
                   {(log.data?.tools || log.data?.latency_ms) && (
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       {log.data?.tools?.map((t: string, ti: number) => (
-                        <span key={ti} className="text-[7px] font-black uppercase px-2 py-0.5 rounded bg-[#f0f2f5] text-[#37352f]/40 tracking-widest">
+                        <span key={ti} className="text-[7px] font-semibold px-2 py-0.5 rounded bg-[#f0f2f5] text-[#37352f]/40">
                           {t}
                         </span>
                       ))}
                       {log.data?.latency_ms && (
-                        <span className="text-[7px] font-bold text-[#37352f]/20 uppercase ml-auto">
-                          {log.data.latency_ms}ms
-                        </span>
+                         <span className="text-[7px] font-bold text-[#37352f]/20 ml-auto">
+                           {log.data.latency_ms}ms
+                         </span>
                       )}
                     </div>
                   )}
@@ -223,17 +220,17 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
             </div>
             <div>
               <h1 className="font-bold text-[13px] tracking-tight text-[#202020]">Simulador Flui</h1>
-              <div className="flex items-center gap-1.5 text-[10px] opacity-30 font-bold uppercase tracking-widest">
+               <div className="flex items-center gap-1.5 text-[10px] opacity-30 font-bold">
                 <span>{loading ? 'Processando...' : 'Online'}</span>
               </div>
             </div>
           </div>
           
           <div className="flex items-center gap-4">
-             <div className="hidden md:flex flex-col items-end">
-                <span className="text-[10px] font-black uppercase tracking-widest text-[#202020]/20">Model</span>
-                <span className="text-[10px] font-bold text-[#202020]/40">{modelInfo?.modelId || 'LUI-2.5'}</span>
-             </div>
+              <div className="hidden md:flex flex-col items-end">
+                 <span className="text-[10px] font-semibold text-[#202020]/20">Modelo</span>
+                 <span className="text-[10px] font-bold text-[#202020]/40">{modelInfo?.modelId || 'Lui-2.5'}</span>
+              </div>
              <div className="w-px h-6 bg-[#e9e9e7] mx-1" />
              <button className="p-2 text-[#202020]/30 hover:text-[#202020] transition-colors rounded-lg hover:bg-[#f7f7f5]">
                 <RefreshCw size={18} />
@@ -285,7 +282,7 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
                     }`} />
                     
                     <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
-                    <div className="text-[9px] mt-1 text-right opacity-40 font-bold uppercase tracking-tighter">
+                    <div className="text-[9px] mt-1 text-right opacity-40 font-bold">
                       {msg.timestamp}
                     </div>
                   </div>

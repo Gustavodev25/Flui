@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
-import { AdminChatSimulator } from './AdminChatSimulator';
+
 import { useAuth } from '../contexts/AuthContext';
 import {
   ShieldAlert, Search, Users, LogOut, ArrowRight,
-  MessageSquare, CheckSquare, MessageCircle, Bot, User as UserIcon,
-  ChevronLeft, ChevronRight, Globe, Smartphone,
-  Filter, RefreshCw, Route, MapPin, Activity, BookOpen, AlertTriangle, TrendingUp
+  MessageSquare, CheckSquare, MessageCircle, User as UserIcon,
+  ChevronLeft, ChevronRight, Smartphone,
+  RefreshCw, Route, MapPin, Activity, BookOpen, AlertTriangle, TrendingUp,
+  Globe
 } from 'lucide-react';
 import Avvvatars from 'avvvatars-react';
 import logo from '../assets/logo/logo.svg';
@@ -139,7 +140,6 @@ function formatMetric(value: number | null | undefined) {
 
 function channelLabel(channel: string) {
   if (channel === 'whatsapp') return 'WhatsApp';
-  if (channel === 'web') return 'Web';
   return channel || 'Outro';
 }
 
@@ -164,20 +164,20 @@ function AdminDashboardStats({ stats }: { stats: AdminStats }) {
         ].map(({ label, value, icon }) => (
           <div key={label} className="bg-white border border-[#e9e9e7] rounded-2xl p-5 flex flex-col gap-3 hover:border-[#d0d0ce] transition-all">
             <div className="flex items-center justify-between text-[#37352f]/30">
-              <span className="text-[11px] font-semibold uppercase tracking-wider">{label}</span>
+              <span className="text-[11px] font-semibold text-[#37352f]/40">{label}</span>
               {icon}
             </div>
-            <span className="text-3xl font-bold text-[#202020]">{formatMetric(value)}</span>
+            <span className="text-3xl font-semibold text-[#202020]">{formatMetric(value)}</span>
           </div>
         ))}
 
         <div className="bg-white border border-[#e9e9e7] rounded-2xl p-5 flex flex-col gap-3 hover:border-[#d0d0ce] transition-all">
           <div className="flex items-center justify-between text-[#37352f]/30">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">Consumo Wpp / mês</span>
+            <span className="text-[11px] font-semibold text-[#37352f]/40">Consumo Wpp / mês</span>
             <MessageCircle size={16} />
           </div>
           <div className="flex items-end gap-1.5">
-            <span className="text-3xl font-bold text-[#202020]">{formatMetric(stats.wppConversationsUsed)}</span>
+            <span className="text-3xl font-semibold text-[#202020]">{formatMetric(stats.wppConversationsUsed)}</span>
             <span className="text-sm font-semibold text-[#37352f]/30 mb-0.5">/ {formatMetric(stats.wppFreeLimit)}</span>
           </div>
           <div className="w-full bg-[#f3f3f1] h-1.5 rounded-full overflow-hidden">
@@ -199,7 +199,7 @@ function AdminDashboardStats({ stats }: { stats: AdminStats }) {
               </div>
               <p className="text-xs text-[#37352f]/40 mt-1">Páginas mais visitadas desde os últimos eventos registrados.</p>
             </div>
-            <span className="text-[10px] font-black uppercase tracking-[0.18em] text-[#37352f]/30">
+            <span className="text-[10px] font-semibold text-[#37352f]/30">
               {stats.analytics?.routeTrackingStatus === 'active' ? 'Ativo' : 'Aguardando'}
             </span>
           </div>
@@ -214,7 +214,7 @@ function AdminDashboardStats({ stats }: { stats: AdminStats }) {
                       <p className="text-[11px] font-medium text-[#37352f]/35 truncate">{route.path} • {formatShortDate(route.lastSeenAt)}</p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-black text-[#202020]">{formatMetric(route.visits)}</p>
+                      <p className="text-sm font-bold text-[#202020]">{formatMetric(route.visits)}</p>
                       <p className="text-[10px] font-bold text-[#37352f]/30">{formatMetric(route.uniqueUsers)} usuários</p>
                     </div>
                   </div>
@@ -255,7 +255,7 @@ function AdminDashboardStats({ stats }: { stats: AdminStats }) {
                     <p className="text-sm font-bold text-[#202020] truncate">{state.state}</p>
                     <p className="text-[11px] font-medium text-[#37352f]/35 truncate">{state.country} • {formatMetric(state.visits)} visitas • {formatMetric(state.messages)} msgs</p>
                   </div>
-                  <span className="text-lg font-black text-[#202020]">{formatMetric(state.users)}</span>
+                  <span className="text-lg font-bold text-[#202020]">{formatMetric(state.users)}</span>
                 </div>
               ))}
             </div>
@@ -275,11 +275,10 @@ function AdminDashboardStats({ stats }: { stats: AdminStats }) {
               <Activity size={16} />
               <h3 className="text-sm font-bold">Conversas e IA</h3>
             </div>
-            <p className="text-xs text-[#37352f]/40 mt-1">Volume, canais e sinais técnicos das conversas recentes.</p>
+            <span className="text-[11px] font-semibold text-[#37352f]/35">
+              Última mensagem: {formatShortDate(stats.analytics?.conversations.lastMessageAt)}
+            </span>
           </div>
-          <span className="text-[11px] font-bold text-[#37352f]/35">
-            Última mensagem: {formatShortDate(stats.analytics?.conversations.lastMessageAt)}
-          </span>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -290,44 +289,25 @@ function AdminDashboardStats({ stats }: { stats: AdminStats }) {
             { label: 'Chamadas de ferramentas', value: stats.analytics?.conversations.toolCalls || 0 },
           ].map((metric) => (
             <div key={metric.label} className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl p-4">
-              <p className="text-[10px] font-black uppercase tracking-wider text-[#37352f]/35">{metric.label}</p>
-              <p className="text-2xl font-black text-[#202020] mt-1">{formatMetric(metric.value)}</p>
+              <p className="text-[10px] font-semibold text-[#37352f]/35">{metric.label}</p>
+              <p className="text-2xl font-bold text-[#202020] mt-1">{formatMetric(metric.value)}</p>
             </div>
           ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_0.8fr] gap-5">
-          <div className="space-y-3">
-            {stats.analytics?.channels?.length ? stats.analytics.channels.map((channel) => (
-              <div key={channel.channel} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {channel.channel === 'whatsapp' ? <Smartphone size={14} className="text-green-600" /> : <Globe size={14} className="text-[#37352f]/50" />}
-                    <span className="text-sm font-bold text-[#202020]">{channelLabel(channel.channel)}</span>
-                  </div>
-                  <span className="text-xs font-bold text-[#37352f]/40">{formatMetric(channel.messages)} mensagens</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-[#f3f3f1] overflow-hidden">
-                  <div className="h-full bg-[#202020] rounded-full" style={{ width: `${Math.max(channel.percentage, 4)}%` }} />
-                </div>
-              </div>
-            )) : (
-              <p className="text-sm text-[#37352f]/40">Sem canais recentes para exibir.</p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-3 gap-2">
+        <div className="flex items-center justify-between gap-5">
+          <div className="grid grid-cols-3 gap-3 flex-1">
             <div className="rounded-xl border border-[#e9e9e7] p-3">
-              <p className="text-[9px] font-black uppercase tracking-wider text-[#37352f]/30">Latência</p>
-              <p className="text-lg font-black text-[#202020]">{formatMetric(stats.analytics?.conversations.avgLatencyMs)}ms</p>
+              <p className="text-[9px] font-semibold text-[#37352f]/30">Latência</p>
+              <p className="text-lg font-semibold text-[#202020]">{formatMetric(stats.analytics?.conversations.avgLatencyMs)}ms</p>
             </div>
             <div className="rounded-xl border border-[#e9e9e7] p-3">
-              <p className="text-[9px] font-black uppercase tracking-wider text-[#37352f]/30">Fallback</p>
-              <p className="text-lg font-black text-[#202020]">{formatMetric(stats.analytics?.conversations.fallbackRate)}%</p>
+              <p className="text-[9px] font-semibold text-[#37352f]/30">Fallback</p>
+              <p className="text-lg font-semibold text-[#202020]">{formatMetric(stats.analytics?.conversations.fallbackRate)}%</p>
             </div>
             <div className="rounded-xl border border-[#e9e9e7] p-3">
-              <p className="text-[9px] font-black uppercase tracking-wider text-[#37352f]/30">Não lidas</p>
-              <p className="text-lg font-black text-[#202020]">{formatMetric(stats.analytics?.conversations.unreadThreads)}</p>
+              <p className="text-[9px] font-semibold text-[#37352f]/30">Não lidas</p>
+              <p className="text-lg font-semibold text-[#202020]">{formatMetric(stats.analytics?.conversations.unreadThreads)}</p>
             </div>
           </div>
         </div>
@@ -354,7 +334,7 @@ function AdminDashboardStats({ stats }: { stats: AdminStats }) {
                     <p className="text-sm font-bold text-[#202020]">{signal.topic}</p>
                     <p className="text-[11px] font-bold text-[#37352f]/35 mt-0.5">{formatMetric(signal.count)} mensagens relacionadas</p>
                   </div>
-                  <span className="text-lg font-black text-[#202020]">{formatMetric(signal.count)}</span>
+                  <span className="text-lg font-bold text-[#202020]">{formatMetric(signal.count)}</span>
                 </div>
                 {signal.sample && (
                   <p className="mt-3 text-xs leading-relaxed text-[#37352f]/55 line-clamp-2">"{signal.sample}"</p>
@@ -374,7 +354,7 @@ function AdminDashboardStats({ stats }: { stats: AdminStats }) {
   );
 }
 
-type AdminTab = 'dashboard' | 'users' | 'messages' | 'simulator';
+type AdminTab = 'dashboard' | 'users' | 'messages';
 
 export function AdminPanel() {
   const { user, session, isLoading: authLoading, signOut } = useAuth();
@@ -394,8 +374,8 @@ export function AdminPanel() {
   const [messagesPage, setMessagesPage] = useState(1);
   const [messagesTotalPages, setMessagesTotalPages] = useState(1);
   const [messagesTotal, setMessagesTotal] = useState(0);
-  const [messagesChannel, setMessagesChannel] = useState<string>('all');
   const [messagesSearch, setMessagesSearch] = useState('');
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const [expandedMessage, setExpandedMessage] = useState<string | null>(null);
   const [selectedUserMessages, setSelectedUserMessages] = useState<User | null>(null);
   const [messagesMode, setMessagesMode] = useState<'all' | 'by-user'>('by-user');
@@ -491,7 +471,6 @@ export function AdminPanel() {
       const resp = await adminFetch<MessagesResponse>('/api/admin/messages', undefined, {
         page: messagesPage,
         limit: 50,
-        channel: messagesChannel,
         search: messagesSearch || undefined,
         userId: selectedUserMessages?.id || undefined,
       });
@@ -503,7 +482,7 @@ export function AdminPanel() {
     } finally {
       setMessagesLoading(false);
     }
-  }, [adminFetch, isAuthenticated, messagesPage, messagesChannel, messagesSearch, selectedUserMessages]);
+  }, [adminFetch, isAuthenticated, messagesPage, messagesSearch, selectedUserMessages]);
 
   useEffect(() => {
     if (activeTab === 'messages' && isAuthenticated) {
@@ -514,7 +493,7 @@ export function AdminPanel() {
   // Reset page when filters change
   useEffect(() => {
     setMessagesPage(1);
-  }, [messagesChannel, messagesSearch, selectedUserMessages, messagesMode]);
+  }, [messagesSearch, selectedUserMessages, messagesMode]);
 
   // ---------------------------------------------
   // LOADER — validando sessão
@@ -596,78 +575,99 @@ export function AdminPanel() {
       ' ' + date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const getRoleBadge = (role: string) => {
-    if (role === 'assistant') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-500/10 text-purple-600 border border-purple-500/20">
-          <Bot size={10} /> IA
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-600 border border-blue-500/20">
-        <UserIcon size={10} /> Usuário
-      </span>
-    );
-  };
-
-  const getChannelBadge = (channel: string) => {
-    if (channel === 'whatsapp') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-green-500/10 text-green-600 border border-green-500/20">
-          <Smartphone size={10} /> WhatsApp
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#37352f]/5 text-[#37352f]/60 border border-[#e9e9e7]">
-        <Globe size={10} /> Web
-      </span>
-    );
-  };
 
   return (
-    <div className="h-screen bg-white text-[#37352f] font-sans selection:bg-[#37352f]/10 relative overflow-hidden flex flex-col">
-      {/* Background Decoration - Only at the top */}
-      <div className="absolute inset-x-0 top-0 h-[500px] z-0 pointer-events-none overflow-hidden bg-[#f7f7f5]">
-        <PixelBlast 
-          count={12}
-          color="#202020"
-          size={120}
-          speed={0.2}
-          className="opacity-[0.03]"
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#f7f7f5]/50 to-white" />
+    <div className="h-screen bg-white text-[#37352f] font-sans selection:bg-[#37352f]/10 relative overflow-hidden flex flex-col hide-scrollbar">
+      {/* Background Decoration - Sync with Landing Page Hero */}
+      <div className="absolute top-0 left-0 w-full h-[800px] pointer-events-none z-0 overflow-hidden"
+        style={{
+          maskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)'
+        }}
+      >
+        <div className="absolute inset-0">
+          <PixelBlast
+            variant="square"
+            pixelSize={3}
+            color="#e2e2e2"
+            patternScale={4}
+            patternDensity={0.6}
+            enableRipples
+            rippleSpeed={0.3}
+            rippleThickness={0.1}
+            rippleIntensityScale={1}
+            speed={0.3}
+            transparent
+            edgeFade={0}
+          />
+        </div>
+
+        {/* Mockup Fragments Floating in Background - Subtly added to Admin */}
+        <div className="absolute inset-0 opacity-[0.03] select-none">
+          <motion.div
+            animate={{ x: [0, 15, 0], y: [0, 20, 0], rotate: [-2, 2, -2] }}
+            transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute top-[5%] left-[-5%] w-72 h-64 bg-[#37352f]/5 border border-[#37352f]/10 rounded-3xl p-4 flex flex-col gap-3"
+          >
+            <div className="flex justify-between items-center px-1">
+              <div className="w-12 h-2 bg-[#37352f]/20 rounded-full" />
+              <div className="flex gap-1"><div className="w-1 h-1 bg-[#37352f]/40 rounded-full" /><div className="w-1 h-1 bg-[#37352f]/40 rounded-full" /></div>
+            </div>
+            <div className="grid grid-cols-7 gap-2 flex-1">
+              {Array.from({ length: 28 }).map((_, i) => (
+                <div key={i} className="aspect-square border border-[#37352f]/10 rounded-md flex flex-col items-center justify-center p-0.5">
+                  <div className={`w-full h-1 bg-[#37352f]/20 rounded-full ${[3, 8, 15, 22].includes(i) ? 'opacity-100' : 'opacity-0'}`} />
+                </div>
+              ))}
+            </div>
+          </motion.div>
+
+          <motion.div
+            animate={{ x: [0, -20, 0], y: [0, -10, 0], rotate: [5, 8, 5] }}
+            transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute top-[35%] right-[-8%] w-80 h-48 bg-[#37352f]/5 border border-[#37352f]/10 rounded-2xl p-6 flex flex-col gap-4"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-6 h-6 rounded-md border-2 border-[#37352f]/40" />
+              <div className="h-3 w-40 bg-[#37352f]/30 rounded-full" />
+            </div>
+            <div className="space-y-2 ml-9">
+              <div className="h-1.5 w-full bg-[#37352f]/10 rounded-full" />
+              <div className="h-1.5 w-[70%] bg-[#37352f]/10 rounded-full" />
+            </div>
+          </motion.div>
+        </div>
       </div>
 
+      {/* Decorative radial gradient - Sync with Landing Page */}
+      <div 
+        className="absolute top-0 left-0 w-full h-[1000px] pointer-events-none z-0"
+        style={{ background: 'radial-gradient(circle at 50% 0%, rgba(55, 53, 47, 0.03) 0%, transparent 70%)' }}
+      />
+
       {/* ═══════════ TOP BAR ═══════════ */}
-      <header className="sticky top-0 z-50 bg-white/10 backdrop-blur-md border-b border-[#e9e9e7]">
-        <div className={`${activeTab === 'simulator' ? 'w-full px-6' : 'max-w-6xl mx-auto px-6'} py-4 transition-all duration-300`}>
+      <header className="sticky top-0 z-50 transition-all duration-300">
+        <div className={`max-w-6xl mx-auto px-6 py-4 transition-all duration-300`}>
           <div className="flex items-center justify-between">
             {/* Left: Logo (Igual LP) */}
             <div className="flex items-center gap-2">
               <img src={logo} alt="Flui Logo" className="w-8 h-8 object-contain" />
-              <span className="text-xl font-bold tracking-tight text-[#202020]">flui.</span>
+              <span className="text-xl font-bold tracking-tight text-[#202020]">Lui</span>
             </div>
 
-            {/* Center: Navigation Tabs (Style refined) - More robust than absolute position */}
-            <nav className="hidden lg:flex items-center gap-1 bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl p-1">
-              {([
-                { id: 'dashboard', label: 'Painel', icon: <CheckSquare size={14} /> },
-                { id: 'users',     label: 'Usuários', icon: <Users size={14} /> },
-                { id: 'messages',  label: 'Mensagens', icon: <MessageSquare size={14} /> },
-                { id: 'simulator', label: 'Simulador', icon: <Bot size={14} /> },
-              ] as { id: AdminTab; label: string; icon: React.ReactNode }[]).map(({ id, label, icon }) => (
+            {/* Center: Navigation Tabs (Simple style) */}
+            <nav className="hidden lg:flex items-center gap-6">
+              {(['dashboard', 'users', 'messages'] as AdminTab[]).map((id) => (
                 <button
                   key={id}
                   onClick={() => setActiveTab(id)}
-                  className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  className={`text-xs font-bold transition-all ${
                     activeTab === id
-                      ? 'bg-white text-[#202020] shadow-sm border border-[#e9e9e7]'
-                      : 'text-[#37352f]/50 hover:text-[#37352f]/80'
+                      ? 'text-[#202020]'
+                      : 'text-[#37352f]/40 hover:text-[#37352f]/80'
                   }`}
                 >
-                  {icon}{label}
+                  {id === 'dashboard' ? 'Painel' : id === 'users' ? 'Usuários' : 'Mensagens'}
                 </button>
               ))}
             </nav>
@@ -677,20 +677,17 @@ export function AdminPanel() {
               <span className="hidden sm:block text-xs font-medium text-[#37352f]/40">
                 {user?.user_metadata?.name?.split(' ')[0] || user?.email?.split('@')[0]}
               </span>
-              {/* Mobile menu */}
-              <div className="lg:hidden flex items-center gap-1 bg-[#f7f7f5] border border-[#e9e9e7] rounded-lg p-1 mr-2">
-                {([
-                  { id: 'dashboard', icon: <CheckSquare size={15} /> },
-                  { id: 'users',     icon: <Users size={15} /> },
-                  { id: 'messages',  icon: <MessageSquare size={15} /> },
-                  { id: 'simulator', icon: <Bot size={15} /> },
-                ] as { id: AdminTab; icon: React.ReactNode }[]).map(({ id, icon }) => (
+              {/* Mobile menu - Simple text version */}
+              <div className="lg:hidden flex items-center gap-4 mr-2">
+                {(['dashboard', 'users', 'messages'] as AdminTab[]).map((id) => (
                   <button
                     key={id}
                     onClick={() => setActiveTab(id)}
-                    className={`p-1.5 rounded-md transition-all ${activeTab === id ? 'bg-white shadow-sm text-[#202020]' : 'text-[#37352f]/40'}`}
+                    className={`text-[10px] font-bold transition-all ${
+                      activeTab === id ? 'text-[#202020]' : 'text-[#37352f]/40'
+                    }`}
                   >
-                    {icon}
+                    {id === 'dashboard' ? 'Painel' : id === 'users' ? 'Usuários' : 'Mensagens'}
                   </button>
                 ))}
               </div>
@@ -700,7 +697,7 @@ export function AdminPanel() {
                   setIsAuthenticated(false);
                   signOut();
                 }}
-                className="px-4 py-2 bg-[#202020] text-white text-[11px] font-bold uppercase tracking-wider rounded-xl hover:bg-[#30302E] shadow-sm transition-all flex items-center gap-2"
+                className="px-4 py-2 bg-[#202020] text-white text-[11px] font-bold rounded-xl hover:bg-[#30302E] shadow-sm transition-all flex items-center gap-2"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 Sair
@@ -712,9 +709,8 @@ export function AdminPanel() {
 
       {/* Content Area */}
       <div className={`flex-1 overflow-hidden relative z-10 transition-all duration-300 ${
-        activeTab === 'simulator' ? 'w-full px-0' :
-        activeTab === 'users' ? 'w-full max-w-6xl mx-auto px-6 py-8 flex flex-col' :
-        'w-full max-w-6xl mx-auto px-6 py-8 overflow-y-auto custom-scrollbar'
+        (activeTab === 'users' || activeTab === 'messages') ? 'w-full max-w-6xl mx-auto px-6 py-8 flex flex-col' :
+        'w-full max-w-6xl mx-auto px-6 py-8 overflow-y-auto hide-scrollbar'
       }`}>
         
         <AnimatePresence mode="wait">
@@ -731,7 +727,7 @@ export function AdminPanel() {
               {/* Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 shrink-0">
                 <div>
-                  <h2 className="text-xl font-bold text-[#202020] tracking-tight">Usuários</h2>
+                  <h2 className="text-xl font-semibold text-[#202020] tracking-tight">Usuários</h2>
                   <p className="text-sm text-[#37352f]/40 mt-0.5">{users.length} contas registradas</p>
                 </div>
                 <div className="relative w-full sm:w-72">
@@ -747,10 +743,10 @@ export function AdminPanel() {
               </div>
 
                 {/* Table Container */}
-                <div className="flex-1 min-h-0 overflow-y-auto bg-white border border-[#e9e9e7] rounded-2xl shadow-sm [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+                <div className="flex-1 min-h-0 overflow-y-auto bg-white border border-[#e9e9e7] rounded-2xl shadow-sm hide-scrollbar">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-[#e9e9e7] text-[#37352f]/40 text-[10px] font-semibold uppercase tracking-widest">
+                      <tr className="border-b border-[#e9e9e7] text-[#37352f]/40 text-[10px] font-semibold tracking-tight">
                         <th className="py-3 px-5">Usuário</th>
                         <th className="py-3 px-5">Plano</th>
                         <th className="py-3 px-5 text-right">Ações</th>
@@ -870,7 +866,7 @@ export function AdminPanel() {
               transition={{ duration: 0.2 }}
             >
               <div className="mb-8">
-                <p className="text-xs font-semibold text-[#37352f]/30 uppercase tracking-widest mb-1">
+                <p className="text-xs font-semibold text-[#37352f]/30 mb-1">
                   Bem-vindo de volta
                 </p>
                 <h2 className="text-2xl font-bold text-[#202020] tracking-tight">
@@ -892,7 +888,7 @@ export function AdminPanel() {
                   ].map(({ label, value, icon }) => (
                     <div key={label} className="bg-white border border-[#e9e9e7] rounded-2xl p-5 flex flex-col gap-3 hover:border-[#d0d0ce] transition-all">
                       <div className="flex items-center justify-between text-[#37352f]/30">
-                        <span className="text-[11px] font-semibold uppercase tracking-wider">{label}</span>
+                        <span className="text-[11px] font-semibold tracking-wider">{label}</span>
                         {icon}
                       </div>
                       <span className="text-3xl font-bold text-[#202020]">{value}</span>
@@ -902,7 +898,7 @@ export function AdminPanel() {
                   {/* WhatsApp card com barra */}
                   <div className="bg-white border border-[#e9e9e7] rounded-2xl p-5 flex flex-col gap-3 hover:border-[#d0d0ce] transition-all">
                     <div className="flex items-center justify-between text-[#37352f]/30">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider">Consumo Wpp / mês</span>
+                      <span className="text-[11px] font-semibold tracking-wider">Consumo Wpp / mês</span>
                       <MessageCircle size={16} />
                     </div>
                     <div className="flex items-end gap-1.5">
@@ -927,19 +923,7 @@ export function AdminPanel() {
             </motion.div>
           )}
 
-          {/* ═══════════ ABA SIMULADOR ═══════════ */}
-          {activeTab === 'simulator' && (
-            <motion.div
-              key="simulator"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="w-full h-full"
-            >
-              <AdminChatSimulator isEmbedded={true} />
-            </motion.div>
-          )}
+
 
           {/* ═══════════ ABA MENSAGENS ═══════════ */}
           {activeTab === 'messages' && (
@@ -949,148 +933,158 @@ export function AdminPanel() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.2 }}
+              className="h-full flex flex-col"
             >
               {/* Header da seção */}
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 shrink-0">
                 <div>
-                  <h2 className="text-2xl font-extrabold tracking-tight text-[#202020]">Log de Mensagens</h2>
-                  <p className="text-[#37352f]/50 font-medium text-sm mt-1">
-                    {messagesTotal} mensagens registradas — Conversas de usuários e respostas da IA
+                  <h2 className="text-xl font-bold text-[#202020] tracking-tight">Log de mensagens</h2>
+                  <p className="text-sm text-[#37352f]/40 mt-0.5">
+                    {messagesTotal} mensagens registradas
                   </p>
                 </div>
-                <button
-                  onClick={fetchMessages}
-                  disabled={messagesLoading}
-                  className="px-4 py-2.5 bg-white text-[#37352f] text-sm font-bold rounded-xl hover:bg-[#f7f7f5] border border-[#e9e9e7] shadow-sm transition-all flex items-center gap-2"
-                >
-                  <RefreshCw size={14} className={messagesLoading ? 'animate-spin' : ''} />
-                  Atualizar
-                </button>
-              </div>
-
-              {/* Subtabs for Messages */}
-              <div className="flex items-center gap-4 mb-6 border-b border-[#e9e9e7]">
-                <button
-                  onClick={() => {
-                    setMessagesMode('by-user');
-                    if (selectedUserMessages) setSelectedUserMessages(null);
-                  }}
-                  className={`pb-3 text-sm font-bold transition-all relative ${
-                    messagesMode === 'by-user' ? 'text-[#202020]' : 'text-[#37352f]/40 hover:text-[#37352f]/60'
-                  }`}
-                >
-                  Por Usuário
-                  {messagesMode === 'by-user' && (
-                    <motion.div layoutId="msgTab" className="absolute bottom-0 left-0 w-full h-0.5 bg-[#202020]" />
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    setMessagesMode('all');
-                    setSelectedUserMessages(null);
-                  }}
-                  className={`pb-3 text-sm font-bold transition-all relative ${
-                    messagesMode === 'all' ? 'text-[#202020]' : 'text-[#37352f]/40 hover:text-[#37352f]/60'
-                  }`}
-                >
-                  Todos os Logs
-                  {messagesMode === 'all' && (
-                    <motion.div layoutId="msgTab" className="absolute bottom-0 left-0 w-full h-0.5 bg-[#202020]" />
-                  )}
-                </button>
+                <div className="flex items-center gap-2">
+                  <div className="relative w-full sm:w-72">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#37352f]/30 w-3.5 h-3.5" />
+                    <input
+                      type="text"
+                      placeholder={messagesMode === 'by-user' && !selectedUserMessages ? "Buscar usuário..." : "Buscar conteúdo..."}
+                      value={messagesMode === 'by-user' && !selectedUserMessages ? searchTerm : messagesSearch}
+                      onChange={(e) => {
+                        if (messagesMode === 'by-user' && !selectedUserMessages) {
+                          setSearchTerm(e.target.value);
+                        } else {
+                          setMessagesSearch(e.target.value);
+                        }
+                      }}
+                      className="w-full bg-white border border-[#e9e9e7] rounded-xl pl-9 pr-4 py-2 text-sm text-[#37352f] placeholder:text-[#37352f]/30 focus:outline-none focus:border-[#202020] focus:ring-1 focus:ring-[#202020] transition-all"
+                    />
+                  </div>
+                  <button
+                    onClick={fetchMessages}
+                    disabled={messagesLoading}
+                    className="p-2 bg-white text-[#37352f]/40 hover:text-[#202020] rounded-xl border border-[#e9e9e7] transition-all"
+                    title="Atualizar"
+                  >
+                    <RefreshCw size={16} className={messagesLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
               </div>
 
               {/* View: User List for selection */}
               {messagesMode === 'by-user' && !selectedUserMessages && (
-                <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-6 shadow-sm">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredUsers.map(u => (
-                      <button
-                        key={u.id}
-                        onClick={() => {
-                          setMessages([]);
-                          setSelectedUserMessages(u);
-                          setMessagesPage(1);
-                        }}
-                        className="flex items-center gap-3 p-4 bg-white border border-[#e9e9e7] rounded-2xl hover:border-[#202020] hover:shadow-md transition-all text-left group"
-                      >
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#37352f]/5 to-[#37352f]/10 flex items-center justify-center font-bold text-[#37352f]/40 shrink-0 group-hover:from-[#202020]/5 group-hover:to-[#202020]/10 transition-colors">
-                          {u.name?.[0]?.toUpperCase() || u.email[0].toUpperCase()}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-bold text-sm text-[#202020] truncate">{u.name || 'Sem nome'}</p>
-                          <p className="text-[11px] font-medium text-[#37352f]/40 truncate">{u.email}</p>
-                        </div>
-                        <ArrowRight size={14} className="ml-auto text-[#37352f]/20 group-hover:text-[#202020] transition-colors" />
-                      </button>
-                    ))}
-                    {filteredUsers.length === 0 && (
-                      <div className="col-span-full py-12 text-center">
-                        <div className="flex flex-col items-center gap-2">
-                          <Users className="w-10 h-10 text-[#e9e9e7]" />
-                          <span className="text-[#37352f]/40 font-medium text-sm">Nenhum usuário encontrado para selecionar.</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                <div className="flex-1 min-h-0 overflow-y-auto bg-white border border-[#e9e9e7] rounded-2xl shadow-sm hide-scrollbar">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#e9e9e7] text-[#37352f]/40 text-[10px] font-semibold tracking-tight">
+                        <th className="py-3 px-5">Usuário</th>
+                        <th className="py-3 px-5">Plano</th>
+                        <th className="py-3 px-5 text-right">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#f3f3f1]">
+                      {(searchTerm ? filteredUsers : users).map((u) => (
+                        <tr key={u.id} className="hover:bg-[#fafafa] transition-colors group">
+                          <td className="py-3 px-5">
+                            <div className="flex items-center gap-3">
+                              <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 flex items-center justify-center">
+                                {u.avatar && !avatarErrors.has(u.id) ? (
+                                  <img
+                                    src={u.avatar}
+                                    alt={u.name}
+                                    className="w-full h-full object-cover"
+                                    onError={() => setAvatarErrors(prev => new Set(prev).add(u.id))}
+                                  />
+                                ) : (
+                                  <Avvvatars value={u.email} style="shape" size={28} radius={50} />
+                                )}
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-[#202020] leading-tight">{u.name || '—'}</p>
+                                <p className="text-[11px] text-[#37352f]/40 leading-tight">{u.email}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-5">
+                            <div className="flex items-center gap-2">
+                              {u.planId === 'flow' ? (
+                                <>
+                                  <img src={flowLogo} alt="Flow" className="h-4 w-auto opacity-70" />
+                                  <span className="text-xs font-semibold text-[#37352f]/60">Flow</span>
+                                </>
+                              ) : u.planId === 'pulse' ? (
+                                <>
+                                  <img src={pulseLogo} alt="Pulse" className="h-4 w-auto opacity-70" />
+                                  <span className="text-xs font-semibold text-[#37352f]/60">Pulse</span>
+                                </>
+                              ) : (
+                                <>
+                                  <img src={gratisLogo} alt="Grátis" className="h-4 w-auto opacity-40" />
+                                  <span className="text-xs font-semibold text-[#37352f]/30">Grátis</span>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-5">
+                            <div className="flex items-center justify-end">
+                              <button
+                                onClick={() => {
+                                  setMessages([]);
+                                  setSelectedUserMessages(u);
+                                  setMessagesPage(1);
+                                }}
+                                className="p-1.5 text-[#37352f]/25 hover:text-[#202020] hover:bg-[#f3f3f1] rounded-lg transition-all"
+                                title="Ver mensagens"
+                              >
+                                <ArrowRight size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {(searchTerm ? filteredUsers : users).length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="py-12 text-center">
+                            <div className="flex flex-col items-center gap-2">
+                              <Users className="w-8 h-8 text-[#e9e9e7]" />
+                              <span className="text-[#37352f]/40 text-sm">Nenhum usuário encontrado.</span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               )}
 
-              {/* Filters (only show if viewed something) */}
-              {(messagesMode === 'all' || selectedUserMessages) && (
-                <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-2xl p-4 mb-6 flex flex-col sm:flex-row gap-3">
-                  {/* Back button if single user */}
-                  {selectedUserMessages && (
-                    <button
-                      onClick={() => setSelectedUserMessages(null)}
-                      className="flex items-center gap-2 px-3 py-2 bg-white border border-[#e9e9e7] rounded-lg text-sm font-bold text-[#37352f]/60 hover:text-[#202020] transition-colors"
-                    >
-                      <ChevronLeft size={16} />
-                      Voltar
-                    </button>
-                  )}
-                  
-                  {/* Selected user badge */}
-                  {selectedUserMessages && (
-                    <div className="flex items-center gap-2 px-3 py-2 bg-[#202020] text-white rounded-lg text-sm font-bold shadow-sm">
-                      <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">
-                        {selectedUserMessages.name?.[0]?.toUpperCase() || selectedUserMessages.email[0].toUpperCase()}
-                      </div>
-                      <span className="truncate max-w-[150px]">{selectedUserMessages.name || selectedUserMessages.email}</span>
+              {selectedUserMessages && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center justify-between mb-8"
+                >
+                  <div className="flex items-center gap-3 px-4 py-2 bg-white border border-[#e9e9e7] rounded-2xl shadow-sm h-[42px] w-[200px] shrink-0">
+                    <div className="w-7 h-7 rounded-full overflow-hidden border border-[#e9e9e7] bg-white flex items-center justify-center">
+                      <Avvvatars value={selectedUserMessages.email} style="shape" size={28} radius={50} />
                     </div>
-                  )}
-
-                  {/* Channel filter */}
-                  <div className="flex items-center gap-2">
-                    <Filter size={14} className="text-[#37352f]/40" />
-                    <select
-                      value={messagesChannel}
-                      onChange={(e) => setMessagesChannel(e.target.value)}
-                      className="bg-white border border-[#e9e9e7] rounded-lg px-3 py-2 text-sm font-medium text-[#37352f] focus:outline-none focus:border-[#202020] focus:ring-1 focus:ring-[#202020] shadow-sm"
-                    >
-                      <option value="all">Todos os canais</option>
-                      <option value="whatsapp">WhatsApp</option>
-                      <option value="web">Web</option>
-                    </select>
+                    <span className="text-xs font-semibold text-[#202020] tracking-tight truncate">
+                      {selectedUserMessages.name || selectedUserMessages.email.split('@')[0]}
+                    </span>
                   </div>
 
-                  {/* Search */}
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#37352f]/40 w-4 h-4" />
-                    <input
-                      type="text"
-                      placeholder="Buscar por nome, email ou conteúdo..."
-                      value={messagesSearch}
-                      onChange={(e) => setMessagesSearch(e.target.value)}
-                      className="w-full bg-white border border-[#e9e9e7] rounded-lg pl-9 pr-4 py-2 text-sm font-medium text-[#37352f] focus:outline-none focus:border-[#202020] focus:ring-1 focus:ring-[#202020] shadow-sm transition-all"
-                    />
-                  </div>
-                </div>
+                  <button
+                    onClick={() => setSelectedUserMessages(null)}
+                    className="group flex items-center gap-2 px-6 py-2 bg-white border border-[#e9e9e7] rounded-2xl text-xs font-semibold text-[#37352f]/40 hover:text-[#202020] hover:border-[#202020]/20 hover:shadow-xl hover:shadow-black/5 transition-all active:scale-95 shadow-sm h-[42px] w-[200px] justify-center"
+                  >
+                    <ChevronLeft size={14} strokeWidth={3} className="group-hover:-translate-x-0.5 transition-transform" />
+                    Voltar
+                  </button>
+                </motion.div>
               )}
 
               {/* Messages List (only show if viewed something) */}
               {(messagesMode === 'all' || selectedUserMessages) && (
-                <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl shadow-sm overflow-hidden">
+                <div className="flex-1 min-h-0 overflow-y-auto bg-white border border-[#e9e9e7] rounded-2xl shadow-sm hide-scrollbar">
                   {messagesLoading ? (
                     <div className="py-20 flex flex-col items-center gap-3">
                       <RefreshCw size={24} className="text-[#37352f]/30 animate-spin" />
@@ -1102,140 +1096,182 @@ export function AdminPanel() {
                       <span className="text-[#37352f]/40 font-medium text-sm">Nenhuma mensagem encontrada.</span>
                     </div>
                   ) : (
-                    <div className="p-6 flex flex-col gap-10">
-                      {(() => {
-                        const groups: { [key: string]: typeof messages } = {};
-                        messages.forEach(msg => {
-                          const date = new Date(msg.created_at);
-                          const dateKey = date.toLocaleDateString('pt-BR');
-                          if (!groups[dateKey]) groups[dateKey] = [];
-                          groups[dateKey].push(msg);
-                        });
-
-                        return Object.entries(groups).map(([dateKey, groupMessages]) => {
-                          const today = new Date().toLocaleDateString('pt-BR');
-                          const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('pt-BR');
-                          
-                          let displayDate = dateKey;
-                          if (dateKey === today) displayDate = 'Hoje';
-                          else if (dateKey === yesterday) displayDate = 'Ontem';
-
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-[#e9e9e7] text-[#37352f]/40 text-[10px] font-semibold tracking-tight">
+                          <th className="py-3 px-5">Data e hora</th>
+                          <th className="py-3 px-5">Ator</th>
+                          <th className="py-3 px-5">Mensagem</th>
+                          <th className="py-3 px-5 text-right">Latência</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#f3f3f1]">
+                        {messages.map((msg) => {
+                          const isAI = msg.role === 'assistant';
                           return (
-                            <div key={dateKey} className="flex flex-col gap-6">
-                              {/* Date Header - Ultra Minimal */}
-                              <div className="flex justify-center py-4">
-                                <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#37352f]/20">
-                                  {displayDate}
-                                </span>
-                              </div>
-
-                              <div className="flex flex-col gap-6">
-                                {groupMessages.map((msg) => {
-                                  const isExpanded = expandedMessage === msg.id;
-                                  const isAI = msg.role === 'assistant';
-                                  
-                                  return (
-                                    <div
-                                      key={msg.id}
-                                      className={`flex w-full ${isAI ? 'justify-start' : 'justify-end'}`}
-                                    >
-                                      <div className={`max-w-[75%] flex flex-col ${isAI ? 'items-start' : 'items-end'}`}>
-                                        {/* Sender Header - With Avatars */}
-                                        <div className={`flex items-center gap-2 mb-1.5 px-0.5 ${isAI ? 'flex-row' : 'flex-row-reverse'}`}>
-                                          <div className={`w-4 h-4 rounded-full overflow-hidden flex items-center justify-center shrink-0 ${
-                                            isAI ? 'bg-[#202020]' : 'bg-[#37352f]/10'
-                                          }`}>
-                                            {isAI ? (
-                                              <img src={luiLogo} alt="Lui" className="w-2.5 h-2.5 object-cover" />
-                                            ) : msg.user.avatar ? (
-                                              <img src={msg.user.avatar} alt={msg.user.name} className="w-full h-full object-cover" />
-                                            ) : (
-                                              <span className="text-[7px] font-black text-[#37352f]/40 uppercase">
-                                                {msg.user.name?.[0] || 'U'}
-                                              </span>
-                                            )}
-                                          </div>
-                                          
-                                          <div className={`flex items-center gap-2 opacity-40 hover:opacity-100 transition-opacity ${isAI ? 'flex-row' : 'flex-row-reverse'}`}>
-                                            <span className="text-[10px] font-black tracking-widest uppercase text-[#37352f]">
-                                              {isAI ? 'Lui' : msg.user.name.split(' ')[0]}
-                                            </span>
-                                            <span className="text-[8px] font-bold text-[#37352f]/30 uppercase">
-                                              {msg.channel}
-                                            </span>
-                                          </div>
+                            <React.Fragment key={msg.id}>
+                                <motion.tr 
+                                  layout
+                                  onMouseEnter={() => setHoveredMessageId(msg.id)}
+                                  onMouseLeave={() => setHoveredMessageId(null)}
+                                  onClick={() => setExpandedMessage(expandedMessage === msg.id ? null : msg.id)}
+                                  initial={false}
+                                  animate={{ 
+                                    backgroundColor: expandedMessage === msg.id ? '#fcfcfb' : (hoveredMessageId === msg.id ? '#fafafa' : '#ffffff'),
+                                    scale: hoveredMessageId === msg.id ? 0.995 : 1
+                                  }}
+                                  transition={{ 
+                                    type: "spring",
+                                    stiffness: 300,
+                                    damping: 30
+                                  }}
+                                  className={`cursor-pointer group relative`}
+                                >
+                                <td className="py-3 px-5 whitespace-nowrap">
+                                  <span className="text-[11px] font-medium text-[#37352f]/40">
+                                    {formatShortDate(msg.created_at)}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-5">
+                                  <div className="flex items-center gap-2">
+                                    {isAI ? (
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="w-5 h-5 rounded-lg bg-white flex items-center justify-center border border-purple-500/10 overflow-hidden shrink-0">
+                                          <img src={luiLogo} alt="Lui" className="w-3.5 h-3.5 object-contain" />
                                         </div>
-
-                                        {/* Message Bubble - Defined & Minimal */}
-                                        <div 
-                                          onClick={() => setExpandedMessage(isExpanded ? null : msg.id)}
-                                          className={`px-5 py-3.5 rounded-2xl transition-all cursor-pointer ${
-                                            isAI 
-                                              ? 'bg-[#efefee] text-[#37352f]/90 rounded-tl-none border border-[#e9e9e7]/50' 
-                                              : 'bg-[#202020] text-white/90 rounded-tr-none'
-                                          }`}
-                                        >
-                                          <p className="text-[13px] leading-relaxed font-medium whitespace-pre-wrap break-words">
-                                            {msg.content || '(sem conteúdo)'}
-                                          </p>
-
-                                          {/* Metadata - Ultra Minimalist Technical Details */}
-                                          <AnimatePresence>
-                                            {isExpanded && (
-                                              <motion.div
-                                                initial={{ opacity: 0, y: -5 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                exit={{ opacity: 0, y: -5 }}
-                                                className={`mt-3 flex gap-3 text-[7px] font-black uppercase tracking-[0.2em] ${
-                                                  isAI ? 'text-[#37352f]/20' : 'text-white/20'
-                                                }`}
-                                              >
-                                                {msg.model && <span>{msg.model}</span>}
-                                                {msg.latency_ms && <span>{msg.latency_ms}ms</span>}
-                                                <span className="ml-auto opacity-50">Ref: {msg.id.substring(0, 6)}</span>
-                                              </motion.div>
-                                            )}
-                                          </AnimatePresence>
-                                        </div>
-
-                                        {/* Time - Subtle */}
-                                        <div className="mt-1.5 px-1 opacity-20">
-                                          <span className="text-[8px] font-black uppercase tracking-tighter">
-                                            {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                          </span>
-                                        </div>
+                                        <span className="text-xs font-bold text-black tracking-tight">
+                                          Lui
+                                        </span>
                                       </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="w-5 h-5 rounded-lg overflow-hidden shrink-0 flex items-center justify-center border border-[#e9e9e7]">
+                                          <Avvvatars value={msg.user.email} style="shape" size={20} radius={4} />
+                                        </div>
+                                        <span className="text-xs font-semibold text-[#202020] truncate max-w-[80px]">
+                                          {msg.user.name?.split(' ')[0] || msg.user.email.split('@')[0]}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+
+                                <motion.td layout className="py-3 px-5 w-full relative">
+                                  <motion.div 
+                                    layout
+                                    className={`text-xs text-[#37352f]/80 flex items-center justify-between gap-2 ${expandedMessage === msg.id ? 'opacity-0' : 'opacity-100'}`}
+                                    transition={{ duration: 0.2 }}
+                                  >
+                                    <motion.p
+                                      layoutId={`content-${msg.id}`}
+                                      className={`${hoveredMessageId === msg.id ? '' : 'line-clamp-1'}`}
+                                    >
+                                      {msg.content || '(sem conteúdo)'}
+                                    </motion.p>
+                                    {msg.latency_ms && !expandedMessage && (
+                                      <span className="text-[9px] font-bold text-[#37352f]/20 whitespace-nowrap">
+                                        {msg.latency_ms}ms
+                                      </span>
+                                    )}
+                                  </motion.div>
+                                </motion.td>
+                                <motion.td layout className="py-3 px-5 text-right whitespace-nowrap">
+                                  {msg.latency_ms ? (
+                                    <span className="text-[10px] font-bold text-[#37352f]/40">
+                                      {formatMetric(msg.latency_ms)}ms
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-[#37352f]/20">—</span>
+                                  )}
+                                </motion.td>
+                              </motion.tr>
+                              <AnimatePresence mode="popLayout">
+                                {expandedMessage === msg.id && (
+                                  <motion.tr
+                                    layout
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="bg-[#fcfcfb]"
+                                  >
+                                    <td colSpan={4} className="py-6 px-10">
+                                      <motion.div 
+                                        layout
+                                        className="space-y-4"
+                                      >
+                                        <motion.div 
+                                          layout
+                                          initial={{ scale: 0.95, opacity: 0 }}
+                                          animate={{ scale: 1, opacity: 1 }}
+                                          exit={{ scale: 0.95, opacity: 0 }}
+                                          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                                          className="bg-white border border-[#e9e9e7] rounded-xl p-5 shadow-sm"
+                                        >
+                                          <motion.p 
+                                            layoutId={`content-${msg.id}`}
+                                            className="text-sm text-[#37352f] leading-relaxed whitespace-pre-wrap"
+                                          >
+                                            {msg.content}
+                                          </motion.p>
+                                        </motion.div>
+                                      
+                                        <div className="flex flex-wrap gap-x-8 gap-y-4 pt-2">
+                                          {msg.model && (
+                                            <div className="flex flex-col gap-0.5">
+                                              <span className="text-[9px] font-semibold text-[#37352f]/20">Modelo</span>
+                                              <span className="text-[11px] font-bold text-[#37352f]/60">{msg.model}</span>
+                                            </div>
+                                          )}
+                                          {msg.latency_ms && (
+                                            <div className="flex flex-col gap-0.5">
+                                              <span className="text-[9px] font-semibold text-[#37352f]/20">Latência</span>
+                                              <span className="text-[11px] font-bold text-[#37352f]/60">{formatMetric(msg.latency_ms)}ms</span>
+                                            </div>
+                                          )}
+                                          <div className="flex flex-col gap-0.5">
+                                            <span className="text-[9px] font-semibold text-[#37352f]/20">Direção</span>
+                                            <span className="text-[11px] font-bold text-[#37352f]/60">{msg.direction}</span>
+                                          </div>
+                                          <div className="flex flex-col gap-0.5 ml-auto">
+                                            <span className="text-[9px] font-semibold text-[#37352f]/20">Id da mensagem</span>
+                                            <span className="text-[10px] font-mono text-[#37352f]/40">{msg.id}</span>
+                                          </div>
+                                        </div>
+                                    </motion.div>
+                                  </td>
+                                </motion.tr>
+                              )}
+                            </AnimatePresence>
+                            </React.Fragment>
                           );
-                        });
-                      })()}
-                    </div>
+                        })}
+                      </tbody>
+                    </table>
                   )}
 
                   {/* Pagination */}
                   {messagesTotalPages > 1 && (
                     <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-[#e9e9e7]">
-                      <span className="text-sm font-medium text-[#37352f]/50">
-                        Página {messagesPage} de {messagesTotalPages}
-                      </span>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-col">
+                        <span className="text-[9px] font-semibold text-[#37352f]/20">Navegação</span>
+                        <span className="text-[11px] font-bold text-[#37352f]/40">
+                          Página {messagesPage} de {messagesTotalPages}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
                         <button
                           onClick={() => setMessagesPage(p => Math.max(1, p - 1))}
                           disabled={messagesPage <= 1}
-                          className="p-2 rounded-lg bg-[#f7f7f5] border border-[#e9e9e7] text-[#37352f]/60 hover:bg-[#e9e9e7] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-[#e9e9e7] text-[#37352f]/40 hover:text-[#202020] hover:border-[#d0d0ce] hover:shadow-sm transition-all disabled:opacity-20 disabled:cursor-not-allowed"
                         >
-                          <ChevronLeft size={16} />
+                          <ChevronLeft size={14} strokeWidth={3} />
                         </button>
                         <button
                           onClick={() => setMessagesPage(p => Math.min(messagesTotalPages, p + 1))}
                           disabled={messagesPage >= messagesTotalPages}
-                          className="p-2 rounded-lg bg-[#f7f7f5] border border-[#e9e9e7] text-[#37352f]/60 hover:bg-[#e9e9e7] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-[#e9e9e7] text-[#37352f]/40 hover:text-[#202020] hover:border-[#d0d0ce] hover:shadow-sm transition-all disabled:opacity-20 disabled:cursor-not-allowed"
                         >
-                          <ChevronRight size={16} />
+                          <ChevronRight size={14} strokeWidth={3} />
                         </button>
                       </div>
                     </div>
