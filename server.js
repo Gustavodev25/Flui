@@ -291,6 +291,279 @@ function sendApiError(res, req, error, fallbackStatus = 500) {
   return res.status(status).json(payload);
 }
 
+const LEGACY_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'AdminFlui123@';
+const SEEDED_ADMIN_USER_IDS = [
+  '2021bd41-b925-45e1-829b-a263aae7a000',
+];
+
+function getConfiguredAdminUserIds() {
+  const envUserIds = (process.env.ADMIN_USER_IDS || '')
+    .split(/[,\s]+/)
+    .map(id => id.trim())
+    .filter(Boolean);
+
+  return [...new Set([...SEEDED_ADMIN_USER_IDS, ...envUserIds])];
+}
+
+function getConfiguredAdminEmails() {
+  return (process.env.ADMIN_EMAILS || '')
+    .split(/[,\s]+/)
+    .map(email => email.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function hasAdminRole(user) {
+  const appMetadata = user?.app_metadata || {};
+  const userMetadata = user?.user_metadata || {};
+  const metadataRoles = Array.isArray(appMetadata.roles)
+    ? appMetadata.roles
+    : String(appMetadata.roles || '').split(/[,\s]+/);
+  const roles = [appMetadata.role, userMetadata.role, ...metadataRoles]
+    .filter(Boolean)
+    .map(role => String(role).toLowerCase());
+
+  return (
+    appMetadata.is_admin === true ||
+    userMetadata.is_admin === true ||
+    roles.some(role => ['admin', 'adm', 'administrator'].includes(role))
+  );
+}
+
+function getAdminAccessToken(req) {
+  const authorization = req.headers.authorization || '';
+  if (authorization.toLowerCase().startsWith('bearer ')) {
+    return authorization.slice(7).trim();
+  }
+
+  return req.query.access_token || req.body?.accessToken || null;
+}
+
+function hasLegacyAdminPassword(req) {
+  const supplied =
+    req.query.password ||
+    req.body?.password ||
+    req.headers['x-admin-password'];
+
+  return supplied && supplied === LEGACY_ADMIN_PASSWORD;
+}
+
+function sendAdminAuthError(res, status = 401, message = 'Acesso de administrador necessario') {
+  return res.status(status).json({ error: { message } });
+}
+
+async function requireAdmin(req, res, next) {
+  if (hasLegacyAdminPassword(req)) {
+    req.adminUser = { id: 'legacy-password', email: null };
+    return next();
+  }
+
+  const token = getAdminAccessToken(req);
+  if (!token) {
+    return sendAdminAuthError(res, 401, 'Sessao Supabase ausente');
+  }
+
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+
+    if (error || !user) {
+      return sendAdminAuthError(res, 401, 'Sessao Supabase invalida');
+    }
+
+    const configuredIds = getConfiguredAdminUserIds();
+    const configuredEmails = getConfiguredAdminEmails();
+    const isConfiguredUser = configuredIds.includes(user.id);
+    const isConfiguredEmail = user.email && configuredEmails.includes(user.email.toLowerCase());
+
+    if (!hasAdminRole(user) && !isConfiguredUser && !isConfiguredEmail) {
+      return sendAdminAuthError(res, 403, 'Usuario sem permissao de administrador');
+    }
+
+    req.adminUser = user;
+    return next();
+  } catch (error) {
+    console.error('[AdminAuth] Falha ao validar admin:', error.message);
+    return sendAdminAuthError(res, 500, 'Falha ao validar administrador');
+  }
+}
+
+async function syncConfiguredAdminUsers() {
+  const userIds = getConfiguredAdminUserIds();
+
+  await Promise.all(userIds.map(async (userId) => {
+    try {
+      const { data: { user }, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+      if (error || !user) throw error || new Error('Usuario nao encontrado');
+      if (hasAdminRole(user)) return;
+
+      const currentMetadata = user.app_metadata || {};
+      const currentRoles = Array.isArray(currentMetadata.roles)
+        ? currentMetadata.roles
+        : String(currentMetadata.roles || '').split(/[,\s]+/).filter(Boolean);
+      const roles = [...new Set([...currentRoles, currentMetadata.role, 'admin'].filter(Boolean))];
+
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+        app_metadata: {
+          ...currentMetadata,
+          role: 'admin',
+          roles,
+          is_admin: true,
+        },
+      });
+
+      if (updateError) throw updateError;
+      console.log(`[AdminAuth] Usuario ${userId} marcado como admin no Supabase Auth`);
+    } catch (error) {
+      console.error(`[AdminAuth] Nao foi possivel sincronizar admin ${userId}:`, error.message);
+    }
+  }));
+}
+
+syncConfiguredAdminUsers().catch(error => {
+  console.error('[AdminAuth] Falha ao sincronizar admins configurados:', error.message);
+});
+
+function isMissingTableError(error) {
+  if (!error) return false;
+  return /does not exist|relation .* does not exist|Could not find the table/i.test(error.message || '');
+}
+
+function decodeHeaderValue(value) {
+  if (!value) return null;
+  const raw = Array.isArray(value) ? value[0] : value;
+  try {
+    return decodeURIComponent(String(raw));
+  } catch {
+    return String(raw);
+  }
+}
+
+function firstHeader(req, names) {
+  for (const name of names) {
+    const value = decodeHeaderValue(req.headers[name]);
+    if (value) return value;
+  }
+  return null;
+}
+
+function getRequestGeo(req) {
+  return {
+    country: firstHeader(req, ['x-vercel-ip-country', 'cf-ipcountry', 'x-country-code']),
+    state: firstHeader(req, ['x-vercel-ip-country-region', 'cloudfront-viewer-country-region', 'x-region', 'x-state']),
+    city: firstHeader(req, ['x-vercel-ip-city', 'x-city']),
+  };
+}
+
+function getClientIpHash(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded || req.socket?.remoteAddress || '')
+    .split(',')[0]
+    .trim();
+
+  if (!ip) return null;
+  const salt = process.env.ANALYTICS_SALT || 'flui-route-analytics';
+  return crypto.createHash('sha256').update(`${salt}:${ip}`).digest('hex');
+}
+
+function normalizeRoutePath(value) {
+  if (!value || typeof value !== 'string') return '/';
+  try {
+    const url = value.startsWith('http') ? new URL(value) : null;
+    const path = url ? url.pathname : value.split('?')[0];
+    return path.startsWith('/') ? path.slice(0, 200) : `/${path.slice(0, 199)}`;
+  } catch {
+    return '/';
+  }
+}
+
+function routeLabel(path) {
+  const labels = {
+    '/': 'Landing',
+    '/login': 'Login',
+    '/dashboard': 'Dashboard',
+    '/tasks': 'Tarefas',
+    '/calendar': 'Calendario',
+    '/whatsapp': 'WhatsApp',
+    '/subscription': 'Assinatura',
+    '/checkout-preview': 'Checkout',
+    '/terms': 'Termos',
+    '/invite': 'Convites',
+    '/mockups': 'Mockups',
+    '/admin': 'Admin',
+    '/admin/chat-simulator': 'Simulador Admin',
+  };
+
+  return labels[path] || path;
+}
+
+function pct(part, total) {
+  if (!total) return 0;
+  return Math.round((part / total) * 100);
+}
+
+function pickUserState(metadata = {}) {
+  return (
+    metadata.state ||
+    metadata.estado ||
+    metadata.region ||
+    metadata.uf ||
+    metadata.province ||
+    null
+  );
+}
+
+function textIncludesAny(text, terms) {
+  const value = (text || '').toLowerCase();
+  return terms.some((term) => value.includes(term));
+}
+
+function buildTrainingSignals(messages = []) {
+  const groups = [
+    {
+      topic: 'Criacao e gestao de tarefas',
+      terms: ['tarefa', 'tarefas', 'lembrete', 'prazo', 'deadline', 'checklist', 'prioridade', 'projeto'],
+      recommendation: 'Criar exemplos de intencao para criar, reagendar, concluir e explicar tarefas.',
+    },
+    {
+      topic: 'Agenda e compromissos',
+      terms: ['agenda', 'calendario', 'calendário', 'reuniao', 'reunião', 'compromisso', 'evento', 'horario', 'horário'],
+      recommendation: 'Treinar respostas que convertam datas relativas em acoes claras no calendario.',
+    },
+    {
+      topic: 'Onboarding e WhatsApp',
+      terms: ['whatsapp', 'telefone', 'numero', 'número', 'vincular', 'conectar', 'codigo', 'código'],
+      recommendation: 'Melhorar o fluxo de ajuda para conectar numero, confirmar conta e recuperar vinculo.',
+    },
+    {
+      topic: 'Planos, assinatura e pagamento',
+      terms: ['plano', 'assinatura', 'assinar', 'pagamento', 'cartao', 'cartão', 'checkout', 'cobranca', 'cobrança'],
+      recommendation: 'Adicionar respostas consistentes sobre planos, limites, upgrade e problemas de pagamento.',
+    },
+    {
+      topic: 'Erros e suporte',
+      terms: ['erro', 'bug', 'problema', 'travou', 'nao funciona', 'não funciona', 'falha', 'sumiu'],
+      recommendation: 'Coletar exemplos reais para respostas de diagnostico e encaminhamento ao suporte.',
+    },
+  ];
+
+  const signals = groups.map((group) => {
+    const matches = messages.filter((message) =>
+      message.role === 'user' && textIncludesAny(message.content, group.terms)
+    );
+    const sample = matches.find((message) => message.content?.trim())?.content || '';
+    return {
+      topic: group.topic,
+      count: matches.length,
+      sample: sample.length > 180 ? `${sample.slice(0, 177)}...` : sample,
+      recommendation: group.recommendation,
+    };
+  });
+
+  return signals
+    .filter((signal) => signal.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+}
+
 app.use((req, res, next) => {
   req.correlationId = req.headers['x-correlation-id'] || crypto.randomUUID();
   res.setHeader('x-correlation-id', req.correlationId);
@@ -1374,13 +1647,60 @@ REGRAS GERAIS:
   }
 });
 
-// ================== ADMIN PANEL ==================
-app.get('/api/admin/users', async (req, res) => {
-  const { password } = req.query;
-  if (password !== 'AdminFlui123@') {
-    return res.status(401).json({ error: 'Senha incorreta!' });
-  }
+app.post('/api/analytics/route', async (req, res) => {
+  try {
+    const geo = getRequestGeo(req);
+    const body = req.body || {};
+    const path = normalizeRoutePath(body.path || body.url || req.headers.referer);
 
+    const payload = {
+      user_id: body.userId || null,
+      path,
+      label: routeLabel(path),
+      referrer: typeof body.referrer === 'string' ? body.referrer.slice(0, 500) : null,
+      title: typeof body.title === 'string' ? body.title.slice(0, 160) : null,
+      user_agent: req.headers['user-agent'] ? String(req.headers['user-agent']).slice(0, 500) : null,
+      country: geo.country,
+      state: geo.state,
+      city: geo.city,
+      locale: typeof body.locale === 'string' ? body.locale.slice(0, 80) : null,
+      timezone: typeof body.timezone === 'string' ? body.timezone.slice(0, 80) : null,
+      viewport: body.viewport || null,
+      ip_hash: getClientIpHash(req),
+      created_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabaseAdmin
+      .from('site_route_events')
+      .insert(payload);
+
+    if (error) {
+      if (isMissingTableError(error)) {
+        return res.json({ ok: true, stored: false, reason: 'site_route_events_missing' });
+      }
+
+      console.warn('[Analytics] Falha ao registrar rota:', error.message);
+      return res.json({ ok: true, stored: false });
+    }
+
+    res.json({ ok: true, stored: true });
+  } catch (error) {
+    console.warn('[Analytics] Falha inesperada ao registrar rota:', error.message);
+    res.json({ ok: true, stored: false });
+  }
+});
+
+// ================== ADMIN PANEL ==================
+app.get('/api/admin/me', requireAdmin, (req, res) => {
+  res.json({
+    admin: true,
+    user: {
+      id: req.adminUser.id,
+      email: req.adminUser.email,
+    },
+  });
+});
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
   try {
     const { data: { users }, error: authError } = await supabaseAdmin.auth.admin.listUsers({
       perPage: 1000
@@ -1392,17 +1712,37 @@ app.get('/api/admin/users', async (req, res) => {
       .select('*');
     if (subError) throw subError;
 
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentMsgs } = await supabaseAdmin
+      .from('conversation_messages')
+      .select('user_id')
+      .eq('role', 'user')
+      .gte('created_at', since24h);
+
+    const activeUserIds = new Set((recentMsgs || []).map(m => m.user_id));
+
     const usersData = users.map(u => {
       const sub = subscriptions?.find(s => s.user_id === u.id);
+      const meta = u.user_metadata || {};
+      const identityData = u.identities?.[0]?.identity_data || {};
+      const avatar =
+        meta.avatar_url ||
+        meta.picture ||
+        identityData.avatar_url ||
+        identityData.picture ||
+        null;
+
       return {
         id: u.id,
         email: u.email,
-        name: u.user_metadata?.name || '',
+        name: meta.name || meta.full_name || '',
+        avatar,
         createdAt: u.created_at,
         lastSignIn: u.last_sign_in_at,
         hasFlow: sub?.status === 'active' && ['flow', 'pulse'].includes(sub?.plan_id),
         planId: sub?.status === 'active' ? (sub?.plan_id || null) : null,
         subscriptionStatus: sub?.status || 'none',
+        activeRecently: activeUserIds.has(u.id),
       };
     });
 
@@ -1413,11 +1753,8 @@ app.get('/api/admin/users', async (req, res) => {
   }
 });
 
-app.post('/api/admin/users/grant', async (req, res) => {
-  const { password, userId, plan } = req.body;
-  if (password !== 'AdminFlui123@') {
-    return res.status(401).json({ error: 'Senha incorreta!' });
-  }
+app.post('/api/admin/users/grant', requireAdmin, async (req, res) => {
+  const { userId, plan } = req.body;
   if (!userId) {
     return res.status(400).json({ error: 'userId obrigatório' });
   }
@@ -1460,13 +1797,296 @@ app.post('/api/admin/users/grant', async (req, res) => {
   }
 });
 
-app.get('/api/admin/stats', async (req, res) => {
-  const password = req.query.password;
-  if (password !== 'AdminFlui123@') {
-    return res.status(401).json({ error: 'Unauthorized' });
+async function buildAdminStatsPayload() {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const startOf7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const routeEventsPromise = (async () => {
+    const { data, error } = await supabaseAdmin
+      .from('site_route_events')
+      .select('id, user_id, path, label, referrer, country, state, city, timezone, ip_hash, created_at')
+      .order('created_at', { ascending: false })
+      .limit(1000);
+
+    if (error) {
+      if (isMissingTableError(error)) return { events: [], status: 'not_configured' };
+      console.warn('[AdminStats] Falha ao buscar rotas:', error.message);
+      return { events: [], status: 'error' };
+    }
+
+    return {
+      events: data || [],
+      status: data?.length ? 'active' : 'empty',
+    };
+  })();
+
+  const authUsersPromise = supabaseAdmin.auth.admin.listUsers({ perPage: 1000 })
+    .then(({ data, error }) => {
+      if (error) {
+        console.warn('[AdminStats] Falha ao buscar usuarios auth:', error.message);
+        return [];
+      }
+      return data?.users || [];
+    })
+    .catch((error) => {
+      console.warn('[AdminStats] Falha inesperada ao buscar usuarios auth:', error.message);
+      return [];
+    });
+
+  const [
+    totalMessagesResp,
+    totalTasksResp,
+    firstMessageUsersResp,
+    wppConversationsUsedResp,
+    messagesTodayResp,
+    totalThreadsResp,
+    recentMessagesResp,
+    recentThreadsResp,
+    bindingsResp,
+    routeEventsResult,
+    authUsers,
+  ] = await Promise.all([
+    supabaseAdmin.from('conversation_messages').select('*', { count: 'exact', head: true }),
+    supabaseAdmin.from('tasks').select('*', { count: 'exact', head: true }),
+    supabaseAdmin.from('channel_bindings').select('*', { count: 'exact', head: true }),
+    supabaseAdmin
+      .from('conversation_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('channel', 'whatsapp')
+      .gte('created_at', startOfMonth),
+    supabaseAdmin
+      .from('conversation_messages')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', startOfDay),
+    supabaseAdmin.from('conversation_threads').select('*', { count: 'exact', head: true }),
+    supabaseAdmin
+      .from('conversation_messages')
+      .select('id, thread_id, user_id, channel, direction, role, message_type, content, status, provider, model, latency_ms, fallback_used, tool_count, created_at')
+      .order('created_at', { ascending: false })
+      .limit(500),
+    supabaseAdmin
+      .from('conversation_threads')
+      .select('id, user_id, channel, title, unread_count, metadata, created_at, last_message_at')
+      .order('last_message_at', { ascending: false })
+      .limit(500),
+    supabaseAdmin
+      .from('channel_bindings')
+      .select('id, user_id, channel, metadata, last_seen_at, last_inbound_at, created_at')
+      .limit(1000),
+    routeEventsPromise,
+    authUsersPromise,
+  ]);
+
+  const requiredError = [
+    totalMessagesResp.error,
+    totalTasksResp.error,
+    firstMessageUsersResp.error,
+    wppConversationsUsedResp.error,
+    messagesTodayResp.error,
+    recentMessagesResp.error,
+    bindingsResp.error,
+  ].find(Boolean);
+  if (requiredError) throw requiredError;
+
+  if (totalThreadsResp.error && !isMissingTableError(totalThreadsResp.error)) throw totalThreadsResp.error;
+  if (recentThreadsResp.error && !isMissingTableError(recentThreadsResp.error)) throw recentThreadsResp.error;
+
+  const recentMessages = recentMessagesResp.data || [];
+  const recentThreads = recentThreadsResp.data || [];
+  const bindings = bindingsResp.data || [];
+  const routeEvents = routeEventsResult.events || [];
+
+  const routesByPath = new Map();
+  for (const event of routeEvents) {
+    const path = normalizeRoutePath(event.path);
+    const current = routesByPath.get(path) || {
+      path,
+      label: event.label || routeLabel(path),
+      visits: 0,
+      userKeys: new Set(),
+      lastSeenAt: event.created_at || null,
+    };
+
+    current.visits += 1;
+    const userKey = event.user_id || event.ip_hash || event.id;
+    if (userKey) current.userKeys.add(userKey);
+    if (!current.lastSeenAt || new Date(event.created_at) > new Date(current.lastSeenAt)) {
+      current.lastSeenAt = event.created_at;
+    }
+    routesByPath.set(path, current);
   }
 
+  const totalRouteVisits = routeEvents.length;
+  const routes = [...routesByPath.values()]
+    .sort((a, b) => b.visits - a.visits)
+    .slice(0, 8)
+    .map((route) => ({
+      path: route.path,
+      label: route.label,
+      visits: route.visits,
+      uniqueUsers: route.userKeys.size,
+      percentage: pct(route.visits, totalRouteVisits),
+      lastSeenAt: route.lastSeenAt,
+    }));
+
+  const userStateById = new Map();
+  const statesByKey = new Map();
+  const ensureStateGroup = (state, country) => {
+    const label = state || country || 'Nao identificado';
+    const key = `${country || '--'}:${label}`;
+    const current = statesByKey.get(key) || {
+      state: label,
+      country: country || '--',
+      usersSet: new Set(),
+      visitorSet: new Set(),
+      visits: 0,
+      conversations: 0,
+      messages: 0,
+      lastSeenAt: null,
+    };
+    statesByKey.set(key, current);
+    return { key, group: current };
+  };
+
+  for (const authUser of authUsers) {
+    const metadata = { ...(authUser.user_metadata || {}), ...(authUser.app_metadata || {}) };
+    const state = pickUserState(metadata);
+    const country = metadata.country || metadata.pais || metadata.country_code || null;
+    if (!state && !country) continue;
+
+    const { key, group } = ensureStateGroup(state, country);
+    group.usersSet.add(authUser.id);
+    userStateById.set(authUser.id, key);
+  }
+
+  for (const event of routeEvents) {
+    if (!event.state && !event.country) continue;
+    const { key, group } = ensureStateGroup(event.state, event.country);
+    group.visits += 1;
+    const visitorKey = event.user_id || event.ip_hash || event.id;
+    if (visitorKey) group.visitorSet.add(visitorKey);
+    if (event.user_id && !userStateById.has(event.user_id)) userStateById.set(event.user_id, key);
+    if (!group.lastSeenAt || new Date(event.created_at) > new Date(group.lastSeenAt)) {
+      group.lastSeenAt = event.created_at;
+    }
+  }
+
+  for (const binding of bindings) {
+    const metadata = binding.metadata || {};
+    const state = pickUserState(metadata);
+    const country = metadata.country || metadata.pais || metadata.country_code || null;
+    if (!state && !country) continue;
+
+    const { key, group } = ensureStateGroup(state, country);
+    if (binding.user_id) {
+      group.usersSet.add(binding.user_id);
+      if (!userStateById.has(binding.user_id)) userStateById.set(binding.user_id, key);
+    }
+  }
+
+  for (const thread of recentThreads) {
+    const key = userStateById.get(thread.user_id);
+    if (!key) continue;
+    const group = statesByKey.get(key);
+    if (group) group.conversations += 1;
+  }
+
+  for (const message of recentMessages) {
+    const key = userStateById.get(message.user_id);
+    if (!key) continue;
+    const group = statesByKey.get(key);
+    if (group) group.messages += 1;
+  }
+
+  const states = [...statesByKey.values()]
+    .map((group) => ({
+      state: group.state,
+      country: group.country,
+      users: group.usersSet.size || group.visitorSet.size,
+      visits: group.visits,
+      conversations: group.conversations,
+      messages: group.messages,
+      lastSeenAt: group.lastSeenAt,
+    }))
+    .sort((a, b) => (b.visits + b.users + b.messages) - (a.visits + a.users + a.messages))
+    .slice(0, 8);
+
+  const channelGroups = new Map();
+  for (const message of recentMessages) {
+    const channel = message.channel || 'web';
+    const current = channelGroups.get(channel) || {
+      channel,
+      messages: 0,
+      inbound: 0,
+      outbound: 0,
+      userKeys: new Set(),
+    };
+
+    current.messages += 1;
+    if (message.direction === 'inbound' || message.role === 'user') current.inbound += 1;
+    if (message.direction === 'outbound' || message.role === 'assistant') current.outbound += 1;
+    if (message.user_id) current.userKeys.add(message.user_id);
+    channelGroups.set(channel, current);
+  }
+
+  const channels = [...channelGroups.values()]
+    .sort((a, b) => b.messages - a.messages)
+    .map((channel) => ({
+      channel: channel.channel,
+      messages: channel.messages,
+      inbound: channel.inbound,
+      outbound: channel.outbound,
+      users: channel.userKeys.size,
+      percentage: pct(channel.messages, recentMessages.length),
+    }));
+
+  const assistantTelemetry = recentMessages.filter((message) => message.role === 'assistant');
+  const latencyValues = assistantTelemetry
+    .map((message) => Number(message.latency_ms))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const avgLatencyMs = latencyValues.length
+    ? Math.round(latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length)
+    : 0;
+  const fallbackCount = assistantTelemetry.filter((message) => message.fallback_used).length;
+  const activeUsers7d = new Set(
+    recentMessages
+      .filter((message) => message.user_id && message.created_at >= startOf7d)
+      .map((message) => message.user_id)
+  ).size;
+
+  return {
+    totalMessages: totalMessagesResp.count || 0,
+    totalTasks: totalTasksResp.count || 0,
+    firstMessageUsers: firstMessageUsersResp.count || 0,
+    wppConversationsUsed: wppConversationsUsedResp.count || 0,
+    wppFreeLimit: 1000,
+    analytics: {
+      routeTrackingStatus: routeEventsResult.status,
+      routes,
+      states,
+      channels,
+      conversations: {
+        totalThreads: totalThreadsResp.count || 0,
+        messagesToday: messagesTodayResp.count || 0,
+        activeUsers7d,
+        assistantResponses: assistantTelemetry.length,
+        avgLatencyMs,
+        fallbackRate: pct(fallbackCount, assistantTelemetry.length),
+        toolCalls: assistantTelemetry.reduce((sum, message) => sum + (Number(message.tool_count) || 0), 0),
+        unreadThreads: recentThreads.filter((thread) => Number(thread.unread_count || 0) > 0).length,
+        lastMessageAt: recentMessages[0]?.created_at || null,
+      },
+      trainingSignals: buildTrainingSignals(recentMessages),
+    },
+  };
+}
+
+app.get('/api/admin/stats', requireAdmin, async (req, res) => {
   try {
+    return res.json(await buildAdminStatsPayload());
+
     // Total messages
     const { count: totalMessages } = await supabaseAdmin
       .from('conversation_messages')
@@ -1504,12 +2124,8 @@ app.get('/api/admin/stats', async (req, res) => {
 });
 
 // ── Admin Messages Log ────────────────────────────────────────────
-app.get('/api/admin/messages', async (req, res) => {
-  const { password, page = 1, limit = 50, channel, search, userId } = req.query;
-  if (password !== 'AdminFlui123@') {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
+app.get('/api/admin/messages', requireAdmin, async (req, res) => {
+  const { page = 1, limit = 50, channel, search, userId } = req.query;
   try {
     const pageNum = parseInt(page, 10) || 1;
     const limitNum = Math.min(parseInt(limit, 10) || 50, 200);
@@ -2360,7 +2976,7 @@ app.post('/api/workspace/accept-invite', async (req, res) => {
   }
 });
 
-app.get('/api/admin/model-info', (req, res) => {
+app.get('/api/admin/model-info', requireAdmin, (req, res) => {
   res.json({
     modelId: process.env.MODEL_ID || 'meta/llama-3.1-70b-instruct',
     provider: 'NVIDIA NIM',
@@ -2368,7 +2984,7 @@ app.get('/api/admin/model-info', (req, res) => {
   });
 });
 
-app.get('/api/admin/chat/stream/:sseId', (req, res) => {
+app.get('/api/admin/chat/stream/:sseId', requireAdmin, (req, res) => {
   const { sseId } = req.params;
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -2388,7 +3004,7 @@ app.get('/api/admin/chat/stream/:sseId', (req, res) => {
   });
 });
 
-app.post('/api/admin/chat/simulate', async (req, res) => {
+app.post('/api/admin/chat/simulate', requireAdmin, async (req, res) => {
   try {
     const { userId, userName, content, sseId } = req.body;
     if (!userId || !content) return res.status(400).json({ error: 'userId e content são obrigatórios' });
