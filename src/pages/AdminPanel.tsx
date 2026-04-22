@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
+import { supabase } from '../lib/supabase';
 
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -380,20 +381,24 @@ export function AdminPanel() {
   const [selectedUserMessages, setSelectedUserMessages] = useState<User | null>(null);
   const [messagesMode, setMessagesMode] = useState<'all' | 'by-user'>('by-user');
 
-  const adminFetch = useCallback(<T,>(
+  const adminFetch = useCallback(async <T,>(
     path: string,
     init?: RequestInit,
     query?: Record<string, string | number | boolean | undefined | null>
-  ) => {
-    if (!accessToken) {
+  ): Promise<T> => {
+    // Sempre busca token fresco do Supabase para evitar 401 com token expirado
+    const { data: { session: freshSession } } = await supabase.auth.getSession();
+    const token = freshSession?.access_token;
+
+    if (!token) {
       throw new Error('Sessao Supabase ausente.');
     }
 
     const headers = new Headers(init?.headers || {});
-    headers.set('Authorization', `Bearer ${accessToken}`);
+    headers.set('Authorization', `Bearer ${token}`);
 
     return apiFetch<T>(path, { ...init, headers }, query);
-  }, [accessToken]);
+  }, []);
 
   const loadAdminData = useCallback(async () => {
     if (!accessToken) return;

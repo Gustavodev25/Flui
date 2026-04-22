@@ -4,6 +4,7 @@ import {
   Send, Terminal, RefreshCw, MessageCircle
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
 interface LogEntry {
@@ -32,16 +33,20 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
   const scrollRef = useRef<HTMLDivElement>(null);
   const logScrollRef = useRef<HTMLDivElement>(null);
 
-  const adminFetch = useCallback(<T,>(path: string, init?: RequestInit) => {
-    if (!accessToken) {
+  const adminFetch = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    // Sempre busca token fresco do Supabase para evitar 401 com token expirado
+    const { data: { session: freshSession } } = await supabase.auth.getSession();
+    const token = freshSession?.access_token;
+
+    if (!token) {
       throw new Error('Sessao Supabase ausente.');
     }
 
     const headers = new Headers(init?.headers || {});
-    headers.set('Authorization', `Bearer ${accessToken}`);
+    headers.set('Authorization', `Bearer ${token}`);
 
     return apiFetch<T>(path, { ...init, headers });
-  }, [accessToken]);
+  }, []);
 
   const fetchModelInfo = useCallback(async () => {
     try {
@@ -56,21 +61,29 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
     if (!accessToken) return;
 
     fetchModelInfo();
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const apiBase = isLocal ? 'http://localhost:3001' : (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
-    const streamUrl = new URL(`/api/admin/chat/stream/${sseId}`, apiBase || window.location.origin);
-    streamUrl.searchParams.set('access_token', accessToken);
-    const eventSource = new EventSource(streamUrl.toString());
+
+    let eventSource: EventSource | null = null;
+
+    // Busca token fresco para o SSE
+    supabase.auth.getSession().then(({ data: { session: freshSession } }) => {
+      const token = freshSession?.access_token || accessToken;
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const apiBase = isLocal ? 'http://localhost:3001' : (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+      const streamUrl = new URL(`/api/admin/chat/stream/${sseId}`, apiBase || window.location.origin);
+      streamUrl.searchParams.set('access_token', token);
+      eventSource = new EventSource(streamUrl.toString());
     
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setLogs(prev => [...prev, data]);
-      } catch (e) {
-        console.warn('Failed to parse SSE data:', e);
-      }
-    };
-    return () => eventSource.close();
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setLogs(prev => [...prev, data]);
+        } catch (e) {
+          console.warn('Failed to parse SSE data:', e);
+        }
+      };
+    });
+
+    return () => { if (eventSource) eventSource.close(); };
   }, [accessToken, fetchModelInfo, sseId]);
 
   useEffect(() => {
