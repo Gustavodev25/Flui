@@ -1705,6 +1705,50 @@ app.post('/api/analytics/route', async (req, res) => {
 });
 
 // ================== ADMIN PANEL ==================
+
+// Endpoint de diagnostico (temporario) — NÃO requer auth
+app.get('/api/admin/debug-env', async (req, res) => {
+  const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const hasSupabaseUrl = !!process.env.VITE_SUPABASE_URL;
+  const hasAnonKey = !!process.env.VITE_SUPABASE_ANON_KEY;
+  const serviceKeyPrefix = process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? process.env.SUPABASE_SERVICE_ROLE_KEY.slice(0, 30) + '...'
+    : 'NAO_CONFIGURADA';
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || 'NAO_CONFIGURADA';
+
+  // Testa validar o token enviado (se houver)
+  const token = getAdminAccessToken(req);
+  let tokenTest = null;
+
+  if (token) {
+    try {
+      const { data, error } = await supabaseAdmin.auth.getUser(token);
+      tokenTest = {
+        success: !error && !!data?.user,
+        userId: data?.user?.id || null,
+        email: data?.user?.email || null,
+        errorMessage: error?.message || null,
+        errorStatus: error?.status || null,
+      };
+    } catch (e) {
+      tokenTest = { success: false, exception: e.message };
+    }
+  }
+
+  res.json({
+    env: {
+      VITE_SUPABASE_URL: supabaseUrl,
+      HAS_ANON_KEY: hasAnonKey,
+      HAS_SERVICE_ROLE_KEY: hasServiceKey,
+      SERVICE_KEY_PREFIX: serviceKeyPrefix,
+      ADMIN_USER_IDS: getConfiguredAdminUserIds(),
+      ADMIN_EMAILS: getConfiguredAdminEmails(),
+    },
+    tokenTest,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get('/api/admin/me', requireAdmin, (req, res) => {
   res.json({
     admin: true,
