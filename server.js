@@ -363,11 +363,24 @@ async function requireAdmin(req, res, next) {
   }
 
   try {
+    // Log para diagnostico — verifica se SERVICE_ROLE_KEY esta configurada
+    const usingServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+    console.log(`[AdminAuth] Validando token (${token.slice(0, 20)}...) | SERVICE_ROLE_KEY configurada: ${usingServiceKey}`);
+
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 
     if (error || !user) {
+      console.error('[AdminAuth] getUser falhou:', {
+        errorMessage: error?.message,
+        errorStatus: error?.status,
+        errorName: error?.name,
+        hasUser: !!user,
+        usingServiceKey,
+      });
       return sendAdminAuthError(res, 401, 'Sessao Supabase invalida');
     }
+
+    console.log(`[AdminAuth] Usuario validado: ${user.id} (${user.email})`);
 
     const configuredIds = getConfiguredAdminUserIds();
     const configuredEmails = getConfiguredAdminEmails();
@@ -375,13 +388,14 @@ async function requireAdmin(req, res, next) {
     const isConfiguredEmail = user.email && configuredEmails.includes(user.email.toLowerCase());
 
     if (!hasAdminRole(user) && !isConfiguredUser && !isConfiguredEmail) {
+      console.warn(`[AdminAuth] Usuario ${user.email} sem permissao admin. IDs configurados: ${configuredIds.join(', ')}. Emails configurados: ${configuredEmails.join(', ')}`);
       return sendAdminAuthError(res, 403, 'Usuario sem permissao de administrador');
     }
 
     req.adminUser = user;
     return next();
   } catch (error) {
-    console.error('[AdminAuth] Falha ao validar admin:', error.message);
+    console.error('[AdminAuth] Falha ao validar admin:', error.message, error.stack);
     return sendAdminAuthError(res, 500, 'Falha ao validar administrador');
   }
 }
