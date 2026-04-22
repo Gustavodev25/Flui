@@ -3,8 +3,6 @@ import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { runReminderCycle, getReminderPreview } from './agent/reminders.js';
 import { transcribeWhatsAppAudio } from './agent/transcriber.js';
 import { TOOLS, executeTool } from './agent/tools.js';
@@ -35,13 +33,9 @@ import {
 import { trackEvent, analyzeAndUpdateProfile } from './agent/behavioralProfile.js';
 import { detectAndSaveCommitment } from './agent/accountabilityLoop.js';
 import { engineEvents as agentEvents } from './agent/queryEngine.js';
-import { getSession, setSession, deleteSession, checkAndMarkMessage, checkRateLimit, createBullMQConnection } from './agent/redisClient.js';
-import { enqueueWhatsAppMessage, getWhatsAppQueue } from './agent/whatsappQueue.js';
-import { Worker } from 'bullmq';
+import { getSession, setSession, deleteSession, checkAndMarkMessage, checkRateLimit } from './agent/memoryState.js';
 import OpenAI from 'openai';
 import Stripe from 'stripe';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config();
 
@@ -243,7 +237,7 @@ const nimClient = new OpenAI({
 });
 
 // ================== SESSÕES ==================
-// pendingAuthSessions e processedMessages migrados para Redis (agent/redisClient.js)
+// Sessao, deduplicacao e rate limit locais ficam em memoria do processo.
 const OUTBOUND_WORKER_ID = `server-${crypto.randomUUID()}`;
 
 // Track last proactive message time per userId for engagement detection
@@ -333,8 +327,7 @@ async function buildReminderSessions() {
     };
   }
 
-  // Sessões pendentes (auth em andamento) ficam no Redis com TTL curto;
-  // usuários sem binding ativo ainda não têm lembretes configurados.
+  // Usuarios sem binding ativo ainda nao tem lembretes configurados.
   return sessions;
 }
 
@@ -489,8 +482,7 @@ async function enqueueSystemWhatsAppMessage(userId, content, messageType = 'assi
 }
 
 // ================== DEDUPLICAÇÃO ==================
-// Migrado para Redis (checkAndMarkMessage em agent/redisClient.js).
-// Garantia atômica via SET NX — funciona em múltiplas instâncias.
+// Deduplicacao local em memoria do processo.
 
 // ================== BOAS-VINDAS COM IA ==================
 async function generateWelcomeMessage() {
@@ -720,7 +712,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
         console.error('[WhatsApp] Erro ao remover binding:', err.message);
       }
 
-      // Limpa sessão no Redis
+      // Limpa sessao local
       await deleteSession(userPhone);
 
       await sendWhatsAppMessage(userPhone,
@@ -895,7 +887,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const message = messages[0];
     if (!message) return;
 
-    // ── FILTRO 3: Deduplicação (Redis atômico, funciona em múltiplas instâncias) ──
+    // ── FILTRO 3: Deduplicacao em memoria do processo ──
     if (await checkAndMarkMessage(message.id)) {
       console.log(`[Webhook] Mensagem duplicada ignorada: ${message.id}`);
       return;
@@ -920,26 +912,19 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
     console.log(`[Webhook] 📩 ${messageType} de ${userPhone} (${messageId})`);
 
-    // ── Enfileira para processamento assíncrono via BullMQ ──
+    // ── Processa diretamente sem fila externa ──
     if (messageType === 'text') {
       const body = message.text?.body;
       if (!body || !body.trim()) {
         console.log('[Webhook] Texto vazio ignorado');
         return;
       }
-      const queued = await enqueueWhatsAppMessage({ userPhone, content: body, messageId, type: 'text' });
-      if (!queued) {
-        // Fila não disponível (Redis não configurado) — processa diretamente
-        await processAndRespondWithAI(userPhone, body, messageId);
-      }
+      await processAndRespondWithAI(userPhone, body, messageId);
       return;
     }
 
     if (messageType === 'audio' && message.audio?.id) {
-      const queued = await enqueueWhatsAppMessage({ userPhone, audioId: message.audio.id, messageId, type: 'audio' });
-      if (!queued) {
-        await handleAudioMessage(userPhone, message.audio.id, messageId);
-      }
+      await handleAudioMessage(userPhone, message.audio.id, messageId);
       return;
     }
 
@@ -947,42 +932,6 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     console.error('[Webhook] Erro ao processar evento:', err.message);
   }
 });
-
-// ================== BULLMQ WORKER ==================
-// Processa mensagens do WhatsApp de forma assíncrona com retry automático.
-// Concurrency=5: até 5 mensagens simultâneas por instância do servidor.
-{
-  const workerConnection = createBullMQConnection();
-  if (workerConnection) {
-    const whatsappWorker = new Worker(
-      'whatsapp-messages',
-      async (job) => {
-        const { userPhone, content, messageId, type, audioId } = job.data;
-        if (type === 'audio') {
-          await handleAudioMessage(userPhone, audioId, messageId);
-        } else {
-          await processAndRespondWithAI(userPhone, content, messageId);
-        }
-      },
-      { connection: workerConnection, concurrency: 5 }
-    );
-
-    whatsappWorker.on('failed', (job, err) => {
-      console.error(`[Worker] Job ${job?.id} falhou (tentativa ${job?.attemptsMade}): ${err.message}`);
-    });
-
-    whatsappWorker.on('completed', (job) => {
-      console.log(`[Worker] Job ${job.id} concluído (${job.data.userPhone})`);
-    });
-
-    process.on('SIGTERM', () => whatsappWorker.close());
-    process.on('SIGINT',  () => whatsappWorker.close());
-
-    console.log('[Worker] BullMQ Worker WhatsApp iniciado (concurrency=5)');
-  } else {
-    console.warn('[Worker] Redis não configurado — Worker BullMQ desativado, processamento direto ativo');
-  }
-}
 
 // ================== STRIPE ==================
 
@@ -2512,6 +2461,14 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
+app.get('/', (req, res) => {
+  res.json({
+    ok: true,
+    service: 'flui-backend',
+    health: '/api/health',
+  });
+});
+
 app.get('/api/conversations', async (req, res) => {
   try {
     const userId = req.query.userId;
@@ -2658,7 +2615,7 @@ app.delete('/api/whatsapp/link-phone', async (req, res) => {
     const binding = await findBindingByUserId(userId, 'whatsapp');
     if (binding?.external_user_id) {
       await deleteChannelBinding('whatsapp', binding.external_user_id);
-      pendingAuthSessions.delete(binding.external_user_id);
+      await deleteSession(binding.external_user_id);
     }
 
     res.json({ ok: true });
@@ -3080,11 +3037,13 @@ if (!process.env.VERCEL) {
   setInterval(checkTaskTimers, 60_000);
   setTimeout(checkTaskTimers, 5_000);
 
-  // Serve o frontend React em modo local
-  const distPath = path.join(__dirname, 'dist');
-  app.use(express.static(distPath));
   app.get(/^(?!\/api).*/, (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
+    res.status(404).json({
+      error: {
+        code: 'not_found',
+        message: 'Rota nao encontrada no backend.',
+      },
+    });
   });
 
   const PORT = process.env.PORT || 3001;

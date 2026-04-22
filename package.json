@@ -12,11 +12,8 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.0",
-    "@upstash/redis": "^1.37.0",
-    "bullmq": "^5.74.1",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
-    "ioredis": "^5.10.1",
     "openai": "^6.33.0",
     "resend": "^6.10.0",
     "stripe": "^21.0.1",
