@@ -57,8 +57,14 @@ export async function apiFetch<T>(path: string, init?: RequestInit, query?: Reco
   const payload = isJson ? await response.json() : null
 
   if (!response.ok) {
-    const message = payload?.error?.message || `Request failed with status ${response.status}`
-    throw new ApiError(message, response.status, payload || undefined)
+    const rawError = payload?.error
+    const message = typeof rawError === 'string'
+      ? rawError
+      : rawError?.message || `Request failed with status ${response.status}`
+    const normalizedPayload = typeof rawError === 'string'
+      ? { error: { message: rawError } }
+      : payload || undefined
+    throw new ApiError(message, response.status, normalizedPayload)
   }
 
   return payload as T

@@ -2,14 +2,19 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
 import { AdminChatSimulator } from './AdminChatSimulator';
+import { useAuth } from '../contexts/AuthContext';
 import {
-  ShieldAlert, Search, Users, LogOut, ArrowRight, ShieldCheck,
+  ShieldAlert, Search, Users, LogOut, ArrowRight,
   MessageSquare, CheckSquare, MessageCircle, Bot, User as UserIcon,
-  ChevronLeft, ChevronRight, Clock, Zap, Globe, Smartphone,
-  Filter, RefreshCw
+  ChevronLeft, ChevronRight, Globe, Smartphone,
+  Filter, RefreshCw, Route, MapPin, Activity, BookOpen, AlertTriangle, TrendingUp
 } from 'lucide-react';
+import Avvvatars from 'avvvatars-react';
 import logo from '../assets/logo/logo.svg';
 import luiLogo from '../assets/logo/lui.svg';
+import flowLogo from '../assets/logo/flow.svg';
+import pulseLogo from '../assets/logo/pulse.svg';
+import gratisLogo from '../assets/logo/gratis.svg';
 import { motion, AnimatePresence } from 'framer-motion';
 import PixelBlast from '../components/ui/PixelBlast';
 
@@ -17,11 +22,13 @@ interface User {
   id: string;
   email: string;
   name: string;
+  avatar: string | null;
   createdAt: string;
   lastSignIn: string;
   hasFlow: boolean;
   planId: string | null;
   subscriptionStatus: string;
+  activeRecently: boolean;
 }
 
 interface AdminStats {
@@ -30,6 +37,65 @@ interface AdminStats {
   firstMessageUsers: number;
   wppConversationsUsed: number;
   wppFreeLimit: number;
+  analytics?: AdminAnalytics;
+}
+
+type RouteTrackingStatus = 'active' | 'empty' | 'not_configured' | 'error';
+
+interface AdminRouteInsight {
+  path: string;
+  label: string;
+  visits: number;
+  uniqueUsers: number;
+  percentage: number;
+  lastSeenAt: string | null;
+}
+
+interface AdminStateInsight {
+  state: string;
+  country: string;
+  users: number;
+  visits: number;
+  conversations: number;
+  messages: number;
+  lastSeenAt: string | null;
+}
+
+interface AdminChannelInsight {
+  channel: string;
+  messages: number;
+  inbound: number;
+  outbound: number;
+  users: number;
+  percentage: number;
+}
+
+interface AdminConversationAnalytics {
+  totalThreads: number;
+  messagesToday: number;
+  activeUsers7d: number;
+  assistantResponses: number;
+  avgLatencyMs: number;
+  fallbackRate: number;
+  toolCalls: number;
+  unreadThreads: number;
+  lastMessageAt: string | null;
+}
+
+interface AdminTrainingSignal {
+  topic: string;
+  count: number;
+  sample: string;
+  recommendation: string;
+}
+
+interface AdminAnalytics {
+  routeTrackingStatus: RouteTrackingStatus;
+  routes: AdminRouteInsight[];
+  states: AdminStateInsight[];
+  channels: AdminChannelInsight[];
+  conversations: AdminConversationAnalytics;
+  trainingSignals: AdminTrainingSignal[];
 }
 
 interface MessageUser {
@@ -65,17 +131,262 @@ interface MessagesResponse {
   totalPages: number;
 }
 
-type AdminTab = 'users' | 'messages' | 'simulator';
+const numberFormatter = new Intl.NumberFormat('pt-BR');
+
+function formatMetric(value: number | null | undefined) {
+  return numberFormatter.format(value || 0);
+}
+
+function channelLabel(channel: string) {
+  if (channel === 'whatsapp') return 'WhatsApp';
+  if (channel === 'web') return 'Web';
+  return channel || 'Outro';
+}
+
+function formatShortDate(dateStr: string | null | undefined) {
+  if (!dateStr) return 'Sem registro';
+  return new Date(dateStr).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function AdminDashboardStats({ stats }: { stats: AdminStats }) {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: 'Mensagens enviadas', value: stats.totalMessages, icon: <MessageSquare size={16} /> },
+          { label: 'Tarefas criadas', value: stats.totalTasks, icon: <CheckSquare size={16} /> },
+          { label: 'Usuários com interação', value: stats.firstMessageUsers, icon: <Users size={16} /> },
+        ].map(({ label, value, icon }) => (
+          <div key={label} className="bg-white border border-[#e9e9e7] rounded-2xl p-5 flex flex-col gap-3 hover:border-[#d0d0ce] transition-all">
+            <div className="flex items-center justify-between text-[#37352f]/30">
+              <span className="text-[11px] font-semibold uppercase tracking-wider">{label}</span>
+              {icon}
+            </div>
+            <span className="text-3xl font-bold text-[#202020]">{formatMetric(value)}</span>
+          </div>
+        ))}
+
+        <div className="bg-white border border-[#e9e9e7] rounded-2xl p-5 flex flex-col gap-3 hover:border-[#d0d0ce] transition-all">
+          <div className="flex items-center justify-between text-[#37352f]/30">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Consumo Wpp / mês</span>
+            <MessageCircle size={16} />
+          </div>
+          <div className="flex items-end gap-1.5">
+            <span className="text-3xl font-bold text-[#202020]">{formatMetric(stats.wppConversationsUsed)}</span>
+            <span className="text-sm font-semibold text-[#37352f]/30 mb-0.5">/ {formatMetric(stats.wppFreeLimit)}</span>
+          </div>
+          <div className="w-full bg-[#f3f3f1] h-1.5 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${(stats.wppConversationsUsed / Math.max(stats.wppFreeLimit, 1)) > 0.9 ? 'bg-red-400' : 'bg-[#202020]'}`}
+              style={{ width: `${Math.min((stats.wppConversationsUsed / Math.max(stats.wppFreeLimit, 1)) * 100, 100)}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.9fr] gap-5">
+        <section className="bg-white border border-[#e9e9e7] rounded-2xl p-5">
+          <div className="flex items-start justify-between gap-4 mb-5">
+            <div>
+              <div className="flex items-center gap-2 text-[#202020]">
+                <Route size={16} />
+                <h3 className="text-sm font-bold">Rotas acessadas</h3>
+              </div>
+              <p className="text-xs text-[#37352f]/40 mt-1">Páginas mais visitadas desde os últimos eventos registrados.</p>
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-[0.18em] text-[#37352f]/30">
+              {stats.analytics?.routeTrackingStatus === 'active' ? 'Ativo' : 'Aguardando'}
+            </span>
+          </div>
+
+          {stats.analytics?.routes?.length ? (
+            <div className="space-y-4">
+              {stats.analytics.routes.map((route) => (
+                <div key={route.path} className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-[#202020] truncate">{route.label}</p>
+                      <p className="text-[11px] font-medium text-[#37352f]/35 truncate">{route.path} • {formatShortDate(route.lastSeenAt)}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-black text-[#202020]">{formatMetric(route.visits)}</p>
+                      <p className="text-[10px] font-bold text-[#37352f]/30">{formatMetric(route.uniqueUsers)} usuários</p>
+                    </div>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-[#f3f3f1] overflow-hidden">
+                    <div className="h-full bg-[#202020] rounded-full" style={{ width: `${Math.max(route.percentage, 4)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-8 flex items-start gap-3 text-[#37352f]/45">
+              <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+              <p className="text-sm leading-relaxed">
+                {stats.analytics?.routeTrackingStatus === 'not_configured'
+                  ? 'A coleta de rotas já foi adicionada, mas a tabela site_route_events ainda precisa existir no Supabase.'
+                  : 'Ainda não há eventos de rota suficientes. As próximas navegações começarão a aparecer aqui.'}
+              </p>
+            </div>
+          )}
+        </section>
+
+        <section className="bg-white border border-[#e9e9e7] rounded-2xl p-5">
+          <div className="flex items-start justify-between gap-4 mb-5">
+            <div>
+              <div className="flex items-center gap-2 text-[#202020]">
+                <MapPin size={16} />
+                <h3 className="text-sm font-bold">Estados e origem</h3>
+              </div>
+              <p className="text-xs text-[#37352f]/40 mt-1">Localização detectada por headers de hospedagem e metadados de usuários.</p>
+            </div>
+          </div>
+
+          {stats.analytics?.states?.length ? (
+            <div className="space-y-3">
+              {stats.analytics.states.map((state) => (
+                <div key={`${state.country}-${state.state}`} className="flex items-center justify-between gap-3 border-b border-[#f3f3f1] last:border-b-0 pb-3 last:pb-0">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-[#202020] truncate">{state.state}</p>
+                    <p className="text-[11px] font-medium text-[#37352f]/35 truncate">{state.country} • {formatMetric(state.visits)} visitas • {formatMetric(state.messages)} msgs</p>
+                  </div>
+                  <span className="text-lg font-black text-[#202020]">{formatMetric(state.users)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-8 flex flex-col items-center text-center gap-2 text-[#37352f]/35">
+              <MapPin size={24} />
+              <p className="text-sm font-medium">Sem estado identificado nos dados atuais.</p>
+            </div>
+          )}
+        </section>
+      </div>
+
+      <section className="bg-white border border-[#e9e9e7] rounded-2xl p-5">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-5">
+          <div>
+            <div className="flex items-center gap-2 text-[#202020]">
+              <Activity size={16} />
+              <h3 className="text-sm font-bold">Conversas e IA</h3>
+            </div>
+            <p className="text-xs text-[#37352f]/40 mt-1">Volume, canais e sinais técnicos das conversas recentes.</p>
+          </div>
+          <span className="text-[11px] font-bold text-[#37352f]/35">
+            Última mensagem: {formatShortDate(stats.analytics?.conversations.lastMessageAt)}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          {[
+            { label: 'Conversas', value: stats.analytics?.conversations.totalThreads || 0 },
+            { label: 'Mensagens hoje', value: stats.analytics?.conversations.messagesToday || 0 },
+            { label: 'Usuários 7d', value: stats.analytics?.conversations.activeUsers7d || 0 },
+            { label: 'Chamadas de ferramentas', value: stats.analytics?.conversations.toolCalls || 0 },
+          ].map((metric) => (
+            <div key={metric.label} className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl p-4">
+              <p className="text-[10px] font-black uppercase tracking-wider text-[#37352f]/35">{metric.label}</p>
+              <p className="text-2xl font-black text-[#202020] mt-1">{formatMetric(metric.value)}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_0.8fr] gap-5">
+          <div className="space-y-3">
+            {stats.analytics?.channels?.length ? stats.analytics.channels.map((channel) => (
+              <div key={channel.channel} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {channel.channel === 'whatsapp' ? <Smartphone size={14} className="text-green-600" /> : <Globe size={14} className="text-[#37352f]/50" />}
+                    <span className="text-sm font-bold text-[#202020]">{channelLabel(channel.channel)}</span>
+                  </div>
+                  <span className="text-xs font-bold text-[#37352f]/40">{formatMetric(channel.messages)} mensagens</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-[#f3f3f1] overflow-hidden">
+                  <div className="h-full bg-[#202020] rounded-full" style={{ width: `${Math.max(channel.percentage, 4)}%` }} />
+                </div>
+              </div>
+            )) : (
+              <p className="text-sm text-[#37352f]/40">Sem canais recentes para exibir.</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-xl border border-[#e9e9e7] p-3">
+              <p className="text-[9px] font-black uppercase tracking-wider text-[#37352f]/30">Latência</p>
+              <p className="text-lg font-black text-[#202020]">{formatMetric(stats.analytics?.conversations.avgLatencyMs)}ms</p>
+            </div>
+            <div className="rounded-xl border border-[#e9e9e7] p-3">
+              <p className="text-[9px] font-black uppercase tracking-wider text-[#37352f]/30">Fallback</p>
+              <p className="text-lg font-black text-[#202020]">{formatMetric(stats.analytics?.conversations.fallbackRate)}%</p>
+            </div>
+            <div className="rounded-xl border border-[#e9e9e7] p-3">
+              <p className="text-[9px] font-black uppercase tracking-wider text-[#37352f]/30">Não lidas</p>
+              <p className="text-lg font-black text-[#202020]">{formatMetric(stats.analytics?.conversations.unreadThreads)}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white border border-[#e9e9e7] rounded-2xl p-5">
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <div className="flex items-center gap-2 text-[#202020]">
+              <BookOpen size={16} />
+              <h3 className="text-sm font-bold">Treinamentos sugeridos para IA</h3>
+            </div>
+            <p className="text-xs text-[#37352f]/40 mt-1">Temas detectados nas mensagens recentes que podem virar exemplos, intents ou ajustes de prompt.</p>
+          </div>
+          <TrendingUp size={16} className="text-[#37352f]/25" />
+        </div>
+
+        {stats.analytics?.trainingSignals?.length ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {stats.analytics.trainingSignals.map((signal) => (
+              <div key={signal.topic} className="border border-[#e9e9e7] rounded-xl p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-[#202020]">{signal.topic}</p>
+                    <p className="text-[11px] font-bold text-[#37352f]/35 mt-0.5">{formatMetric(signal.count)} mensagens relacionadas</p>
+                  </div>
+                  <span className="text-lg font-black text-[#202020]">{formatMetric(signal.count)}</span>
+                </div>
+                {signal.sample && (
+                  <p className="mt-3 text-xs leading-relaxed text-[#37352f]/55 line-clamp-2">"{signal.sample}"</p>
+                )}
+                <p className="mt-3 text-xs font-medium leading-relaxed text-[#37352f]/45">{signal.recommendation}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="py-8 flex flex-col items-center text-center gap-2 text-[#37352f]/35">
+            <BookOpen size={24} />
+            <p className="text-sm font-medium">Ainda não há volume suficiente para sugerir treinamentos.</p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+type AdminTab = 'dashboard' | 'users' | 'messages' | 'simulator';
 
 export function AdminPanel() {
-  const [password, setPassword] = useState('');
+  const { user, session, isLoading: authLoading, signOut } = useAuth();
+  const accessToken = session?.access_token;
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<AdminTab>('users');
+  const [avatarErrors, setAvatarErrors] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
 
   // Messages state
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
@@ -89,28 +400,66 @@ export function AdminPanel() {
   const [selectedUserMessages, setSelectedUserMessages] = useState<User | null>(null);
   const [messagesMode, setMessagesMode] = useState<'all' | 'by-user'>('by-user');
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const adminFetch = useCallback(<T,>(
+    path: string,
+    init?: RequestInit,
+    query?: Record<string, string | number | boolean | undefined | null>
+  ) => {
+    if (!accessToken) {
+      throw new Error('Sessao Supabase ausente.');
+    }
+
+    const headers = new Headers(init?.headers || {});
+    headers.set('Authorization', `Bearer ${accessToken}`);
+
+    return apiFetch<T>(path, { ...init, headers }, query);
+  }, [accessToken]);
+
+  const loadAdminData = useCallback(async () => {
+    if (!accessToken) return;
+
     setLoading(true);
     setError('');
 
     try {
-      const resp = await apiFetch<{ users: User[] }>(`/api/admin/users`, undefined, { password });
-      setUsers(resp.users || []);
+      const [usersResp, statsResp] = await Promise.all([
+        adminFetch<{ users: User[] }>('/api/admin/users'),
+        adminFetch<AdminStats>('/api/admin/stats').catch((e) => {
+          console.error("Falha ao buscar estatisticas:", e);
+          return null;
+        }),
+      ]);
 
-      try {
-        const statsResp = await apiFetch<AdminStats>(`/api/admin/stats`, undefined, { password });
-        setStats(statsResp);
-      } catch (e) {
-        console.error("Falha ao buscar estatísticas:", e);
-      }
-
+      setUsers(usersResp.users || []);
+      setStats(statsResp);
       setIsAuthenticated(true);
     } catch (err: any) {
-      setError(err.message || 'Senha incorreta.');
+      setUsers([]);
+      setStats(null);
+      setIsAuthenticated(false);
+      setError(err.message || 'Usuario sem permissao de administrador.');
     } finally {
       setLoading(false);
     }
+  }, [accessToken, adminFetch]);
+
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (!user || !accessToken) {
+      setIsAuthenticated(false);
+      setUsers([]);
+      setStats(null);
+      setLoading(false);
+      setError('Entre com sua conta para verificar o acesso administrativo.');
+      return;
+    }
+
+    loadAdminData();
+  }, [authLoading, user, accessToken, loadAdminData]);
+
+  const retryAdminAccess = async () => {
+    await loadAdminData();
   };
 
   const handleGrantAccess = async (userId: string, plan: 'flow' | 'pulse') => {
@@ -118,13 +467,13 @@ export function AdminPanel() {
     if (!window.confirm(`Tem certeza que deseja conceder o plano "${planLabel}" para este usuário?`)) return;
 
     try {
-      await apiFetch('/api/admin/users/grant', {
+      await adminFetch('/api/admin/users/grant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, userId, plan })
+        body: JSON.stringify({ userId, plan })
       });
       // Atualiza localmente
-      setUsers(users.map(u =>
+      setUsers(prev => prev.map(u =>
         u.id === userId
           ? { ...u, hasFlow: true, planId: plan, subscriptionStatus: 'active' }
           : u
@@ -139,8 +488,7 @@ export function AdminPanel() {
     if (!isAuthenticated) return;
     setMessagesLoading(true);
     try {
-      const resp = await apiFetch<MessagesResponse>('/api/admin/messages', undefined, {
-        password,
+      const resp = await adminFetch<MessagesResponse>('/api/admin/messages', undefined, {
         page: messagesPage,
         limit: 50,
         channel: messagesChannel,
@@ -155,7 +503,7 @@ export function AdminPanel() {
     } finally {
       setMessagesLoading(false);
     }
-  }, [isAuthenticated, password, messagesPage, messagesChannel, messagesSearch, selectedUserMessages]);
+  }, [adminFetch, isAuthenticated, messagesPage, messagesChannel, messagesSearch, selectedUserMessages]);
 
   useEffect(() => {
     if (activeTab === 'messages' && isAuthenticated) {
@@ -169,100 +517,67 @@ export function AdminPanel() {
   }, [messagesChannel, messagesSearch, selectedUserMessages, messagesMode]);
 
   // ---------------------------------------------
-  // TELA DE LOGIN (Estilo Landing Page)
+  // LOADER — validando sessão
+  // ---------------------------------------------
+  if (authLoading || loading) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-5">
+        <img src={logo} alt="Flui" className="w-7 h-7 object-contain opacity-30" />
+        <div className="flex items-center gap-1.5">
+          {[0, 1, 2].map(i => (
+            <motion.span
+              key={i}
+              className="w-1.5 h-1.5 rounded-full bg-[#37352f]/20"
+              animate={{ opacity: [0.2, 1, 0.2] }}
+              transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------------------------------------
+  // TELA DE ACESSO NEGADO / LOGIN
   // ---------------------------------------------
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-white text-[#37352f] font-sans selection:bg-[#37352f]/10 relative overflow-hidden flex flex-col">
-        {/* Background Pixel Blast Moderno no Topo */}
-        <div className="absolute top-0 left-0 w-full h-[800px] pointer-events-none z-0 overflow-hidden opacity-40"
-          style={{
-            maskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)',
-            WebkitMaskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, black 70%, transparent 100%)'
-          }}
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="w-full max-w-[360px] flex flex-col items-start gap-5"
         >
-          <PixelBlast
-            variant="square"
-            pixelSize={3}
-            color="#cdcdc9"
-            patternScale={4}
-            patternDensity={0.6}
-            enableRipples
-            rippleSpeed={0.3}
-            speed={0.3}
-            transparent
-          />
-        </div>
-
-        {/* Header Minimalista */}
-        <header className="w-full max-w-6xl mx-auto px-6 py-6 flex items-center justify-between relative z-10 shrink-0">
-          <div className="flex items-center gap-2">
-            <img src={logo} alt="Flui Logo" className="w-8 h-8 object-contain" />
-            <span className="text-xl font-bold tracking-tight">flui.</span>
+          <div className="w-10 h-10 bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl flex items-center justify-center">
+            <ShieldAlert className="text-[#37352f]/30 w-5 h-5" />
           </div>
-          <Link to="/" className="text-sm font-semibold text-[#37352f]/60 hover:text-[#202020] transition-colors">
-            Voltar ao início
-          </Link>
-        </header>
 
-        {/* Login Area */}
-        <main className="flex-1 flex flex-col items-center justify-center relative z-10 px-6 py-12">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="w-full max-w-[420px]"
-          >
-            <div className="relative z-10">
-              <div className="mb-8 p-3 w-14 h-14 bg-white border border-[#e9e9e7] rounded-xl flex items-center justify-center shadow-sm">
-                <ShieldAlert className="text-[#37352f]/40 w-7 h-7" />
-              </div>
-              
-              <div className="mb-6 flex flex-col items-start text-left">
-                <h1 className="text-2xl font-bold tracking-tight mb-2 text-[#202020]">
-                  Painel Restrito
-                </h1>
-                <p className="text-sm text-[#37352f]/40 font-medium leading-relaxed">
-                  Insira sua senha de administração para gerenciar a plataforma com segurança.
-                </p>
-              </div>
+          <div>
+            <h1 className="text-lg font-bold text-[#202020] tracking-tight">Acesso restrito</h1>
+            <p className="text-sm text-[#37352f]/40 mt-1">
+              {user
+                ? (error || 'Sua conta não tem permissão de administrador.')
+                : 'Entre com sua conta para continuar.'}
+            </p>
+          </div>
 
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-[12px] font-medium text-[#37352f]/40">Senha Administrativa</label>
-                  <input
-                    type="password"
-                    placeholder="Sua senha segura"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-white border border-[#e9e9e7] rounded-[6px] py-2.5 px-3.5 text-[#37352f] placeholder-[#37352f]/30 outline-none focus:border-[#2383e2] focus:ring-1 focus:ring-[#2383e2]/10 transition-all text-sm"
-                    required
-                  />
-                </div>
-
-                {error && (
-                  <motion.p 
-                    initial={{ opacity: 0, y: -4 }} 
-                    animate={{ opacity: 1, y: 0 }} 
-                    className="text-red-500 text-[12px] font-medium"
-                  >
-                    {error}
-                  </motion.p>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full bg-[#202020] hover:bg-[#202020]/90 disabled:opacity-70 text-white font-medium py-2.5 rounded-[6px] transition-all mt-4 shadow-md shadow-black/5 flex items-center justify-center h-[38px] relative overflow-hidden"
-                >
-                  <span className="text-sm font-medium">
-                    {loading ? 'Acessando...' : 'Acessar Painel'}
-                  </span>
-                </button>
-              </form>
-            </div>
-          </motion.div>
-        </main>
+          {user ? (
+            <button
+              onClick={retryAdminAccess}
+              className="px-4 py-2 bg-[#202020] hover:bg-[#202020]/90 text-white text-sm font-medium rounded-lg transition-all"
+            >
+              Tentar novamente
+            </button>
+          ) : (
+            <Link
+              to="/login?redirect=/admin"
+              className="px-4 py-2 bg-[#202020] hover:bg-[#202020]/90 text-white text-sm font-medium rounded-lg transition-all"
+            >
+              Entrar
+            </Link>
+          )}
+        </motion.div>
       </div>
     );
   }
@@ -337,67 +652,54 @@ export function AdminPanel() {
 
             {/* Center: Navigation Tabs (Style refined) - More robust than absolute position */}
             <nav className="hidden lg:flex items-center gap-1 bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl p-1">
-              <button
-                onClick={() => setActiveTab('users')}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  activeTab === 'users'
-                    ? 'bg-white text-[#202020] shadow-sm border border-[#e9e9e7]'
-                    : 'text-[#37352f]/50 hover:text-[#37352f]/80'
-                }`}
-              >
-                <Users size={14} />
-                Usuários
-              </button>
-              <button
-                onClick={() => setActiveTab('messages')}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  activeTab === 'messages'
-                    ? 'bg-white text-[#202020] shadow-sm border border-[#e9e9e7]'
-                    : 'text-[#37352f]/50 hover:text-[#37352f]/80'
-                }`}
-              >
-                <MessageSquare size={14} />
-                Mensagens
-              </button>
-              <button
-                onClick={() => setActiveTab('simulator')}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  activeTab === 'simulator'
-                    ? 'bg-white text-[#202020] shadow-sm border border-[#e9e9e7]'
-                    : 'text-[#37352f]/50 hover:text-[#37352f]/80'
-                }`}
-              >
-                <Bot size={14} />
-                Simulador
-              </button>
+              {([
+                { id: 'dashboard', label: 'Painel', icon: <CheckSquare size={14} /> },
+                { id: 'users',     label: 'Usuários', icon: <Users size={14} /> },
+                { id: 'messages',  label: 'Mensagens', icon: <MessageSquare size={14} /> },
+                { id: 'simulator', label: 'Simulador', icon: <Bot size={14} /> },
+              ] as { id: AdminTab; label: string; icon: React.ReactNode }[]).map(({ id, label, icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setActiveTab(id)}
+                  className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    activeTab === id
+                      ? 'bg-white text-[#202020] shadow-sm border border-[#e9e9e7]'
+                      : 'text-[#37352f]/50 hover:text-[#37352f]/80'
+                  }`}
+                >
+                  {icon}{label}
+                </button>
+              ))}
             </nav>
 
-            {/* Right: Logout & Mobile Menu */}
+            {/* Right: name + Logout & Mobile Menu */}
             <div className="flex items-center gap-3">
-              {/* Mobile menu (tabs) simplified for admin */}
+              <span className="hidden sm:block text-xs font-medium text-[#37352f]/40">
+                {user?.user_metadata?.name?.split(' ')[0] || user?.email?.split('@')[0]}
+              </span>
+              {/* Mobile menu */}
               <div className="lg:hidden flex items-center gap-1 bg-[#f7f7f5] border border-[#e9e9e7] rounded-lg p-1 mr-2">
-                <button 
-                  onClick={() => setActiveTab('users')}
-                  className={`p-1.5 rounded-md ${activeTab === 'users' ? 'bg-white shadow-sm' : 'text-[#37352f]/40'}`}
-                >
-                  <Users size={16} />
-                </button>
-                <button 
-                  onClick={() => setActiveTab('messages')}
-                  className={`p-1.5 rounded-md ${activeTab === 'messages' ? 'bg-white shadow-sm' : 'text-[#37352f]/40'}`}
-                >
-                  <MessageSquare size={16} />
-                </button>
-                <button 
-                  onClick={() => setActiveTab('simulator')}
-                  className={`p-1.5 rounded-md ${activeTab === 'simulator' ? 'bg-white shadow-sm' : 'text-[#37352f]/40'}`}
-                >
-                   <Bot size={16} />
-                </button>
+                {([
+                  { id: 'dashboard', icon: <CheckSquare size={15} /> },
+                  { id: 'users',     icon: <Users size={15} /> },
+                  { id: 'messages',  icon: <MessageSquare size={15} /> },
+                  { id: 'simulator', icon: <Bot size={15} /> },
+                ] as { id: AdminTab; icon: React.ReactNode }[]).map(({ id, icon }) => (
+                  <button
+                    key={id}
+                    onClick={() => setActiveTab(id)}
+                    className={`p-1.5 rounded-md transition-all ${activeTab === id ? 'bg-white shadow-sm text-[#202020]' : 'text-[#37352f]/40'}`}
+                  >
+                    {icon}
+                  </button>
+                ))}
               </div>
 
               <button 
-                onClick={() => { setIsAuthenticated(false); setPassword(''); }}
+                onClick={() => {
+                  setIsAuthenticated(false);
+                  signOut();
+                }}
                 className="px-4 py-2 bg-[#202020] text-white text-[11px] font-bold uppercase tracking-wider rounded-xl hover:bg-[#30302E] shadow-sm transition-all flex items-center gap-2"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -409,7 +711,11 @@ export function AdminPanel() {
       </header>
 
       {/* Content Area */}
-      <div className={`flex-1 overflow-hidden ${activeTab === 'simulator' ? 'w-full px-0' : 'w-full max-w-6xl mx-auto px-6 py-8 overflow-y-auto custom-scrollbar'} relative z-10 transition-all duration-300`}>
+      <div className={`flex-1 overflow-hidden relative z-10 transition-all duration-300 ${
+        activeTab === 'simulator' ? 'w-full px-0' :
+        activeTab === 'users' ? 'w-full max-w-6xl mx-auto px-6 py-8 flex flex-col' :
+        'w-full max-w-6xl mx-auto px-6 py-8 overflow-y-auto custom-scrollbar'
+      }`}>
         
         <AnimatePresence mode="wait">
           {/* ═══════════ ABA USUÁRIOS ═══════════ */}
@@ -420,75 +726,89 @@ export function AdminPanel() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.2 }}
+              className="h-full flex flex-col"
             >
-              {/* Dashboard Content */}
-              <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-6 shadow-sm flex flex-col">
-                
-                {/* Controls Bar */}
-                <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6">
-                  <div className="flex items-center gap-2 text-[#37352f] bg-white px-5 py-2.5 rounded-xl border border-[#e9e9e7] shadow-sm">
-                    <Users size={18} className="text-[#37352f]/40"/> 
-                    <span className="font-bold text-sm">{users.length} usuários na base</span>
-                  </div>
-                  
-                  <div className="relative w-full sm:w-[400px]">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#37352f]/40 w-4 h-4" />
-                    <input
-                      type="text"
-                      placeholder="Buscar por nome ou email..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full bg-white border border-[#e9e9e7] rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-[#37352f] focus:outline-none focus:border-[#202020] focus:ring-1 focus:ring-[#202020] shadow-sm transition-all"
-                    />
-                  </div>
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 shrink-0">
+                <div>
+                  <h2 className="text-xl font-bold text-[#202020] tracking-tight">Usuários</h2>
+                  <p className="text-sm text-[#37352f]/40 mt-0.5">{users.length} contas registradas</p>
                 </div>
+                <div className="relative w-full sm:w-72">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#37352f]/30 w-3.5 h-3.5" />
+                  <input
+                    type="text"
+                    placeholder="Buscar usuário..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full bg-white border border-[#e9e9e7] rounded-xl pl-9 pr-4 py-2 text-sm text-[#37352f] placeholder:text-[#37352f]/30 focus:outline-none focus:border-[#202020] focus:ring-1 focus:ring-[#202020] transition-all"
+                  />
+                </div>
+              </div>
 
                 {/* Table Container */}
-                <div className="overflow-x-auto bg-white border border-[#e9e9e7] rounded-2xl shadow-sm">
+                <div className="flex-1 min-h-0 overflow-y-auto bg-white border border-[#e9e9e7] rounded-2xl shadow-sm [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-[#e9e9e7] bg-[#fcfcfc] text-[#37352f]/60 text-sm">
-                        <th className="py-4 px-6 font-bold uppercase tracking-wider text-[10px]">Usuário</th>
-                        <th className="py-4 px-6 font-bold uppercase tracking-wider text-[10px]">Email</th>
-                        <th className="py-4 px-6 font-bold uppercase tracking-wider text-[10px]">Cadastrado em</th>
-                        <th className="py-4 px-6 font-bold uppercase tracking-wider text-[10px]">Status</th>
-                        <th className="py-4 px-6 font-bold uppercase tracking-wider text-[10px]">Plano</th>
-                        <th className="py-4 px-6 font-bold uppercase tracking-wider text-[10px] text-right">Ação</th>
+                      <tr className="border-b border-[#e9e9e7] text-[#37352f]/40 text-[10px] font-semibold uppercase tracking-widest">
+                        <th className="py-3 px-5">Usuário</th>
+                        <th className="py-3 px-5">Plano</th>
+                        <th className="py-3 px-5 text-right">Ações</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#e9e9e7]">
+                    <tbody className="divide-y divide-[#f3f3f1]">
                       {filteredUsers.map((user) => (
-                        <tr key={user.id} className="text-[#37352f] hover:bg-[#fcfcfc] transition-colors">
-                          <td className="py-4 px-6 font-bold text-sm">{user.name || 'Sem nome definido'}</td>
-                          <td className="py-4 px-6 text-sm font-medium text-[#37352f]/70">{user.email}</td>
-                          <td className="py-4 px-6 text-sm text-[#37352f]/60">{new Date(user.createdAt).toLocaleDateString('pt-BR')}</td>
-                          <td className="py-4 px-6">
-                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                              user.subscriptionStatus === 'active' 
-                                ? 'bg-[#28c840]/10 text-[#28c840]' 
-                                : 'bg-[#37352f]/5 text-[#37352f]/40'
-                            }`}>
-                              {user.subscriptionStatus}
-                            </span>
+                        <tr key={user.id} className="hover:bg-[#fafafa] transition-colors group">
+                          <td className="py-3 px-5">
+                            <div className="flex items-center gap-3">
+                              <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 flex items-center justify-center">
+                                {user.avatar && !avatarErrors.has(user.id) ? (
+                                  <img
+                                    src={user.avatar}
+                                    alt={user.name}
+                                    className="w-full h-full object-cover"
+                                    onError={() => setAvatarErrors(prev => new Set(prev).add(user.id))}
+                                  />
+                                ) : (
+                                  <Avvvatars value={user.email} style="shape" size={28} radius={50} />
+                                )}
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-[#202020] leading-tight">{user.name || '—'}</p>
+                                <p className="text-[11px] text-[#37352f]/40 leading-tight">{user.email}</p>
+                              </div>
+                              {user.activeRecently && (
+                                <span title="Ativo nas últimas 24h" className="shrink-0">
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="#75a23f">
+                                    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                                    <path d="M12.01 2.011a3.2 3.2 0 0 1 2.113 .797l.154 .145l.698 .698a1.2 1.2 0 0 0 .71 .341l.135 .008h1a3.2 3.2 0 0 1 3.195 3.018l.005 .182v1c0 .27 .092 .533 .258 .743l.09 .1l.697 .698a3.2 3.2 0 0 1 .147 4.382l-.145 .154l-.698 .698a1.2 1.2 0 0 0 -.341 .71l-.008 .135v1a3.2 3.2 0 0 1 -3.018 3.195l-.182 .005h-1a1.2 1.2 0 0 0 -.743 .258l-.1 .09l-.698 .697a3.2 3.2 0 0 1 -4.382 .147l-.154 -.145l-.698 -.698a1.2 1.2 0 0 0 -.71 -.341l-.135 -.008h-1a3.2 3.2 0 0 1 -3.195 -3.018l-.005 -.182v-1a1.2 1.2 0 0 0 -.258 -.743l-.09 -.1l-.697 -.698a3.2 3.2 0 0 1 -.147 -4.382l.145 -.154l.698 -.698a1.2 1.2 0 0 0 .341 -.71l.008 -.135v-1l.005 -.182a3.2 3.2 0 0 1 3.013 -3.013l.182 -.005h1a1.2 1.2 0 0 0 .743 -.258l.1 -.09l.698 -.697a3.2 3.2 0 0 1 2.269 -.944zm3.697 7.282a1 1 0 0 0 -1.414 0l-3.293 3.292l-1.293 -1.292l-.094 -.083a1 1 0 0 0 -1.32 1.497l2 2l.094 .083a1 1 0 0 0 1.32 -.083l4 -4l.083 -.094a1 1 0 0 0 -.083 -1.32z"/>
+                                  </svg>
+                                </span>
+                              )}
+                            </div>
                           </td>
-                          <td className="py-4 px-6">
-                            {user.planId === 'pulse' ? (
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-[#37352f]/5 text-[#37352f]/50 border border-[#e9e9e7]">
-                                Pulse
-                              </span>
-                            ) : user.planId === 'flow' ? (
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-[#37352f]/5 text-[#37352f]/50 border border-[#e9e9e7]">
-                                Flow
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold text-[#37352f]/25 uppercase tracking-widest">
-                                —
-                              </span>
-                            )}
+                          <td className="py-3 px-5">
+                            <div className="flex items-center gap-2">
+                              {user.planId === 'flow' ? (
+                                <>
+                                  <img src={flowLogo} alt="Flow" className="h-4 w-auto opacity-70" />
+                                  <span className="text-xs font-semibold text-[#37352f]/60">Flow</span>
+                                </>
+                              ) : user.planId === 'pulse' ? (
+                                <>
+                                  <img src={pulseLogo} alt="Pulse" className="h-4 w-auto opacity-70" />
+                                  <span className="text-xs font-semibold text-[#37352f]/60">Pulse</span>
+                                </>
+                              ) : (
+                                <>
+                                  <img src={gratisLogo} alt="Grátis" className="h-4 w-auto opacity-40" />
+                                  <span className="text-xs font-semibold text-[#37352f]/30">Grátis</span>
+                                </>
+                              )}
+                            </div>
                           </td>
-                          <td className="py-4 px-6 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              {/* New Button to view logs */}
+                          <td className="py-3 px-5">
+                            <div className="flex items-center justify-end gap-1">
                               <button
                                 onClick={() => {
                                   setSelectedUserMessages(user);
@@ -496,49 +816,28 @@ export function AdminPanel() {
                                   setActiveTab('messages');
                                   setMessagesPage(1);
                                 }}
-                                className="p-1.5 bg-[#f7f7f5] border border-[#e9e9e7] text-[#37352f]/40 hover:text-[#202020] hover:border-[#202020] rounded-lg transition-all"
-                                title="Ver Logs de Mensagens"
+                                className="p-1.5 text-[#37352f]/25 hover:text-[#202020] hover:bg-[#f3f3f1] rounded-lg transition-all"
+                                title="Ver mensagens"
                               >
-                                <MessageSquare size={14} />
+                                <MessageSquare size={13} />
                               </button>
-                              
-                              {!user.hasFlow ? (
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    onClick={() => handleGrantAccess(user.id, 'flow')}
-                                    className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
-                                  >
-                                    Flow
-                                  </button>
-                                  <button
-                                    onClick={() => handleGrantAccess(user.id, 'pulse')}
-                                    className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
-                                  >
-                                    Pulse
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-end gap-2">
-                                  {user.planId !== 'pulse' && (
-                                    <button
-                                      onClick={() => handleGrantAccess(user.id, 'pulse')}
-                                      className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
-                                    >
-                                      Pulse
-                                    </button>
-                                  )}
-                                  {user.planId !== 'flow' && (
-                                    <button
-                                      onClick={() => handleGrantAccess(user.id, 'flow')}
-                                      className="px-3 py-1.5 bg-white border border-[#e9e9e7] text-[#37352f] text-[10px] uppercase tracking-widest font-bold rounded-lg hover:bg-[#f1f1f0] transition-all"
-                                    >
-                                      Flow
-                                    </button>
-                                  )}
-                                  <span className="text-[10px] font-bold text-[#37352f]/25 uppercase tracking-widest whitespace-nowrap">
-                                    {user.planId === 'pulse' ? 'Pulse ativo' : 'Flow ativo'}
-                                  </span>
-                                </div>
+                              {user.planId !== 'flow' && (
+                                <button
+                                  onClick={() => handleGrantAccess(user.id, 'flow')}
+                                  className="p-1 hover:bg-[#f3f3f1] rounded-lg transition-all opacity-30 hover:opacity-100"
+                                  title="Conceder Flow"
+                                >
+                                  <img src={flowLogo} alt="Flow" className="h-4 w-auto" />
+                                </button>
+                              )}
+                              {user.planId !== 'pulse' && (
+                                <button
+                                  onClick={() => handleGrantAccess(user.id, 'pulse')}
+                                  className="p-1 hover:bg-[#f3f3f1] rounded-lg transition-all opacity-30 hover:opacity-100"
+                                  title="Conceder Pulse"
+                                >
+                                  <img src={pulseLogo} alt="Pulse" className="h-4 w-auto" />
+                                </button>
                               )}
                             </div>
                           </td>
@@ -546,10 +845,10 @@ export function AdminPanel() {
                       ))}
                       {filteredUsers.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="py-12 text-center">
+                          <td colSpan={3} className="py-12 text-center">
                             <div className="flex flex-col items-center gap-2">
-                              <Users className="w-10 h-10 text-[#e9e9e7]" />
-                              <span className="text-[#37352f]/50 font-medium text-sm">Nenhum usuário encontrado na busca.</span>
+                              <Users className="w-8 h-8 text-[#e9e9e7]" />
+                              <span className="text-[#37352f]/40 text-sm">Nenhum usuário encontrado.</span>
                             </div>
                           </td>
                         </tr>
@@ -557,58 +856,77 @@ export function AdminPanel() {
                     </tbody>
                   </table>
                 </div>
+
+            </motion.div>
+          )}
+
+          {/* ═══════════ ABA PAINEL ═══════════ */}
+          {activeTab === 'dashboard' && (
+            <motion.div
+              key="dashboard"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div className="mb-8">
+                <p className="text-xs font-semibold text-[#37352f]/30 uppercase tracking-widest mb-1">
+                  Bem-vindo de volta
+                </p>
+                <h2 className="text-2xl font-bold text-[#202020] tracking-tight">
+                  {user?.user_metadata?.name?.split(' ')[0]
+                    ? `Olá, ${user.user_metadata.name.split(' ')[0]}.`
+                    : `Olá, ${user?.email?.split('@')[0]}.`}
+                </h2>
+                <p className="text-sm text-[#37352f]/40 mt-1">Visão geral da plataforma Flui.</p>
               </div>
 
-              {/* Dashboard Statistics */}
-              {stats && (
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-8">
-                  <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-6 shadow-sm flex flex-col gap-2 relative overflow-hidden transition-all hover:shadow-md hover:border-[#d9d9d7]">
-                    <div className="flex items-center justify-between text-[#37352f]/60 mb-2">
-                      <span className="text-sm font-bold tracking-tight uppercase">Mensagens Enviadas</span>
-                      <MessageSquare size={18} />
+              {stats ? (
+                <>
+                  <AdminDashboardStats stats={stats} />
+                  <div className="hidden">
+                  {[
+                    { label: 'Mensagens enviadas', value: stats.totalMessages, icon: <MessageSquare size={16} /> },
+                    { label: 'Tarefas criadas', value: stats.totalTasks, icon: <CheckSquare size={16} /> },
+                    { label: 'Usuários com interação', value: stats.firstMessageUsers, icon: <Users size={16} /> },
+                  ].map(({ label, value, icon }) => (
+                    <div key={label} className="bg-white border border-[#e9e9e7] rounded-2xl p-5 flex flex-col gap-3 hover:border-[#d0d0ce] transition-all">
+                      <div className="flex items-center justify-between text-[#37352f]/30">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider">{label}</span>
+                        {icon}
+                      </div>
+                      <span className="text-3xl font-bold text-[#202020]">{value}</span>
                     </div>
-                    <span className="text-4xl font-extrabold text-[#202020]">{stats.totalMessages}</span>
-                  </div>
-                  
-                  <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-6 shadow-sm flex flex-col gap-2 relative overflow-hidden transition-all hover:shadow-md hover:border-[#d9d9d7]">
-                    <div className="flex items-center justify-between text-[#37352f]/60 mb-2">
-                      <span className="text-sm font-bold tracking-tight uppercase">Tarefas Criadas</span>
-                      <CheckSquare size={18} />
+                  ))}
+
+                  {/* WhatsApp card com barra */}
+                  <div className="bg-white border border-[#e9e9e7] rounded-2xl p-5 flex flex-col gap-3 hover:border-[#d0d0ce] transition-all">
+                    <div className="flex items-center justify-between text-[#37352f]/30">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider">Consumo Wpp / mês</span>
+                      <MessageCircle size={16} />
                     </div>
-                    <span className="text-4xl font-extrabold text-[#202020]">{stats.totalTasks}</span>
-                  </div>
-                  
-                  <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-6 shadow-sm flex flex-col gap-2 relative overflow-hidden transition-all hover:shadow-md hover:border-[#d9d9d7]">
-                    <div className="flex items-center justify-between text-[#37352f]/60 mb-2">
-                      <span className="text-sm font-bold tracking-tight uppercase">Usuários C/ Interação</span>
-                      <Users size={18} />
+                    <div className="flex items-end gap-1.5">
+                      <span className="text-3xl font-bold text-[#202020]">{stats.wppConversationsUsed}</span>
+                      <span className="text-sm font-semibold text-[#37352f]/30 mb-0.5">/ {stats.wppFreeLimit}</span>
                     </div>
-                    <span className="text-4xl font-extrabold text-[#202020]">{stats.firstMessageUsers}</span>
-                  </div>
-                  
-                  <div className="bg-[#f7f7f5] border border-[#e9e9e7] rounded-3xl p-6 shadow-sm flex flex-col gap-2 relative overflow-hidden transition-all hover:shadow-md hover:border-[#d9d9d7]">
-                    <div className="flex items-center justify-between text-[#37352f]/60 mb-2">
-                      <span className="text-sm font-bold tracking-tight uppercase text-truncate">Consumo Wpp Mês</span>
-                      <MessageCircle size={18} className="shrink-0" />
-                    </div>
-                    <div className="flex items-end gap-2 text-[#202020]">
-                      <span className="text-4xl font-extrabold">{stats.wppConversationsUsed}</span>
-                      <span className="text-lg font-bold text-[#37352f]/40 mb-1">/ {stats.wppFreeLimit}</span>
-                    </div>
-                    <div className="w-full bg-[#e9e9e7] h-2 mt-2 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full transition-all ${
-                          (stats.wppConversationsUsed / stats.wppFreeLimit) > 0.9 ? 'bg-red-500' : 'bg-[#202020]'
-                        }`}
+                    <div className="w-full bg-[#f3f3f1] h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${(stats.wppConversationsUsed / stats.wppFreeLimit) > 0.9 ? 'bg-red-400' : 'bg-[#202020]'}`}
                         style={{ width: `${Math.min((stats.wppConversationsUsed / stats.wppFreeLimit) * 100, 100)}%` }}
                       />
                     </div>
                   </div>
+                  </div>
+                </>
+              ) : (
+                <div className="py-20 flex flex-col items-center gap-2 text-[#37352f]/30">
+                  <CheckSquare size={28} />
+                  <span className="text-sm">Carregando estatísticas...</span>
                 </div>
               )}
             </motion.div>
           )}
-          
+
           {/* ═══════════ ABA SIMULADOR ═══════════ */}
           {activeTab === 'simulator' && (
             <motion.div

@@ -85,6 +85,39 @@ function InviteProcessor() {
   return null
 }
 
+function RouteAnalyticsTracker() {
+  const { user } = useAuth()
+  const location = useLocation()
+  const lastTrackedRef = useRef('')
+
+  useEffect(() => {
+    const key = `${user?.id || 'anon'}:${location.pathname}:${location.search}`
+    if (lastTrackedRef.current === key) return
+    lastTrackedRef.current = key
+
+    apiFetch('/api/analytics/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: user?.id || null,
+        path: location.pathname,
+        referrer: document.referrer || null,
+        title: document.title || null,
+        locale: navigator.language,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        },
+      }),
+    }).catch(() => {
+      // Analytics must never block navigation.
+    })
+  }, [location.pathname, location.search, user?.id])
+
+  return null
+}
+
 import { Loading } from './components/ui/Loading'
 
 function App() {
@@ -122,6 +155,7 @@ function App() {
             {showLoading && <Loading />}
             <InviteProcessor />
             <WhatsAppChecker onNeedWhatsApp={() => setShowWhatsAppOnboarding(true)} />
+            <RouteAnalyticsTracker />
             <Routes>
               <Route path="/admin" element={<AdminPanel />} />
               <Route path="/admin/chat-simulator" element={<AdminChatSimulator />} />

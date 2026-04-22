@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Send, Bot, Activity, Terminal, 
-  RefreshCw, MessageCircle, MessageSquare
+  Send, Terminal, RefreshCw, MessageCircle
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 interface LogEntry {
   type: string;
@@ -20,6 +20,8 @@ interface Message {
 }
 
 export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolean }) {
+  const { session } = useAuth();
+  const accessToken = session?.access_token;
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -30,11 +32,35 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
   const scrollRef = useRef<HTMLDivElement>(null);
   const logScrollRef = useRef<HTMLDivElement>(null);
 
+  const adminFetch = useCallback(<T,>(path: string, init?: RequestInit) => {
+    if (!accessToken) {
+      throw new Error('Sessao Supabase ausente.');
+    }
+
+    const headers = new Headers(init?.headers || {});
+    headers.set('Authorization', `Bearer ${accessToken}`);
+
+    return apiFetch<T>(path, { ...init, headers });
+  }, [accessToken]);
+
+  const fetchModelInfo = useCallback(async () => {
+    try {
+      const info = await adminFetch<any>('/api/admin/model-info');
+      setModelInfo(info);
+    } catch (err) {
+      console.error('Falha ao carregar modelo:', err);
+    }
+  }, [adminFetch]);
+
   useEffect(() => {
+    if (!accessToken) return;
+
     fetchModelInfo();
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const apiBase = isLocal ? 'http://localhost:3001' : (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
-    const eventSource = new EventSource(`${apiBase}/api/admin/chat/stream/${sseId}`);
+    const streamUrl = new URL(`/api/admin/chat/stream/${sseId}`, apiBase || window.location.origin);
+    streamUrl.searchParams.set('access_token', accessToken);
+    const eventSource = new EventSource(streamUrl.toString());
     
     eventSource.onmessage = (event) => {
       try {
@@ -45,7 +71,7 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
       }
     };
     return () => eventSource.close();
-  }, [sseId]);
+  }, [accessToken, fetchModelInfo, sseId]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -54,15 +80,6 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
   useEffect(() => {
     if (logScrollRef.current) logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
   }, [logs]);
-
-  const fetchModelInfo = async () => {
-    try {
-      const info = await apiFetch<any>('/api/admin/model-info');
-      setModelInfo(info);
-    } catch (err) {
-      console.error('Falha ao carregar modelo:', err);
-    }
-  };
 
   const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -74,7 +91,7 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
     setLoading(true);
 
     try {
-      const response = await apiFetch<any>('/api/admin/chat/simulate', {
+      const response = await adminFetch<any>('/api/admin/chat/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -108,6 +125,22 @@ export function AdminChatSimulator({ isEmbedded = false }: { isEmbedded?: boolea
       setLoading(false);
     }
   };
+
+  if (!accessToken) {
+    return (
+      <div className={`${isEmbedded ? 'h-full' : 'min-h-screen'} flex items-center justify-center bg-white text-[#37352f] font-sans`}>
+        <div className="max-w-sm px-6 text-center">
+          <div className="mx-auto mb-4 w-12 h-12 rounded-xl bg-[#202020] text-white flex items-center justify-center">
+            <Terminal className="w-5 h-5" />
+          </div>
+          <h1 className="text-lg font-bold text-[#202020]">Acesso restrito</h1>
+          <p className="text-sm text-[#37352f]/50 mt-2">
+            Entre com uma conta admin para usar o simulador.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`flex w-full h-full bg-white overflow-hidden font-sans transition-all`}>

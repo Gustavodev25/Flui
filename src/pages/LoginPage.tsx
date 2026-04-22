@@ -447,6 +447,10 @@ const LoginPage: React.FC = () => {
   const [isForgotPassword, setIsForgotPassword] = useState(false)
   const [searchParams] = useSearchParams()
   const inviteToken = searchParams.get('invite_token')
+  const redirectParam = searchParams.get('redirect')
+  const safeRedirect = redirectParam?.startsWith('/') && !redirectParam.startsWith('//')
+    ? redirectParam
+    : null
   const [lastLoginMethod, setLastLoginMethod] = useState<string | null>(null)
 
   React.useEffect(() => {
@@ -478,7 +482,7 @@ const LoginPage: React.FC = () => {
   }
 
   if (user) {
-    return <Navigate to={inviteToken ? `/dashboard?invite_token=${inviteToken}` : `/checkout-preview`} replace />
+    return <Navigate to={inviteToken ? `/dashboard?invite_token=${inviteToken}` : (safeRedirect || `/checkout-preview`)} replace />
   }
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -625,7 +629,7 @@ const LoginPage: React.FC = () => {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}${inviteToken ? `/dashboard?invite_token=${inviteToken}` : '/checkout-preview'}`,
+          redirectTo: `${window.location.origin}${inviteToken ? `/dashboard?invite_token=${inviteToken}` : (safeRedirect || '/checkout-preview')}`,
         }
       })
       if (error) throw error
