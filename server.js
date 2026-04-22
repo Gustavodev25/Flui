@@ -363,20 +363,28 @@ async function requireAdmin(req, res, next) {
   }
 
   try {
-    // Log para diagnostico — verifica se SERVICE_ROLE_KEY esta configurada
-    const usingServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-    console.log(`[AdminAuth] Validando token (${token.slice(0, 20)}...) | SERVICE_ROLE_KEY configurada: ${usingServiceKey}`);
+    // Chama a API REST do Supabase Auth diretamente
+    // (supabaseAdmin.auth.getUser(token) tem bug — ignora o token e tenta usar sessão interna)
+    const authResponse = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'apikey': SUPABASE_SERVICE_KEY,
+      },
+    });
 
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-
-    if (error || !user) {
-      console.error('[AdminAuth] getUser falhou:', {
-        errorMessage: error?.message,
-        errorStatus: error?.status,
-        errorName: error?.name,
-        hasUser: !!user,
-        usingServiceKey,
+    if (!authResponse.ok) {
+      const errorBody = await authResponse.text();
+      console.error('[AdminAuth] Auth API falhou:', {
+        status: authResponse.status,
+        body: errorBody,
       });
+      return sendAdminAuthError(res, 401, 'Sessao Supabase invalida');
+    }
+
+    const user = await authResponse.json();
+
+    if (!user || !user.id) {
+      console.error('[AdminAuth] Auth API retornou usuario invalido:', user);
       return sendAdminAuthError(res, 401, 'Sessao Supabase invalida');
     }
 
@@ -1716,19 +1724,25 @@ app.get('/api/admin/debug-env', async (req, res) => {
     : 'NAO_CONFIGURADA';
   const supabaseUrl = process.env.VITE_SUPABASE_URL || 'NAO_CONFIGURADA';
 
-  // Testa validar o token enviado (se houver)
+  // Testa validar o token enviado (se houver) via REST API
   const token = getAdminAccessToken(req);
   let tokenTest = null;
 
   if (token) {
     try {
-      const { data, error } = await supabaseAdmin.auth.getUser(token);
+      const authResponse = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'apikey': SUPABASE_SERVICE_KEY,
+        },
+      });
+      const userData = await authResponse.json();
       tokenTest = {
-        success: !error && !!data?.user,
-        userId: data?.user?.id || null,
-        email: data?.user?.email || null,
-        errorMessage: error?.message || null,
-        errorStatus: error?.status || null,
+        success: authResponse.ok && !!userData?.id,
+        httpStatus: authResponse.status,
+        userId: userData?.id || null,
+        email: userData?.email || null,
+        errorMessage: userData?.msg || userData?.message || null,
       };
     } catch (e) {
       tokenTest = { success: false, exception: e.message };
