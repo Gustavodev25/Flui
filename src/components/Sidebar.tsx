@@ -1,4 +1,9 @@
-import { LayoutDashboard, Folder, ChevronLeft, ExternalLink, Calendar, PieChart, Zap, Target, ArrowRight } from 'lucide-react'
+import { LayoutDashboard, Folder, ChevronLeft, ExternalLink, Calendar, Flame, BarChart2, ArrowRight } from 'lucide-react'
+import painelIcon from '../assets/icones/painel.svg'
+import tarefasIcon from '../assets/icones/tarefas.svg'
+import calendarioIcon from '../assets/icones/caledario.svg'
+import criarIcon from '../assets/icones/criar.svg'
+import breveIcon from '../assets/icones/breve.svg'
 import { Link, useLocation } from 'react-router-dom'
 import { useSidebar } from '../contexts/SidebarContext'
 import { useNavigate } from 'react-router-dom'
@@ -32,7 +37,7 @@ const TooltipCard: React.FC<{ label: string; subLabel?: string; disabled?: boole
        <div className="flex items-center gap-2">
          <span className="text-[12px] font-bold text-[#37352f] tracking-tight">{label}</span>
          {disabled && (
-           <span className="text-[8px] font-black bg-[#fceddb] text-[#cc7a33] px-1.5 py-0.5 rounded-md border border-[#e9e9e7] uppercase">Breve</span>
+           <span className="text-[8px] font-medium text-[#37352f]/35 tracking-wide">em breve</span>
          )}
        </div>
        {subLabel && !disabled && (
@@ -179,12 +184,11 @@ export const Sidebar: React.FC = () => {
   }, [location.pathname, closeMobileMenu])
 
   const navItems = [
-    { icon: LayoutDashboard, label: 'Painel', path: '/dashboard' },
-    { icon: Folder, label: 'Tarefas', path: '/tasks' },
-    { icon: Calendar, label: 'Calendário', path: '/calendar' },
-    { icon: Zap, label: 'Automações IA', path: '#', disabled: true },
-    { icon: Target, label: 'Metas Smart', path: '#', disabled: true },
-    { icon: PieChart, label: 'Relatórios', path: '#', disabled: true },
+    { icon: LayoutDashboard, iconSvg: painelIcon, label: 'Painel', path: '/dashboard' },
+    { icon: Folder, iconSvg: tarefasIcon, label: 'Tarefas', path: '/tasks' },
+    { icon: Calendar, iconSvg: calendarioIcon, label: 'Calendário', path: '/calendar' },
+    { icon: Flame, iconSvg: breveIcon, label: 'Hábitos', path: '#', disabled: true },
+    { icon: BarChart2, iconSvg: breveIcon, label: 'Relatórios', path: '#', disabled: true },
   ]
 
   return (
@@ -259,7 +263,10 @@ export const Sidebar: React.FC = () => {
 
           const Content = (
             <>
-              <item.icon size={18} className="flex-shrink-0" />
+              {item.iconSvg
+                ? <img src={item.iconSvg} alt="" className={`w-[18px] h-[18px] flex-shrink-0 ${item.disabled ? 'opacity-20' : isActive ? 'opacity-100' : 'opacity-60'}`} />
+                : <item.icon size={18} className="flex-shrink-0" />
+              }
               <AnimatePresence>
                 {(!isCollapsed || isMobile) && (
                   <motion.div
@@ -270,8 +277,8 @@ export const Sidebar: React.FC = () => {
                   >
                     <motion.span layoutId={item.path === '/calendar' ? "calendar-title" : undefined}>{item.label}</motion.span>
                     {item.disabled && (
-                      <span className="ml-2 px-1.5 py-0.5 rounded-md bg-[#e9e9e7]/50 text-[#37352f]/40 text-[9px] font-bold tracking-widest border border-[#e9e9e7]">
-                        Em breve
+                      <span className="ml-2 text-[9px] font-medium text-[#37352f]/30 tracking-wide">
+                        em breve
                       </span>
                     )}
                   </motion.div>
@@ -351,11 +358,17 @@ export const Sidebar: React.FC = () => {
                   onMouseEnter={() => isCollapsed && !isMobile && setHoveredId('lui')}
                   onMouseLeave={() => setHoveredId(null)}
                   className="w-full flex justify-center cursor-pointer relative"
-                  whileHover={{ scale: 1.1 }}
+                  whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   <div className="w-10 h-10 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm hover:shadow-md transition-shadow">
-                    <img src={luiLogo} alt="Lui" className="w-6 h-6 object-contain" />
+                    <motion.img
+                      src={luiLogo}
+                      alt="Lui"
+                      className="w-6 h-6 object-contain"
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+                    />
                   </div>
                   <AnimatePresence>
                     {isCollapsed && !isMobile && hoveredId === 'lui' && (
@@ -386,7 +399,13 @@ export const Sidebar: React.FC = () => {
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 mb-0.5">
-                        <img src={luiLogo} alt="Lui" className="w-3.5 h-3.5 object-contain" />
+                        <motion.img
+                          src={luiLogo}
+                          alt="Lui"
+                          className="w-3.5 h-3.5 object-contain"
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+                        />
                         <p className="text-[11px] font-semibold text-[#37352f]">Lui</p>
                       </div>
                       <p className="text-[9.5px] text-[#37352f]/50 leading-snug">Escaneie para abrir no WhatsApp</p>

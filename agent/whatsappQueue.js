@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import { createBullMQConnection } from './redisClient.js';
+import { createBullMQConnection, disableBullMQ } from './redisClient.js';
 
 const JOB_OPTIONS = {
   attempts: 3,
@@ -14,10 +14,19 @@ export function getWhatsAppQueue() {
   if (_queue) return _queue;
   const connection = createBullMQConnection();
   if (!connection) {
-    console.warn('[WhatsAppQueue] UPSTASH_REDIS_URL não configurado — fila desativada, processamento direto ativo');
+    console.warn('[WhatsAppQueue] Fila desativada — processamento direto ativo');
     return null;
   }
   _queue = new Queue('whatsapp-messages', { connection, defaultJobOptions: JOB_OPTIONS });
+  _queue.on('error', (error) => {
+    if (error?.message?.includes('max requests limit exceeded')) {
+      disableBullMQ(`Limite de requisicoes do Redis excedido: ${error.message}`);
+      void _queue?.close().catch(() => {});
+      _queue = null;
+      return;
+    }
+    console.error('[WhatsAppQueue] Erro na fila:', error.message);
+  });
   console.log('[WhatsAppQueue] Fila BullMQ inicializada');
   return _queue;
 }
@@ -27,5 +36,15 @@ export function getWhatsAppQueue() {
 export async function enqueueWhatsAppMessage(data) {
   const queue = getWhatsAppQueue();
   if (!queue) return null;
-  return queue.add('process', data, JOB_OPTIONS);
+  try {
+    return await queue.add('process', data, JOB_OPTIONS);
+  } catch (error) {
+    if (error?.message?.includes('max requests limit exceeded')) {
+      disableBullMQ(`Limite de requisicoes do Redis excedido: ${error.message}`);
+      await queue.close().catch(() => {});
+      _queue = null;
+      return null;
+    }
+    throw error;
+  }
 }

@@ -35,7 +35,19 @@ import {
 import { trackEvent, analyzeAndUpdateProfile } from './agent/behavioralProfile.js';
 import { detectAndSaveCommitment } from './agent/accountabilityLoop.js';
 import { engineEvents as agentEvents } from './agent/queryEngine.js';
-import { getSession, setSession, deleteSession, checkAndMarkMessage, checkRateLimit, createBullMQConnection } from './agent/redisClient.js';
+import {
+  getSession,
+  setSession,
+  deleteSession,
+  checkAndMarkMessage,
+  checkRateLimit,
+  checkAndMarkRateLimitNotify,
+  createBullMQConnection,
+  deletePhoneLinkChallenge,
+  disableBullMQ,
+  getPhoneLinkChallenge,
+  setPhoneLinkChallenge,
+} from './agent/redisClient.js';
 import { enqueueWhatsAppMessage, getWhatsAppQueue } from './agent/whatsappQueue.js';
 import { Worker } from 'bullmq';
 import OpenAI from 'openai';
@@ -47,20 +59,79 @@ dotenv.config();
 
 const app = express();
 
+function normalizeOrigin(origin) {
+  return typeof origin === 'string' ? origin.replace(/\/$/, '') : null;
+}
+
+function getAllowedOrigins() {
+  const configured = (process.env.ALLOWED_ORIGINS || '')
+    .split(/[,\s]+/)
+    .map(normalizeOrigin)
+    .filter(Boolean);
+
+  const defaults = [
+    process.env.FRONTEND_URL,
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:4173',
+    'http://127.0.0.1:4173',
+    'http://localhost:3001',
+    'http://127.0.0.1:3001',
+  ]
+    .map(normalizeOrigin)
+    .filter(Boolean);
+
+  return new Set([...defaults, ...configured]);
+}
+
+function isAllowedOrigin(origin) {
+  const normalizedOrigin = normalizeOrigin(origin);
+  if (!normalizedOrigin) return true;
+
+  if (getAllowedOrigins().has(normalizedOrigin)) return true;
+
+  if (
+    process.env.ALLOW_VERCEL_PREVIEWS === 'true' &&
+    /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(normalizedOrigin)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 // CORS manual — compatível com Express 5 + Node 18
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  const origin = normalizeOrigin(req.headers.origin);
+  if (origin && isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,stripe-signature,ngrok-skip-browser-warning');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Max-Age', '86400');
   if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
+    if (origin && !isAllowedOrigin(origin)) {
+      return res.sendStatus(403);
+    }
+    return res.sendStatus(204);
   }
+  if (origin && !isAllowedOrigin(origin)) {
+    return res.status(403).json({
+      error: {
+        code: 'origin_not_allowed',
+        message: 'Origin nao permitido',
+      },
+    });
+  }
+  next();
+});
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
 
@@ -202,7 +273,9 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
   res.json({ received: true });
 });
 
-app.use(express.json());
+app.use(express.json({
+  verify: (_req, _res, buf) => { _req.rawBody = buf; },
+}));
 
 // ================== ENV ==================
 const requireEnv = (name) => {
@@ -223,7 +296,6 @@ requireEnv('NVIDIA_API_KEY'); // validação na inicialização; consumido pelo 
 const WHATSAPP_ACCESS_TOKEN = requireEnv('WHATSAPP_ACCESS_TOKEN');
 const WHATSAPP_PHONE_NUMBER_ID = requireEnv('WHATSAPP_PHONE_NUMBER_ID');
 const WHATSAPP_VERIFY_TOKEN = requireEnv('WHATSAPP_VERIFY_TOKEN');
-console.log(`[ENV Check] PHONE_ID=${WHATSAPP_PHONE_NUMBER_ID} | TOKEN=...${WHATSAPP_ACCESS_TOKEN.slice(-10)}`);
 const SUPABASE_URL = requireEnv('VITE_SUPABASE_URL');
 const SUPABASE_KEY = requireEnv('VITE_SUPABASE_ANON_KEY');
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_KEY;
@@ -233,14 +305,422 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   global: { fetch: fetchWithTimeout(30_000) },
 });
-const resend = new Resend('re_AaQ8QNKS_Ljvo7xxJoGEKMLvnWmaXcYUd');
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const VITE_API_URL = process.env.VITE_API_URL || '';
 const FRONTEND_URL = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? 'https://flui.ia.br' : 'http://localhost:5173');
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const GOOGLE_DEFAULT_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
+const GOOGLE_DEFAULT_TIME_ZONE = process.env.GOOGLE_CALENDAR_TIME_ZONE || 'America/Sao_Paulo';
+const GOOGLE_CALENDAR_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/calendar.events',
+];
 const nimClient = new OpenAI({
   apiKey: process.env.NVIDIA_API_KEY,
   baseURL: 'https://integrate.api.nvidia.com/v1',
 });
+
+function isGoogleCalendarConfigured() {
+  return Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
+}
+
+function trimTrailingSlash(value = '') {
+  return String(value || '').replace(/\/$/, '');
+}
+
+function padTime(value) {
+  return String(value).padStart(2, '0');
+}
+
+function normalizeClockTime(value) {
+  if (!value || typeof value !== 'string') return null;
+  const parts = value.split(':').map(part => Number(part));
+  if (parts.length < 2 || parts.some(Number.isNaN)) return null;
+  const [hours, minutes, seconds = 0] = parts;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59) return null;
+  return `${padTime(hours)}:${padTime(minutes)}:${padTime(seconds)}`;
+}
+
+function addMinutesToLocalDateTime(dateStr, timeStr, minutesToAdd) {
+  const [year, month, day] = String(dateStr).split('-').map(Number);
+  const normalizedTime = normalizeClockTime(timeStr);
+  if (!year || !month || !day || !normalizedTime) return null;
+  const [hours, minutes, seconds] = normalizedTime.split(':').map(Number);
+  const base = new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds));
+  const shifted = new Date(base.getTime() + minutesToAdd * 60 * 1000);
+  return `${shifted.getUTCFullYear()}-${padTime(shifted.getUTCMonth() + 1)}-${padTime(shifted.getUTCDate())}T${padTime(shifted.getUTCHours())}:${padTime(shifted.getUTCMinutes())}:${padTime(shifted.getUTCSeconds())}`;
+}
+
+function formatDateTimeForTimeZone(value, timeZone) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+
+  const mapped = Object.fromEntries(
+    parts
+      .filter(part => part.type !== 'literal')
+      .map(part => [part.type, part.value])
+  );
+
+  if (!mapped.year || !mapped.month || !mapped.day || !mapped.hour || !mapped.minute || !mapped.second) {
+    return null;
+  }
+
+  return `${mapped.year}-${mapped.month}-${mapped.day}T${mapped.hour}:${mapped.minute}:${mapped.second}`;
+}
+
+function resolveGoogleCalendarSchedule(task, timeZone) {
+  const dueTime = normalizeClockTime(task?.due_time);
+  if (task?.due_date && dueTime) {
+    const startDateTime = `${task.due_date}T${dueTime}`;
+    return {
+      startDateTime,
+      endDateTime: addMinutesToLocalDateTime(task.due_date, dueTime, 60) || startDateTime,
+      timeZone,
+    };
+  }
+
+  if (task?.timer_at) {
+    const start = new Date(task.timer_at);
+    if (!Number.isNaN(start.getTime())) {
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      const startDateTime = formatDateTimeForTimeZone(start, timeZone);
+      const endDateTime = formatDateTimeForTimeZone(end, timeZone);
+
+      if (startDateTime && endDateTime) {
+        return { startDateTime, endDateTime, timeZone };
+      }
+    }
+  }
+
+  return null;
+}
+
+function safeReturnToPath(returnTo) {
+  if (typeof returnTo !== 'string' || !returnTo.startsWith('/')) return '/dashboard';
+  return returnTo;
+}
+
+function buildFrontendRedirectUrl(returnTo, params = {}) {
+  const url = new URL(safeReturnToPath(returnTo), FRONTEND_URL);
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue;
+    url.searchParams.set(key, String(value));
+  }
+  return url.toString();
+}
+
+function getApiBaseUrl(req) {
+  return trimTrailingSlash(VITE_API_URL || `${req.protocol}://${req.get('host')}`);
+}
+
+function getGoogleRedirectUri(req) {
+  return process.env.GOOGLE_OAUTH_REDIRECT_URI || `${getApiBaseUrl(req)}/api/integrations/google/callback`;
+}
+
+function signGoogleStatePayload(serialized) {
+  return crypto.createHmac('sha256', SUPABASE_SERVICE_KEY).update(serialized).digest('base64url');
+}
+
+function createGoogleState(payload) {
+  const serialized = JSON.stringify(payload);
+  return `${Buffer.from(serialized).toString('base64url')}.${signGoogleStatePayload(serialized)}`;
+}
+
+function parseGoogleState(state) {
+  if (!state || typeof state !== 'string') return null;
+  const [encoded, signature] = state.split('.');
+  if (!encoded || !signature) return null;
+
+  try {
+    const serialized = Buffer.from(encoded, 'base64url').toString('utf8');
+    const expected = signGoogleStatePayload(serialized);
+    if (signature.length !== expected.length) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+    return JSON.parse(serialized);
+  } catch {
+    return null;
+  }
+}
+
+async function googleApiFetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const raw = await response.text();
+  const payload = raw ? (() => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  })() : null;
+
+  if (!response.ok) {
+    const message =
+      typeof payload === 'string'
+        ? payload
+        : payload?.error?.message || payload?.message || `Google request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return payload;
+}
+
+async function getGoogleIntegration(userId) {
+  const { data, error } = await supabaseAdmin
+    .from('google_integrations')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+async function setGoogleIntegrationError(userId, message) {
+  if (!userId) return;
+  await supabaseAdmin
+    .from('google_integrations')
+    .update({
+      last_error: String(message || '').slice(0, 500),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId);
+}
+
+async function refreshGoogleAccessToken(integration) {
+  if (!integration?.refresh_token) {
+    throw new Error('Refresh token do Google Calendar ausente.');
+  }
+
+  const body = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    client_secret: GOOGLE_CLIENT_SECRET,
+    refresh_token: integration.refresh_token,
+    grant_type: 'refresh_token',
+  });
+
+  const tokenPayload = await googleApiFetchJson('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+
+  const expiresAt = tokenPayload?.expires_in
+    ? new Date(Date.now() + Math.max(tokenPayload.expires_in - 60, 0) * 1000).toISOString()
+    : null;
+
+  const updates = {
+    access_token: tokenPayload.access_token,
+    refresh_token: tokenPayload.refresh_token || integration.refresh_token,
+    token_type: tokenPayload.token_type || integration.token_type,
+    scope: tokenPayload.scope || integration.scope,
+    expires_at: expiresAt,
+    last_error: null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from('google_integrations')
+    .update(updates)
+    .eq('user_id', integration.user_id)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function ensureGoogleAccess(integration) {
+  if (!integration) throw new Error('Integração Google Calendar não encontrada.');
+  if (!integration.expires_at) return integration;
+
+  const expiresAt = new Date(integration.expires_at).getTime();
+  if (Number.isNaN(expiresAt) || expiresAt > Date.now() + 60_000) {
+    return integration;
+  }
+
+  return refreshGoogleAccessToken(integration);
+}
+
+async function getGoogleTaskLink(userId, taskId) {
+  const { data, error } = await supabaseAdmin
+    .from('google_calendar_task_links')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('task_id', taskId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+function buildGoogleCalendarEvent(task, integration) {
+  const timeZone = integration?.time_zone || GOOGLE_DEFAULT_TIME_ZONE;
+  const schedule = resolveGoogleCalendarSchedule(task, timeZone);
+  if (!schedule) return null;
+
+  return {
+    summary: task.title,
+    description: [task.description?.trim(), 'Criado no Flui.']
+      .filter(Boolean)
+      .join('\n\n'),
+    start: {
+      dateTime: schedule.startDateTime,
+      timeZone: schedule.timeZone,
+    },
+    end: {
+      dateTime: schedule.endDateTime || schedule.startDateTime,
+      timeZone: schedule.timeZone,
+    },
+    reminders: {
+      useDefault: false,
+      overrides: [{ method: 'popup', minutes: 30 }],
+    },
+    source: {
+      title: 'Flui',
+      url: FRONTEND_URL,
+    },
+    extendedProperties: {
+      private: {
+        fluiTaskId: task.id,
+        fluiUserId: task.user_id,
+        fluiStatus: task.status || 'todo',
+      },
+    },
+  };
+}
+
+async function removeGoogleCalendarSyncForTask({ userId, taskId }) {
+  const link = await getGoogleTaskLink(userId, taskId);
+  if (!link) {
+    return { success: true, status: 'not_linked' };
+  }
+
+  const integration = await getGoogleIntegration(userId);
+  if (integration?.access_token) {
+    const activeIntegration = await ensureGoogleAccess(integration);
+    try {
+      await googleApiFetchJson(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(link.calendar_id || activeIntegration.calendar_id || GOOGLE_DEFAULT_CALENDAR_ID)}/events/${encodeURIComponent(link.google_event_id)}`,
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${activeIntegration.access_token}`,
+          },
+        }
+      );
+    } catch (error) {
+      if (!String(error.message || '').includes('404')) {
+        throw error;
+      }
+    }
+  }
+
+  await supabaseAdmin
+    .from('google_calendar_task_links')
+    .delete()
+    .eq('user_id', userId)
+    .eq('task_id', taskId);
+
+  return { success: true, status: 'removed' };
+}
+
+async function syncGoogleCalendarTask({ userId, taskId }) {
+  const integration = await getGoogleIntegration(userId);
+  if (!integration) return { success: true, status: 'not_connected' };
+  if (!integration.auto_sync_enabled) return { success: true, status: 'paused' };
+
+  const { data: task, error: taskError } = await supabaseAdmin
+    .from('tasks')
+    .select('id, user_id, title, description, due_date, due_time, timer_at, status')
+    .eq('id', taskId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (taskError) throw taskError;
+  if (!task) return { success: true, status: 'task_not_found' };
+
+  const hasDueSchedule = Boolean(task.due_date && normalizeClockTime(task.due_time));
+  const hasTimerSchedule = Boolean(task.timer_at && !Number.isNaN(new Date(task.timer_at).getTime()));
+  const shouldRemoveEvent =
+    (!hasDueSchedule && !hasTimerSchedule) ||
+    ['done', 'canceled'].includes(task.status);
+
+  if (shouldRemoveEvent) {
+    return removeGoogleCalendarSyncForTask({ userId, taskId });
+  }
+
+  const activeIntegration = await ensureGoogleAccess(integration);
+  const eventPayload = buildGoogleCalendarEvent(task, activeIntegration);
+  if (!eventPayload) return { success: true, status: 'missing_schedule' };
+
+  const existingLink = await getGoogleTaskLink(userId, taskId);
+  const calendarId = activeIntegration.calendar_id || GOOGLE_DEFAULT_CALENDAR_ID;
+  const baseUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
+  const response = existingLink?.google_event_id
+    ? await googleApiFetchJson(`${baseUrl}/${encodeURIComponent(existingLink.google_event_id)}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${activeIntegration.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(eventPayload),
+      })
+    : await googleApiFetchJson(baseUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${activeIntegration.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(eventPayload),
+      });
+
+  const linkPayload = {
+    user_id: userId,
+    task_id: taskId,
+    google_event_id: response.id,
+    calendar_id: calendarId,
+    event_html_link: response.htmlLink || null,
+    synced_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error: linkError } = await supabaseAdmin
+    .from('google_calendar_task_links')
+    .upsert(linkPayload, { onConflict: 'user_id,task_id' });
+
+  if (linkError) throw linkError;
+
+  await supabaseAdmin
+    .from('google_integrations')
+    .update({
+      last_error: null,
+      last_synced_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId);
+
+  return {
+    success: true,
+    status: existingLink?.google_event_id ? 'updated' : 'created',
+    eventId: response.id,
+    htmlLink: response.htmlLink || null,
+  };
+}
 
 const SEEDED_ADMIN_USER_IDS = [
   '2021bd41-b925-45e1-829b-a263aae7a000',
@@ -282,6 +762,58 @@ function getAdminAccessToken(req) {
 
 function sendAdminAuthError(res, status = 401, message = 'Acesso de administrador necessario') {
   return res.status(status).json({ error: { message } });
+}
+
+function getResendClient() {
+  if (!resend) {
+    throw createHttpError(503, 'email_unavailable', 'Servico de email indisponivel', true);
+  }
+  return resend;
+}
+
+function getUserAccessToken(req) {
+  const authorization = req.headers.authorization || '';
+  if (authorization.toLowerCase().startsWith('bearer ')) {
+    return authorization.slice(7).trim();
+  }
+  return null;
+}
+
+function sendUserAuthError(res, status = 401, message = 'Sessao Supabase ausente') {
+  return res.status(status).json({ error: { message } });
+}
+
+async function requireAuthenticatedUser(req, res, next) {
+  const token = getUserAccessToken(req);
+  if (!token) {
+    return sendUserAuthError(res, 401, 'Sessao Supabase ausente');
+  }
+
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) {
+      return sendUserAuthError(res, 401, 'Sessao Supabase invalida');
+    }
+
+    req.authUser = user;
+    return next();
+  } catch (error) {
+    console.error('[UserAuth] Falha ao validar usuario:', error.message);
+    return sendUserAuthError(res, 500, 'Falha ao validar sessao');
+  }
+}
+
+function getAuthenticatedUserId(req, providedUserId = null) {
+  const authenticatedUserId = req.authUser?.id;
+  if (!authenticatedUserId) {
+    throw createHttpError(401, 'session_required', 'Sessao Supabase ausente');
+  }
+
+  if (providedUserId && String(providedUserId) !== authenticatedUserId) {
+    throw createHttpError(403, 'forbidden_user_scope', 'Sessao nao autorizada para este usuario');
+  }
+
+  return authenticatedUserId;
 }
 
 async function requireAdmin(req, res, next) {
@@ -598,6 +1130,14 @@ async function buildReminderSessions() {
   // Sessões pendentes (auth em andamento) ficam no Redis com TTL curto;
   // usuários sem binding ativo ainda não têm lembretes configurados.
   return sessions;
+}
+
+const PHONE_LINK_CODE_TTL_SEC = 10 * 60;
+const PHONE_LINK_RESEND_COOLDOWN_MS = 60 * 1000;
+const PHONE_LINK_MAX_ATTEMPTS = 5;
+
+function generateVerificationCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 // ================== WHATSAPP ==================
@@ -1011,6 +1551,13 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     // ===== AGENT LOOP =====
     sendTypingIndicator(userPhone, messageId);
 
+    // Se demorar mais de 5s, avisa o usuário que está processando
+    let processingMsgSent = false;
+    const processingTimer = setTimeout(() => {
+      processingMsgSent = true;
+      sendWhatsAppMessage(userPhone, "Processando... ⏳").catch(() => {});
+    }, 5000);
+
     // Atualiza janela de 24h: registra último inbound do usuário na binding
     supabaseAdmin
       .from('channel_bindings')
@@ -1021,19 +1568,24 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
       .catch(err => console.error('[24hWindow] Erro ao atualizar last_inbound_at:', err.message));
 
     const turnStart = Date.now();
-    const result = await processConversationTurn({
-      userId: session.userId,
-      userName: session.userName,
-      threadId: session.threadId || null,
-      content: cleanMessage,
-      incomingChannel: 'whatsapp',
-      preferredThreadChannel: 'whatsapp',
-      externalUserId: userPhone,
-      externalMessageId: messageId,
-      messageType: fromAudio ? 'audio_transcript' : 'user_text',
-      fromAudio,
-      onAck: (ackText) => sendWhatsAppMessage(userPhone, ackText),
-    });
+    let result;
+    try {
+      result = await processConversationTurn({
+        userId: session.userId,
+        userName: session.userName,
+        threadId: session.threadId || null,
+        content: cleanMessage,
+        incomingChannel: 'whatsapp',
+        preferredThreadChannel: 'whatsapp',
+        externalUserId: userPhone,
+        externalMessageId: messageId,
+        messageType: fromAudio ? 'audio_transcript' : 'user_text',
+        fromAudio,
+        onAck: (ackText) => sendWhatsAppMessage(userPhone, ackText),
+      });
+    } finally {
+      clearTimeout(processingTimer);
+    }
     console.log(`[AI] Resposta: "${result.reply?.substring(0, 80)}..."`);
     await dispatchOutboundMessageJobs();
 
@@ -1120,6 +1672,29 @@ app.get('/api/whatsapp/webhook', (req, res) => {
 });
 
 app.post('/api/whatsapp/webhook', async (req, res) => {
+  // ── Valida assinatura HMAC do Meta (previne requisições forjadas) ──
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  if (appSecret) {
+    const sigHeader = req.headers['x-hub-signature-256'];
+    if (!sigHeader) {
+      console.warn('[Webhook] HMAC ausente — rejeitado');
+      return res.sendStatus(401);
+    }
+    const expected = 'sha256=' + crypto.createHmac('sha256', appSecret)
+      .update(req.rawBody ?? '')
+      .digest('hex');
+    try {
+      const valid = sigHeader.length === expected.length &&
+        crypto.timingSafeEqual(Buffer.from(sigHeader), Buffer.from(expected));
+      if (!valid) {
+        console.warn('[Webhook] HMAC inválido — rejeitado');
+        return res.sendStatus(401);
+      }
+    } catch {
+      return res.sendStatus(401);
+    }
+  }
+
   // Responde 200 imediatamente para o Meta não reenviar
   res.sendStatus(200);
 
@@ -1169,7 +1744,11 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
     // ── FILTRO 4: Rate limiting por número ──
     if (await checkRateLimit(userPhone)) {
-      console.warn(`[Webhook] Rate limit atingido para ${userPhone} — mensagem descartada`);
+      const alreadyNotified = await checkAndMarkRateLimitNotify(userPhone);
+      if (!alreadyNotified) {
+        sendWhatsAppMessage(userPhone, "Ei, tô processando as últimas mensagens ainda! Me manda de novo em 1 minutinho 😊").catch(() => {});
+      }
+      console.warn(`[Webhook] Rate limit para ${userPhone}`);
       return;
     }
 
@@ -1229,6 +1808,15 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
       { connection: workerConnection, concurrency: 5 }
     );
 
+    whatsappWorker.on('error', (err) => {
+      if (err?.message?.includes('max requests limit exceeded')) {
+        disableBullMQ(`Worker desativado por limite de requisicoes do Redis: ${err.message}`);
+        void whatsappWorker.close().catch(() => {});
+        return;
+      }
+      console.error('[Worker] Erro no worker:', err.message);
+    });
+
     whatsappWorker.on('failed', (job, err) => {
       console.error(`[Worker] Job ${job?.id} falhou (tentativa ${job?.attemptsMade}): ${err.message}`);
     });
@@ -1242,7 +1830,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
     console.log('[Worker] BullMQ Worker WhatsApp iniciado (concurrency=5)');
   } else {
-    console.warn('[Worker] Redis não configurado — Worker BullMQ desativado, processamento direto ativo');
+    console.warn('[Worker] Worker BullMQ desativado — processamento direto ativo');
   }
 }
 
@@ -2247,6 +2835,257 @@ app.get('/api/admin/messages', requireAdmin, async (req, res) => {
 // ── Workspace Members ─────────────────────────────────────────────
 
 // Retorna o workspace ao qual o usuário pertence como membro convidado
+app.get('/api/integrations/google/status', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
+
+  try {
+    if (!isGoogleCalendarConfigured()) {
+      return res.json({
+        configured: false,
+        connected: false,
+        autoSyncEnabled: false,
+      });
+    }
+
+    let integration = await getGoogleIntegration(userId);
+    if (!integration) {
+      return res.json({
+        configured: true,
+        connected: false,
+        autoSyncEnabled: false,
+      });
+    }
+
+    try {
+      integration = await ensureGoogleAccess(integration);
+    } catch (error) {
+      await setGoogleIntegrationError(userId, error.message);
+      integration = await getGoogleIntegration(userId);
+    }
+
+    return res.json({
+      configured: true,
+      connected: true,
+      autoSyncEnabled: Boolean(integration?.auto_sync_enabled),
+      email: integration?.email || null,
+      calendarId: integration?.calendar_id || GOOGLE_DEFAULT_CALENDAR_ID,
+      timeZone: integration?.time_zone || GOOGLE_DEFAULT_TIME_ZONE,
+      connectedAt: integration?.connected_at || null,
+      lastSyncedAt: integration?.last_synced_at || null,
+      lastError: integration?.last_error || null,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/integrations/google/connect', async (req, res) => {
+  const { userId, returnTo = '/dashboard?settings=integrations', timeZone } = req.query;
+  const safeReturnTo = safeReturnToPath(returnTo);
+
+  if (!userId) {
+    return res.redirect(buildFrontendRedirectUrl(safeReturnTo, {
+      settings: 'integrations',
+      googleCalendar: 'error',
+      googleCalendarMessage: 'Usuário inválido para conectar o Google Calendar.',
+    }));
+  }
+
+  if (!isGoogleCalendarConfigured()) {
+    return res.redirect(buildFrontendRedirectUrl(safeReturnTo, {
+      settings: 'integrations',
+      googleCalendar: 'error',
+      googleCalendarMessage: 'Google Calendar não está configurado no servidor.',
+    }));
+  }
+
+  const state = createGoogleState({
+    userId,
+    returnTo: safeReturnTo,
+    timeZone: typeof timeZone === 'string' && timeZone ? timeZone : GOOGLE_DEFAULT_TIME_ZONE,
+    createdAt: Date.now(),
+  });
+
+  const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  authUrl.searchParams.set('client_id', GOOGLE_CLIENT_ID);
+  authUrl.searchParams.set('redirect_uri', getGoogleRedirectUri(req));
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('access_type', 'offline');
+  authUrl.searchParams.set('prompt', 'consent');
+  authUrl.searchParams.set('include_granted_scopes', 'true');
+  authUrl.searchParams.set('scope', GOOGLE_CALENDAR_SCOPES.join(' '));
+  authUrl.searchParams.set('state', state);
+
+  return res.redirect(authUrl.toString());
+});
+
+app.get('/api/integrations/google/callback', async (req, res) => {
+  const state = parseGoogleState(req.query.state);
+  const fallbackReturnTo = safeReturnToPath(state?.returnTo);
+  const redirectWithStatus = (status, message) => res.redirect(buildFrontendRedirectUrl(fallbackReturnTo, {
+    settings: 'integrations',
+    googleCalendar: status,
+    googleCalendarMessage: message,
+  }));
+
+  if (!state?.userId) {
+    return res.redirect(buildFrontendRedirectUrl('/dashboard', {
+      settings: 'integrations',
+      googleCalendar: 'error',
+      googleCalendarMessage: 'Não foi possível validar a conexão com o Google Calendar.',
+    }));
+  }
+
+  if (req.query.error) {
+    return redirectWithStatus('error', req.query.error_description || req.query.error);
+  }
+
+  if (!req.query.code) {
+    return redirectWithStatus('error', 'Código de autorização ausente.');
+  }
+
+  try {
+    const existingIntegration = await getGoogleIntegration(state.userId);
+    const tokenPayload = await googleApiFetchJson('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code: req.query.code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: getGoogleRedirectUri(req),
+        grant_type: 'authorization_code',
+      }),
+    });
+
+    const profile = await googleApiFetchJson('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: {
+        Authorization: `Bearer ${tokenPayload.access_token}`,
+      },
+    });
+
+    const expiresAt = tokenPayload?.expires_in
+      ? new Date(Date.now() + Math.max(tokenPayload.expires_in - 60, 0) * 1000).toISOString()
+      : null;
+
+    const upsertPayload = {
+      user_id: state.userId,
+      provider: 'google_calendar',
+      email: profile?.email || existingIntegration?.email || null,
+      access_token: tokenPayload.access_token,
+      refresh_token: tokenPayload.refresh_token || existingIntegration?.refresh_token || null,
+      token_type: tokenPayload.token_type || 'Bearer',
+      scope: tokenPayload.scope || GOOGLE_CALENDAR_SCOPES.join(' '),
+      expires_at: expiresAt,
+      calendar_id: existingIntegration?.calendar_id || GOOGLE_DEFAULT_CALENDAR_ID,
+      time_zone: state.timeZone || existingIntegration?.time_zone || GOOGLE_DEFAULT_TIME_ZONE,
+      auto_sync_enabled: existingIntegration?.auto_sync_enabled ?? true,
+      last_error: null,
+      connected_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabaseAdmin
+      .from('google_integrations')
+      .upsert(upsertPayload, { onConflict: 'user_id' });
+
+    if (error) throw error;
+
+    return redirectWithStatus('connected', 'Google Calendar conectado com sucesso.');
+  } catch (error) {
+    await setGoogleIntegrationError(state.userId, error.message);
+    return redirectWithStatus('error', error.message);
+  }
+});
+
+app.patch('/api/integrations/google/auto-sync', async (req, res) => {
+  const { userId, autoSyncEnabled } = req.body;
+  if (!userId || typeof autoSyncEnabled !== 'boolean') {
+    return res.status(400).json({ error: 'userId e autoSyncEnabled são obrigatórios' });
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('google_integrations')
+      .update({
+        auto_sync_enabled: autoSyncEnabled,
+        updated_at: new Date().toISOString(),
+        last_error: null,
+      })
+      .eq('user_id', userId)
+      .select('user_id, auto_sync_enabled')
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Integração Google Calendar não encontrada.' });
+
+    return res.json({
+      success: true,
+      autoSyncEnabled: Boolean(data.auto_sync_enabled),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/integrations/google/disconnect', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
+
+  try {
+    const integration = await getGoogleIntegration(userId);
+
+    if (integration?.access_token || integration?.refresh_token) {
+      const tokenToRevoke = integration.refresh_token || integration.access_token;
+      try {
+        await fetch('https://oauth2.googleapis.com/revoke', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ token: tokenToRevoke }),
+        });
+      } catch (error) {
+        console.warn('[GoogleCalendar] Falha ao revogar token:', error.message);
+      }
+    }
+
+    await supabaseAdmin
+      .from('google_integrations')
+      .delete()
+      .eq('user_id', userId);
+
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/integrations/google/sync-task', async (req, res) => {
+  const { userId, taskId } = req.body;
+  if (!userId || !taskId) return res.status(400).json({ error: 'userId e taskId são obrigatórios' });
+
+  try {
+    const result = await syncGoogleCalendarTask({ userId, taskId });
+    return res.json(result);
+  } catch (error) {
+    await setGoogleIntegrationError(userId, error.message);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/integrations/google/sync-task', async (req, res) => {
+  const { userId, taskId } = req.body;
+  if (!userId || !taskId) return res.status(400).json({ error: 'userId e taskId são obrigatórios' });
+
+  try {
+    const result = await removeGoogleCalendarSyncForTask({ userId, taskId });
+    return res.json(result);
+  } catch (error) {
+    await setGoogleIntegrationError(userId, error.message);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/workspace/my-membership', async (req, res) => {
   const { userId } = req.query;
   if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
@@ -2457,6 +3296,9 @@ app.post('/api/workspace/shared-tasks', async (req, res) => {
         status: task.status || 'todo',
         priority: task.priority || 'medium',
         due_date: (task.dueDate && task.dueDate !== 'Sem prazo') ? task.dueDate : null,
+        due_time: task.dueTime || null,
+        timer_at: task.timerAt || null,
+        timer_fired: false,
         source: task.source || 'user',
         progress: task.progress || 0,
         description: task.description || '',
@@ -2539,6 +3381,14 @@ app.delete('/api/workspace/tasks/:taskId', async (req, res) => {
     }
 
     // Deleta via supabaseAdmin (bypass RLS)
+    if (task.user_id) {
+      try {
+        await removeGoogleCalendarSyncForTask({ userId: task.user_id, taskId });
+      } catch (syncErr) {
+        console.warn('[GoogleCalendar] Falha ao remover evento ao excluir tarefa:', syncErr.message);
+      }
+    }
+
     const { error: delErr } = await supabaseAdmin
       .from('tasks')
       .delete()
@@ -2661,7 +3511,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     if (insertErr) throw insertErr;
 
     // Envia email via Resend
-    await resend.emails.send({
+    await getResendClient().emails.send({
       from: 'Flui <noreply@flui.ia.br>',
       to: email,
       subject: 'Seu código de redefinição de senha — Flui',
@@ -2810,7 +3660,7 @@ app.post('/api/workspace/invite', async (req, res) => {
     const ownerName = owner?.user_metadata?.full_name || owner?.user_metadata?.name || owner?.email?.split('@')[0] || 'Alguém';
     const inviteUrl = `${FRONTEND_URL}/invite?invite_token=${invite.token}`;
 
-    resend.emails.send({
+    getResendClient().emails.send({
       from: 'Flui <noreply@flui.ia.br>',
       to: inviteEmail,
       subject: `${ownerName} te convidou para um workspace no Flui`,
@@ -3117,10 +3967,9 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
-app.get('/api/conversations', async (req, res) => {
+app.get('/api/conversations', requireAuthenticatedUser, async (req, res) => {
   try {
-    const userId = req.query.userId;
-    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    const userId = getAuthenticatedUserId(req, req.query.userId);
 
     const threads = await listThreadsForUser(userId);
     res.json({ threads });
@@ -3129,10 +3978,9 @@ app.get('/api/conversations', async (req, res) => {
   }
 });
 
-app.get('/api/conversations/:threadId/messages', async (req, res) => {
+app.get('/api/conversations/:threadId/messages', requireAuthenticatedUser, async (req, res) => {
   try {
-    const userId = req.query.userId;
-    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    const userId = getAuthenticatedUserId(req, req.query.userId);
 
     const thread = await getThreadForUser(userId, req.params.threadId);
     if (!thread) throw createHttpError(404, 'thread_not_found', 'Conversa não encontrada');
@@ -3148,10 +3996,10 @@ app.get('/api/conversations/:threadId/messages', async (req, res) => {
   }
 });
 
-app.post('/api/conversations/:threadId/messages', async (req, res) => {
+app.post('/api/conversations/:threadId/messages', requireAuthenticatedUser, async (req, res) => {
   try {
-    const { userId, content } = req.body;
-    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    const { content } = req.body;
+    const userId = getAuthenticatedUserId(req, req.body?.userId);
     if (!content?.trim()) throw createHttpError(400, 'missing_content', 'content required');
 
     const thread = await getThreadForUser(userId, req.params.threadId);
@@ -3178,10 +4026,10 @@ app.post('/api/conversations/:threadId/messages', async (req, res) => {
   }
 });
 
-app.post('/api/conversations/:threadId/read', async (req, res) => {
+app.post('/api/conversations/:threadId/read', requireAuthenticatedUser, async (req, res) => {
   try {
-    const userId = req.body.userId || req.query.userId;
-    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    const requestedUserId = req.body?.userId || req.query.userId;
+    const userId = getAuthenticatedUserId(req, requestedUserId);
 
     const thread = await getThreadForUser(userId, req.params.threadId);
     if (!thread) throw createHttpError(404, 'thread_not_found', 'Conversa não encontrada');
@@ -3193,10 +4041,9 @@ app.post('/api/conversations/:threadId/read', async (req, res) => {
   }
 });
 
-app.get('/api/reminders', async (req, res) => {
+app.get('/api/reminders', requireAuthenticatedUser, async (req, res) => {
   try {
-    const userId = req.query.userId;
-    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    const userId = getAuthenticatedUserId(req, req.query.userId);
 
     const binding = await findBindingByUserId(userId, 'whatsapp');
     const message = await getReminderPreview(userId, binding?.display_name || 'você');
@@ -3207,23 +4054,149 @@ app.get('/api/reminders', async (req, res) => {
   }
 });
 
-app.get('/api/whatsapp/linked-phone', async (req, res) => {
+app.get('/api/whatsapp/linked-phone', requireAuthenticatedUser, async (req, res) => {
   try {
-    const { userId } = req.query;
-    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    const userId = getAuthenticatedUserId(req, req.query.userId);
     const binding = await findBindingByUserId(userId, 'whatsapp');
-    res.json({ phone: binding?.external_user_id || null });
+    const pendingChallenge = await getPhoneLinkChallenge(userId);
+    res.json({
+      phone: binding?.external_user_id || null,
+      pendingPhone: pendingChallenge?.phone || null,
+      verificationPending: Boolean(pendingChallenge?.phone),
+    });
   } catch (error) {
     return sendApiError(res, req, error, 500);
   }
 });
 
-app.post('/api/whatsapp/link-phone', async (req, res) => {
+app.post('/api/whatsapp/link-phone', requireAuthenticatedUser, async (req, res) => {
   try {
-    const { userId, phone } = req.body;
-    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
-    if (!phone) throw createHttpError(400, 'missing_phone', 'phone required');
+    const userId = getAuthenticatedUserId(req, req.body?.userId);
+    const normalizedCode = String(req.body?.code || '').replace(/\D/g, '');
+    const rawPhone = String(req.body?.phone || '');
 
+    if (normalizedCode) {
+      const challenge = await getPhoneLinkChallenge(userId);
+      if (!challenge?.phone || !challenge?.code) {
+        throw createHttpError(400, 'verification_not_pending', 'Nenhuma verificaÃ§Ã£o pendente para este usuÃ¡rio.');
+      }
+
+      if (rawPhone) {
+        const challengePhone = rawPhone.replace(/\D/g, '');
+        if (challengePhone !== challenge.phone) {
+          throw createHttpError(400, 'phone_verification_mismatch', 'O nÃºmero informado nÃ£o corresponde ao desafio pendente.');
+        }
+      }
+
+      if (normalizedCode.length !== 6) {
+        throw createHttpError(400, 'invalid_verification_code', 'Informe o cÃ³digo de 6 dÃ­gitos enviado no WhatsApp.');
+      }
+
+      if (challenge.code !== normalizedCode) {
+        const attempts = Number(challenge.attempts || 0) + 1;
+        if (attempts >= PHONE_LINK_MAX_ATTEMPTS) {
+          await deletePhoneLinkChallenge(userId);
+          throw createHttpError(400, 'verification_locked', 'CÃ³digo invÃ¡lido muitas vezes. Solicite um novo cÃ³digo.');
+        }
+
+        await setPhoneLinkChallenge(
+          userId,
+          { ...challenge, attempts },
+          PHONE_LINK_CODE_TTL_SEC
+        );
+        throw createHttpError(400, 'invalid_verification_code', 'CÃ³digo invÃ¡lido. Confira a mensagem recebida no WhatsApp.');
+      }
+
+      const existingBinding = await findBindingByUserId(userId, 'whatsapp');
+      if (existingBinding?.external_user_id && existingBinding.external_user_id !== challenge.phone) {
+        await deleteChannelBinding('whatsapp', existingBinding.external_user_id);
+      }
+
+      const userName = req.authUser.user_metadata?.full_name || req.authUser.user_metadata?.name || 'voce';
+      await upsertChannelBinding({
+        userId,
+        channel: 'whatsapp',
+        externalUserId: challenge.phone,
+        displayName: userName,
+        authenticated: true,
+        metadata: {
+          email: req.authUser.email,
+          phone: challenge.phone,
+          authMethod: 'web_verification',
+          verified_at: new Date().toISOString(),
+        },
+      });
+
+      await deletePhoneLinkChallenge(userId);
+      await sendWhatsAppMessage(
+        challenge.phone,
+        `Conta conectada, *${userName}*.\n\nAgora voce pode falar comigo por aqui e eu vou reconhecer seu perfil.`
+      );
+      return res.json({ ok: true, phone: challenge.phone });
+    }
+
+    if (!rawPhone) throw createHttpError(400, 'missing_phone', 'phone required');
+
+    const normalizedPhone = rawPhone.replace(/\D/g, '');
+    if (normalizedPhone.length < 10) {
+      throw createHttpError(400, 'invalid_phone', 'NÃºmero invÃ¡lido');
+    }
+
+    const existingBinding = await findBindingByUserId(userId, 'whatsapp');
+    if (existingBinding?.external_user_id === normalizedPhone) {
+      await deletePhoneLinkChallenge(userId);
+      return res.json({ ok: true, phone: normalizedPhone, alreadyLinked: true });
+    }
+
+    const pendingChallenge = await getPhoneLinkChallenge(userId);
+    if (pendingChallenge?.phone && pendingChallenge.phone !== normalizedPhone) {
+      throw createHttpError(
+        409,
+        'verification_already_pending',
+        'JÃ¡ existe uma verificaÃ§Ã£o pendente para outro nÃºmero. Conclua ou aguarde o cÃ³digo expirar.'
+      );
+    }
+
+    if (pendingChallenge?.phone === normalizedPhone && pendingChallenge.issued_at) {
+      const issuedAtMs = new Date(pendingChallenge.issued_at).getTime();
+      if (Number.isFinite(issuedAtMs) && (Date.now() - issuedAtMs) < PHONE_LINK_RESEND_COOLDOWN_MS) {
+        throw createHttpError(
+          429,
+          'verification_rate_limited',
+          'Aguarde 1 minuto antes de pedir um novo cÃ³digo.'
+        );
+      }
+    }
+
+    const verificationCode = generateVerificationCode();
+    const sent = await sendWhatsAppMessage(
+      normalizedPhone,
+      `Seu cÃ³digo para conectar o Lui Ã© *${verificationCode}*.\n\nDigite esse cÃ³digo na Flui para confirmar que este WhatsApp Ã© seu.\n\nSe nÃ£o foi vocÃª, pode ignorar esta mensagem.`
+    );
+
+    if (!sent) {
+      throw createHttpError(400, 'whatsapp_unreachable', 'Este nÃºmero nÃ£o foi encontrado no WhatsApp ou nÃ£o Ã© acessÃ­vel.');
+    }
+
+    await setPhoneLinkChallenge(
+      userId,
+      {
+        phone: normalizedPhone,
+        code: verificationCode,
+        attempts: 0,
+        issued_at: new Date().toISOString(),
+      },
+      PHONE_LINK_CODE_TTL_SEC
+    );
+
+    return res.json({
+      ok: true,
+      phone: normalizedPhone,
+      pendingVerification: true,
+      expiresInSec: PHONE_LINK_CODE_TTL_SEC,
+    });
+
+    /*
     const normalizedPhone = phone.replace(/\D/g, '');
     if (normalizedPhone.length < 10) throw createHttpError(400, 'invalid_phone', 'Número inválido');
 
@@ -3250,21 +4223,22 @@ app.post('/api/whatsapp/link-phone', async (req, res) => {
     }
 
     res.json({ ok: true, phone: normalizedPhone });
+    */
   } catch (error) {
     return sendApiError(res, req, error, 500);
   }
 });
 
-app.delete('/api/whatsapp/link-phone', async (req, res) => {
+app.delete('/api/whatsapp/link-phone', requireAuthenticatedUser, async (req, res) => {
   try {
-    const { userId } = req.body;
-    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    const userId = getAuthenticatedUserId(req, req.body?.userId);
 
     const binding = await findBindingByUserId(userId, 'whatsapp');
     if (binding?.external_user_id) {
       await deleteChannelBinding('whatsapp', binding.external_user_id);
-      pendingAuthSessions.delete(binding.external_user_id);
     }
+
+    await deletePhoneLinkChallenge(userId);
 
     res.json({ ok: true });
   } catch (error) {
@@ -3272,10 +4246,9 @@ app.delete('/api/whatsapp/link-phone', async (req, res) => {
   }
 });
 
-app.get('/api/whatsapp/messages', async (req, res) => {
+app.get('/api/whatsapp/messages', requireAuthenticatedUser, async (req, res) => {
   try {
-    const userId = req.query.userId;
-    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    const userId = getAuthenticatedUserId(req, req.query.userId);
 
     const { thread, messages } = await getThreadMessagesForUser(userId, 'whatsapp');
     if (!thread) return res.json([]);
@@ -3295,10 +4268,10 @@ app.get('/api/whatsapp/messages', async (req, res) => {
   }
 });
 
-app.post('/api/whatsapp/send', async (req, res) => {
+app.post('/api/whatsapp/send', requireAuthenticatedUser, async (req, res) => {
   try {
-    const { userId, to, message, template } = req.body;
-    if (!userId) throw createHttpError(400, 'missing_user_id', 'userId required');
+    const { to, message, template } = req.body;
+    const userId = getAuthenticatedUserId(req, req.body?.userId);
     if (!to) throw createHttpError(400, 'missing_target', 'to required');
     if (!message && !template) throw createHttpError(400, 'missing_payload', 'message or template required');
 

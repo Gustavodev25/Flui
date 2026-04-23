@@ -7,6 +7,7 @@ import { useSubscription } from '../contexts/SubscriptionContext'
 import Avvvatars from 'avvvatars-react'
 import { supabase } from '../lib/supabase'
 import { apiFetch } from '../lib/api'
+import { syncTaskWithGoogleCalendar, unlinkTaskFromGoogleCalendar } from '../lib/googleCalendar'
 import Modal from '../components/ui/Modal'
 import TaskForm from '../components/TaskForm'
 import TaskDetailModal from '../components/TaskDetailModal'
@@ -104,6 +105,11 @@ const formatDate = (dateStr: string) => {
 
   const months = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
   return `${day} ${months[month - 1]}`
+}
+
+const formatDueTime = (timeStr?: string) => {
+  if (!timeStr) return ''
+  return timeStr.slice(0, 5)
 }
 
 /** Retorna quantos dias faltam para a data de vencimento (negativo = atrasado) */
@@ -301,7 +307,7 @@ const TaskCardUI = React.forwardRef<
         <div
           onClick={() => { if (!isDragging && !isOverlay && onCardClick) { onCardClick(task) } }}
           className={`relative z-10 rounded-2xl transition-all duration-200 ease-out ${cardStateClasses}`}>
-          
+
           {/* Fundo do card */}
           <div className="absolute inset-0 bg-white rounded-2xl" />
 
@@ -415,7 +421,7 @@ const TaskCardUI = React.forwardRef<
               {/* Avatares: responsável (Direita) */}
               <div className="flex items-center flex-shrink-0">
                 {task.assignedToId && (
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     whileHover={{ scale: 1.05, y: -1 }}
@@ -494,19 +500,19 @@ const TaskCardUI = React.forwardRef<
                   : null
 
               const dateGlow = isDone || formatDate(task.dueDate) === 'Sem prazo' ? null
-                : days !== null && days < 0  ? 'rgba(239,68,68,0.15)'
-                : days === 0                 ? 'rgba(248,113,113,0.13)'
-                : days === 1                 ? 'rgba(249,115,22,0.13)'
-                : days !== null && days <= 3 ? 'rgba(245,158,11,0.11)'
-                : null
+                : days !== null && days < 0 ? 'rgba(239,68,68,0.15)'
+                  : days === 0 ? 'rgba(248,113,113,0.13)'
+                    : days === 1 ? 'rgba(249,115,22,0.13)'
+                      : days !== null && days <= 3 ? 'rgba(245,158,11,0.11)'
+                        : null
 
               const dateColor = isDone
                 ? 'text-[#37352f]/25'
-                : days !== null && days < 0  ? 'text-red-500'
-                : days === 0                 ? 'text-red-400'
-                : days === 1                 ? 'text-orange-500'
-                : days !== null && days <= 3 ? 'text-amber-500'
-                : 'text-[#37352f]/30'
+                : days !== null && days < 0 ? 'text-red-500'
+                  : days === 0 ? 'text-red-400'
+                    : days === 1 ? 'text-orange-500'
+                      : days !== null && days <= 3 ? 'text-amber-500'
+                        : 'text-[#37352f]/30'
 
               return (
                 <div className="flex items-center -mx-5 -mb-5 mt-3 px-4 py-2 border-t border-[#f1f1f0] rounded-b-2xl relative overflow-hidden">
@@ -515,7 +521,7 @@ const TaskCardUI = React.forwardRef<
                       animate={{ opacity: [0.4, 0.7, 0.4], scale: [1, 1.1, 1] }}
                       transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
                       className="absolute left-0 inset-y-0 w-28 pointer-events-none rounded-bl-2xl blur-3xl opacity-50"
-                      style={{ background: priorityGlow.replace('0.1', '0.2') }} 
+                      style={{ background: priorityGlow.replace('0.1', '0.2') }}
                     />
                   )}
                   {dateGlow && (
@@ -523,12 +529,11 @@ const TaskCardUI = React.forwardRef<
                       animate={{ opacity: [0.4, 0.6, 0.4], scale: [1, 1.15, 1] }}
                       transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
                       className="absolute right-0 inset-y-0 w-28 pointer-events-none rounded-br-2xl blur-3xl opacity-50"
-                      style={{ background: dateGlow.replace('0.1', '0.2') }} 
+                      style={{ background: dateGlow.replace('0.1', '0.2') }}
                     />
                   )}
-                  <span className={`relative flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 ${
-                    task.priority === 'high' ? 'text-red-500' : task.priority === 'medium' ? 'text-amber-500' : 'text-[#37352f]/30'
-                  }`}>
+                  <span className={`relative flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 ${task.priority === 'high' ? 'text-red-500' : task.priority === 'medium' ? 'text-amber-500' : 'text-[#37352f]/30'
+                    }`}>
                     <Flag size={10} strokeWidth={2.5} />
                     {task.priority === 'high' ? 'Crítica' : task.priority === 'medium' ? 'Média' : 'Baixa'}
                   </span>
@@ -547,6 +552,7 @@ const TaskCardUI = React.forwardRef<
                     <span className={`relative flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 tabular-nums ${dateColor}`}>
                       <Calendar size={10} strokeWidth={2.5} />
                       {formatDate(task.dueDate)}
+                      {task.dueTime && <span className="text-[#37352f]/35">· {formatDueTime(task.dueTime)}</span>}
                     </span>
                   )}
                 </div>
@@ -559,8 +565,8 @@ const TaskCardUI = React.forwardRef<
             <div className="absolute inset-0 z-[20] flex flex-col items-center justify-center pointer-events-none overflow-hidden rounded-2xl">
               <div className="absolute inset-0 bg-white/60 backdrop-blur-[4px] z-0" />
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <InfiniteRibbon 
-                  rotation={7} 
+                <InfiniteRibbon
+                  rotation={7}
                   className="w-[140%] py-2 bg-white/60 border-y border-[#37352f]/5 shadow-sm"
                   speed={600}
                   backgroundColor="bg-white/60"
@@ -570,9 +576,9 @@ const TaskCardUI = React.forwardRef<
                 </InfiniteRibbon>
               </div>
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <InfiniteRibbon 
-                  reverse={true} 
-                  rotation={-7} 
+                <InfiniteRibbon
+                  reverse={true}
+                  rotation={-7}
                   className="w-[140%] py-2 bg-slate-50/50 border-y border-[#37352f]/5 shadow-sm"
                   speed={900}
                   backgroundColor="bg-slate-50/50"
@@ -602,9 +608,8 @@ const TaskCardUI = React.forwardRef<
               onTouchEnd={cancelHold}
               onTouchCancel={cancelHold}
               style={{ userSelect: 'none' }}
-              className={`border border-t-0 rounded-b-xl px-3 py-0.5 flex items-center justify-center gap-0.5 h-[26px] cursor-pointer select-none transition-all ${
-                holdProgress > 0 ? 'border-red-300 bg-red-50' : 'border-[#e9e9e7] bg-white'
-              }`}
+              className={`border border-t-0 rounded-b-xl px-3 py-0.5 flex items-center justify-center gap-0.5 h-[26px] cursor-pointer select-none transition-all ${holdProgress > 0 ? 'border-red-300 bg-red-50' : 'border-[#e9e9e7] bg-white'
+                }`}
             >
               {holdProgress > 0 ? (
                 <NumberFlow value={Math.floor(holdProgress / 10)} className="text-[13px] font-normal text-red-500 tabular-nums w-[18px] text-center" />
@@ -853,7 +858,7 @@ const Tasks: React.FC = () => {
   useEffect(() => {
     const targetView = workspaceModeActive ? 'workspace' : 'personal'
     setTaskView(targetView)
-    
+
     // Limpa o destaque da aba que está sendo aberta
     if (targetView === 'personal') setPersonalHighlighted(false)
     else setWorkspaceHighlighted(false)
@@ -882,7 +887,7 @@ const Tasks: React.FC = () => {
         setTimeout(() => setWorkspaceHighlighted(false), 5000)
       }
     }
-    
+
     prevPersonalCount.current = personalCount
     prevWorkspaceCount.current = workspaceCount
   }, [personalCount, workspaceCount])
@@ -1071,6 +1076,7 @@ const Tasks: React.FC = () => {
             status: newTask.status,
             priority: newTask.priority,
             due_date: (newTask.dueDate && newTask.dueDate !== 'Sem prazo') ? newTask.dueDate : null,
+            due_time: newTask.dueTime || null,
             source: newTask.source,
             progress: newTask.progress,
             description: newTask.description,
@@ -1082,6 +1088,7 @@ const Tasks: React.FC = () => {
 
         if (error) throw error
         setTasks(tasks.map(t => t.id === editingTask.id ? { ...t, ...newTask } : t))
+        await syncTaskWithGoogleCalendar(editingTask.id, user?.id)
       } else if (isWorkspaceTask) {
         // Cria tarefa workspace via API (garante workspace_owner_id correto)
         const result = await apiFetch<{ task: any }>('/api/workspace/shared-tasks', {
@@ -1093,6 +1100,7 @@ const Tasks: React.FC = () => {
           const newTaskWithId = { ...mapDbTask(result.task), isNew: true, authorName: user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0], authorEmail: user?.email }
           setTasks([newTaskWithId, ...tasks])
           setWorkspaceCount(prev => prev + 1)
+          await syncTaskWithGoogleCalendar(result.task.id, user?.id)
         }
       } else {
         const { id, ...taskData } = newTask
@@ -1102,6 +1110,7 @@ const Tasks: React.FC = () => {
             user_id: user?.id,
             title: newTask.title, status: newTask.status, priority: newTask.priority,
             due_date: (newTask.dueDate && newTask.dueDate !== 'Sem prazo') ? newTask.dueDate : null,
+            due_time: newTask.dueTime || null,
             source: newTask.source, progress: newTask.progress,
             description: newTask.description, subtasks: newTask.subtasks,
             timer_at: newTask.timerAt || null,
@@ -1114,6 +1123,7 @@ const Tasks: React.FC = () => {
           const newTaskWithId = { ...mapDbTask(data[0]), isNew: true }
           setTasks([newTaskWithId, ...tasks])
           setPersonalCount(prev => prev + 1)
+          await syncTaskWithGoogleCalendar(data[0].id, user?.id)
         }
       }
       setIsModalOpen(false)
@@ -1147,11 +1157,12 @@ const Tasks: React.FC = () => {
         })
       } else {
         // Tenta deletar direto via Supabase se for pessoal (o usuário logado é o autor)
+        await unlinkTaskFromGoogleCalendar(id, user?.id)
         const { error: directErr } = await supabase
           .from('tasks')
           .delete()
           .eq('id', id)
-        
+
         if (directErr) throw directErr
       }
 
@@ -1360,7 +1371,7 @@ const Tasks: React.FC = () => {
     }
   }
 
-  const confirmStatusChange = useCallback(() => {
+  const confirmStatusChange = useCallback(async () => {
     if (!pendingStatusTask) return
     const { id, targetStatus } = pendingStatusTask
     setPendingStatusTask(null)
@@ -1368,17 +1379,19 @@ const Tasks: React.FC = () => {
     if (targetStatus === 'done' || targetStatus === 'canceled') {
       updates.timer_fired = true
     }
-    supabase
+    const { error } = await supabase
       .from('tasks')
       .update(updates)
       .eq('id', id)
-      .then(({ error }) => {
-        if (error) {
-          console.error('Erro ao atualizar status:', error)
-          fetchTasks()
-        }
-      })
-  }, [pendingStatusTask, fetchTasks])
+
+    if (error) {
+      console.error('Erro ao atualizar status:', error)
+      fetchTasks()
+      return
+    }
+
+    await syncTaskWithGoogleCalendar(id, user?.id)
+  }, [pendingStatusTask, fetchTasks, user?.id])
 
   const cancelStatusChange = useCallback(() => {
     if (!pendingStatusTask) return
@@ -1483,10 +1496,10 @@ const Tasks: React.FC = () => {
                     onClick={() => !isDisabled && setViewMode(tab.id as any)}
                     disabled={isDisabled}
                     className={`flex shrink-0 items-center gap-1.5 sm:gap-2 pb-3 text-xs sm:text-sm font-semibold transition-all relative ${isDisabled
-                        ? 'text-[#37352f]/25 cursor-not-allowed'
-                        : viewMode === tab.id
-                          ? 'text-[#37352f]'
-                          : 'text-[#37352f]/40 hover:text-[#37352f]/60'
+                      ? 'text-[#37352f]/25 cursor-not-allowed'
+                      : viewMode === tab.id
+                        ? 'text-[#37352f]'
+                        : 'text-[#37352f]/40 hover:text-[#37352f]/60'
                       }`}
                   >
                     <tab.icon size={16} strokeWidth={viewMode === tab.id ? 2.5 : 2} />
@@ -1518,7 +1531,7 @@ const Tasks: React.FC = () => {
                     >
                       <Lock size={10} strokeWidth={2.5} />
                       <span className="hidden sm:inline">Pessoal</span>
-                      <motion.div 
+                      <motion.div
                         animate={personalHighlighted ? { backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#ef4444' } : {}}
                         className={`ml-1 px-1.5 py-0.5 rounded-full relative overflow-hidden transition-colors ${taskView === 'personal' && !personalHighlighted ? 'bg-[#37352f]/10 text-[#37352f]' : 'bg-[#37352f]/5 text-[#37352f]/30'}`}
                       >
@@ -1654,9 +1667,9 @@ const Tasks: React.FC = () => {
                           <div className="flex items-center gap-2">
                             <span className={`w-1.5 h-1.5 rounded-full ${column.color} opacity-80`}></span>
                             <h3 className="text-[13px] font-semibold text-[#37352f]">{column.title}</h3>
-                            <NumberFlow 
-                              value={columnTasks.length} 
-                              className="text-[12px] font-medium text-[#37352f]/40" 
+                            <NumberFlow
+                              value={columnTasks.length}
+                              className="text-[12px] font-medium text-[#37352f]/40"
                             />
                           </div>
                         </div>
@@ -1728,9 +1741,9 @@ const Tasks: React.FC = () => {
                       <div className="flex items-center gap-2 px-1">
                         <span className={`w-1.5 h-1.5 rounded-full ${column.color} opacity-80`}></span>
                         <h3 className="text-[13px] font-semibold text-[#37352f]">{column.title}</h3>
-                        <NumberFlow 
-                          value={columnTasks.length} 
-                          className="text-[12px] font-medium text-[#37352f]/40" 
+                        <NumberFlow
+                          value={columnTasks.length}
+                          className="text-[12px] font-medium text-[#37352f]/40"
                         />
                       </div>
 
@@ -1765,6 +1778,7 @@ const Tasks: React.FC = () => {
                                   <td className="py-4 px-5 text-right border-r border-[#f1f1f0]">
                                     <span className="text-[11px] font-extrabold text-[#37352f]/40 bg-[#f7f7f5] px-2 py-1 rounded-sm border border-[#e9e9e7]">
                                       {formatDate(task.dueDate)}
+                                      {task.dueTime ? ` · ${formatDueTime(task.dueTime)}` : ''}
                                     </span>
                                   </td>
                                   <td className="py-4 px-2 text-center relative">
@@ -1825,7 +1839,10 @@ const Tasks: React.FC = () => {
                                 <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${getPriorityColor(task.priority)}`}>
                                   {task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Média' : 'Baixa'}
                                 </span>
-                                <span className="text-[10px] text-[#37352f]/40 font-medium">{formatDate(task.dueDate)}</span>
+                                <span className="text-[10px] text-[#37352f]/40 font-medium">
+                                  {formatDate(task.dueDate)}
+                                  {task.dueTime ? ` · ${formatDueTime(task.dueTime)}` : ''}
+                                </span>
                               </div>
                             </div>
                             <div className="relative flex-shrink-0">

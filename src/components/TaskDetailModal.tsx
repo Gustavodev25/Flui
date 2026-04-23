@@ -73,6 +73,11 @@ function formatDate(dateStr: string) {
   return `${day} ${months[month - 1]} ${year}`
 }
 
+function formatDueTime(timeStr?: string) {
+  if (!timeStr) return ''
+  return timeStr.slice(0, 5)
+}
+
 function getTimerParts(timerAt: string): { h: number; m: number; s: number } | null {
   const diff = new Date(timerAt).getTime() - Date.now()
   if (diff <= 0) return null
@@ -157,6 +162,7 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           <DetailRow label="Prazo">
             <span className="text-[13px] text-[#37352f]">
               {formatDate(task.dueDate)}
+              {task.dueTime ? ` · ${formatDueTime(task.dueTime)}` : ''}
             </span>
           </DetailRow>
 

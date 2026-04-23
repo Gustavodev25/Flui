@@ -10,6 +10,7 @@ import Modal from '../components/ui/Modal'
 import TaskForm from '../components/TaskForm'
 import { Loading } from '../components/ui/Loading'
 import finlozLogo from '../assets/logo/lui.svg'
+import { syncTaskWithGoogleCalendar } from '../lib/googleCalendar'
 
 interface Subtask {
   id: string
@@ -76,7 +77,7 @@ export default function CalendarPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [currentDate, setCurrentDate] = useState(new Date())
-  const [selectedDay, setSelectedDay] = useState<string | null>(todayKey())
+  const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [newTaskDate, setNewTaskDate] = useState<string | null>(null)
@@ -230,7 +231,6 @@ export default function CalendarPage() {
 
   const handleToday = () => {
     setCurrentDate(new Date())
-    setSelectedDay(todayKey())
   }
 
   const openNewTask = (dateKey?: string) => {
@@ -254,10 +254,12 @@ export default function CalendarPage() {
             progress: newTask.progress,
             description: newTask.description,
             subtasks: newTask.subtasks,
+            ...(newTask.timerAt !== undefined ? { timer_at: newTask.timerAt, timer_fired: false } : {}),
           })
           .eq('id', editingTask.id)
         if (error) throw error
         setTasks(prev => prev.map(t => t.id === editingTask.id ? { ...t, ...newTask } : t))
+        await syncTaskWithGoogleCalendar(editingTask.id, user?.id)
       } else {
         const { id: _id, ...taskData } = newTask
         const { data, error } = await supabase
@@ -273,10 +275,15 @@ export default function CalendarPage() {
             progress: taskData.progress,
             description: taskData.description,
             subtasks: taskData.subtasks,
+            timer_at: taskData.timerAt || null,
+            timer_fired: false,
           }])
           .select()
         if (error) throw error
-        if (data?.[0]) setTasks(prev => [{ ...newTask, id: data[0].id }, ...prev])
+        if (data?.[0]) {
+          setTasks(prev => [{ ...newTask, id: data[0].id }, ...prev])
+          await syncTaskWithGoogleCalendar(data[0].id, user?.id)
+        }
       }
       setIsModalOpen(false)
       setEditingTask(null)

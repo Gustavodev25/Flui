@@ -15,6 +15,45 @@ type Mode = 'at' | 'in'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
+const parseTimerValue = (value: string | null) => {
+  if (!value) return null
+
+  const parts = value.split(':')
+  const rawHours = parseInt(parts[0] || '0', 10)
+  const rawMinutes = parseInt(parts[1] || '0', 10)
+  const rawSeconds = parseInt(parts[2] || '0', 10)
+
+  if ([rawHours, rawMinutes, rawSeconds].some(Number.isNaN)) return null
+
+  const totalMinutes = rawHours * 60 + rawMinutes + (rawSeconds > 0 ? 1 : 0)
+
+  return {
+    totalMinutes,
+    hours: Math.floor(totalMinutes / 60),
+    minutes: totalMinutes % 60,
+  }
+}
+
+const formatDurationValue = (hours: number, minutes: number) => `${pad(hours)}:${pad(minutes)}:00`
+
+const getDisplayPartsFromValue = (value: string | null, mode: Mode) => {
+  const parsed = parseTimerValue(value)
+  if (!parsed) return null
+
+  if (mode === 'in') {
+    return {
+      hours: Math.min(parsed.hours, 99),
+      minutes: parsed.minutes,
+    }
+  }
+
+  const target = new Date(Date.now() + parsed.totalMinutes * 60 * 1000)
+  return {
+    hours: target.getHours(),
+    minutes: target.getMinutes(),
+  }
+}
+
 const TimePicker: React.FC<TimePickerProps> = ({ label, value, onChange }) => {
   const [isOpen, setIsOpen] = useState(false)
   const [shouldRender, setShouldRender] = useState(false)
@@ -85,26 +124,17 @@ const TimePicker: React.FC<TimePickerProps> = ({ label, value, onChange }) => {
 
   useEffect(() => {
     if (value && !isDragging) {
-      const parts = value.split(':')
-      const h = parseInt(parts[0]) || 0
-      const m = parseInt(parts[1]) || 0
-      
-      if (mode === 'at') {
-        const now = new Date()
-        const target = new Date(now.getTime() + (h * 3600 + m * 60) * 1000)
-        setHours(target.getHours())
-        setMinutes(target.getMinutes())
-      } else {
-        setHours(h)
-      }
-      setMinutes(m)
+      const nextDisplay = getDisplayPartsFromValue(value, mode)
+      if (!nextDisplay) return
+      setHours(nextDisplay.hours)
+      setMinutes(nextDisplay.minutes)
     }
   }, [value, mode, isDragging])
 
   const propagate = useCallback((h: number, m: number, currentMode: Mode) => {
     if (currentMode === 'in') {
       if (h === 0 && m === 0) onChange(null)
-      else onChange(`${pad(h)}:${pad(m)}:00`)
+      else onChange(formatDurationValue(h, m))
     } else {
       const now = new Date()
       const target = new Date()
@@ -114,10 +144,10 @@ const TimePicker: React.FC<TimePickerProps> = ({ label, value, onChange }) => {
         target.setDate(target.getDate() + 1)
         diff = target.getTime() - now.getTime()
       }
-      const totalSeconds = Math.floor(diff / 1000)
-      const dh = Math.floor(totalSeconds / 3600)
-      const dm = Math.floor((totalSeconds % 3600) / 60)
-      onChange(`${pad(dh)}:${pad(dm)}:00`)
+      const totalMinutes = Math.ceil(diff / 60000)
+      const durationHours = Math.floor(totalMinutes / 60)
+      const durationMinutes = totalMinutes % 60
+      onChange(formatDurationValue(durationHours, durationMinutes))
     }
   }, [onChange])
 
@@ -247,7 +277,7 @@ const TimePicker: React.FC<TimePickerProps> = ({ label, value, onChange }) => {
                   <div className="w-full relative flex items-center bg-[#f7f7f5] rounded-full p-1 border border-[#e9e9e7]">
                     <button
                       type="button"
-                      onClick={() => { setMode('at'); propagate(hours, minutes, 'at'); }}
+                      onClick={() => setMode('at')}
                       className={`relative z-10 flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-full text-[9px] font-bold uppercase transition-colors duration-300 ${
                         mode === 'at' ? 'text-black' : 'text-[#37352f]/30 hover:text-[#37352f]/50'
                       }`}
@@ -264,7 +294,7 @@ const TimePicker: React.FC<TimePickerProps> = ({ label, value, onChange }) => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setMode('in'); propagate(hours, minutes, 'in'); }}
+                      onClick={() => setMode('in')}
                       className={`relative z-10 flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-full text-[9px] font-bold uppercase transition-colors duration-300 ${
                         mode === 'in' ? 'text-black' : 'text-[#37352f]/30 hover:text-[#37352f]/50'
                       }`}
@@ -281,77 +311,88 @@ const TimePicker: React.FC<TimePickerProps> = ({ label, value, onChange }) => {
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-3 sm:gap-3">
-                    <div className="flex flex-col items-center gap-1">
+                  <div className="flex items-center gap-3">
+                    {/* Up arrows */}
+                    <div className="flex items-center">
                       <button
                         type="button"
                         onClick={() => setSegmentAndPropagate('hours', hours + 1)}
-                        className="p-1 sm:p-0.5 hover:bg-black/5 rounded-full transition-colors text-[#37352f]/20 hover:text-black active:scale-90"
+                        className="w-[42px] flex justify-center p-1 hover:bg-black/5 rounded-full transition-colors text-[#37352f]/20 hover:text-black active:scale-90"
                       >
                         <ChevronUp size={12} strokeWidth={3} />
                       </button>
-                      <motion.div
-                        onPointerDown={(e) => handlePointerDown(e, 'hours')}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp}
-                        onClick={() => setActiveSegment('hours')}
-                        className={`
-                          w-10 h-11 rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing border-2 transition-all touch-none select-none
-                          ${activeSegment === 'hours' ? 'bg-black border-black text-white' : 'bg-[#f7f7f5] border-transparent text-[#37352f]/40 hover:border-[#e9e9e7]'}
-                        `}
-                      >
-                        <NumberFlow
-                          value={hours}
-                          format={{ minimumIntegerDigits: 2 }}
-                          className="text-base font-black tabular-nums"
-                          transformTiming={{ duration: 400, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
-                        />
-                      </motion.div>
-                      <button
-                        type="button"
-                        onClick={() => setSegmentAndPropagate('hours', hours - 1)}
-                        className="p-1 sm:p-0.5 hover:bg-black/5 rounded-full transition-colors text-[#37352f]/20 hover:text-black active:scale-90"
-                      >
-                        <ChevronDown size={12} strokeWidth={3} />
-                      </button>
-                      <span className="text-[7px] sm:text-[6px] font-black uppercase tracking-tighter opacity-40">Hora</span>
-                    </div>
-
-                    <div className="text-xl sm:text-base font-bold text-[#37352f]/10 mb-5">:</div>
-
-                    <div className="flex flex-col items-center gap-1">
+                      <div className="w-[1px] mx-0" />
                       <button
                         type="button"
                         onClick={() => setSegmentAndPropagate('minutes', minutes + 1)}
-                        className="p-1 sm:p-0.5 hover:bg-black/5 rounded-full transition-colors text-[#37352f]/20 hover:text-black active:scale-90"
+                        className="w-[42px] flex justify-center p-1 hover:bg-black/5 rounded-full transition-colors text-[#37352f]/20 hover:text-black active:scale-90"
                       >
                         <ChevronUp size={12} strokeWidth={3} />
                       </button>
-                      <motion.div
-                        onPointerDown={(e) => handlePointerDown(e, 'minutes')}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp}
-                        onClick={() => setActiveSegment('minutes')}
-                        className={`
-                          w-10 h-11 rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing border-2 transition-all touch-none select-none
-                          ${activeSegment === 'minutes' ? 'bg-black border-black text-white' : 'bg-[#f7f7f5] border-transparent text-[#37352f]/40 hover:border-[#e9e9e7]'}
-                        `}
-                      >
-                        <NumberFlow
-                          value={minutes}
-                          format={{ minimumIntegerDigits: 2 }}
-                          className="text-base font-black tabular-nums"
-                          transformTiming={{ duration: 400, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
-                        />
-                      </motion.div>
+                    </div>
+                  </div>
+
+                  {/* Unified time box */}
+                  <div className="flex items-center bg-[#f7f7f5] rounded-xl border border-[#e9e9e7] overflow-hidden">
+                    <motion.div
+                      onPointerDown={(e) => handlePointerDown(e, 'hours')}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      onClick={() => setActiveSegment('hours')}
+                      className={`
+                        w-[52px] h-12 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing transition-all touch-none select-none
+                        ${activeSegment === 'hours' ? 'bg-black text-white' : 'text-[#37352f]/50'}
+                      `}
+                    >
+                      <NumberFlow
+                        value={hours}
+                        format={{ minimumIntegerDigits: 2 }}
+                        className="text-lg font-black tabular-nums"
+                        transformTiming={{ duration: 400, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
+                      />
+                    </motion.div>
+                    <div className="text-base font-black text-[#37352f]/20 select-none">:</div>
+                    <motion.div
+                      onPointerDown={(e) => handlePointerDown(e, 'minutes')}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      onClick={() => setActiveSegment('minutes')}
+                      className={`
+                        w-[52px] h-12 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing transition-all touch-none select-none
+                        ${activeSegment === 'minutes' ? 'bg-black text-white' : 'text-[#37352f]/50'}
+                      `}
+                    >
+                      <NumberFlow
+                        value={minutes}
+                        format={{ minimumIntegerDigits: 2 }}
+                        className="text-lg font-black tabular-nums"
+                        transformTiming={{ duration: 400, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
+                      />
+                    </motion.div>
+                  </div>
+
+                  {/* Labels + Down arrows */}
+                  <div className="flex items-center">
+                    <div className="w-[52px] flex flex-col items-center gap-0.5">
                       <button
                         type="button"
-                        onClick={() => setSegmentAndPropagate('minutes', minutes - 1)}
-                        className="p-1 sm:p-0.5 hover:bg-black/5 rounded-full transition-colors text-[#37352f]/20 hover:text-black active:scale-90"
+                        onClick={() => setSegmentAndPropagate('hours', hours - 1)}
+                        className="p-1 hover:bg-black/5 rounded-full transition-colors text-[#37352f]/20 hover:text-black active:scale-90"
                       >
                         <ChevronDown size={12} strokeWidth={3} />
                       </button>
-                      <span className="text-[7px] sm:text-[6px] font-black uppercase tracking-tighter opacity-40">Min</span>
+                      <span className="text-[7px] font-black uppercase tracking-tighter opacity-40">Hora</span>
+                    </div>
+                    <div className="w-[13px]" />
+                    <div className="w-[52px] flex flex-col items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setSegmentAndPropagate('minutes', minutes - 1)}
+                        className="p-1 hover:bg-black/5 rounded-full transition-colors text-[#37352f]/20 hover:text-black active:scale-90"
+                      >
+                        <ChevronDown size={12} strokeWidth={3} />
+                      </button>
+                      <span className="text-[7px] font-black uppercase tracking-tighter opacity-40">Min</span>
                     </div>
                   </div>
 

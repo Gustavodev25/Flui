@@ -1,26 +1,30 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import Avvvatars from 'avvvatars-react'
-import { Menu, User, CreditCard, LifeBuoy, LogOut, Star, ChevronRight } from 'lucide-react'
+import { Menu, LogOut, ChevronRight } from 'lucide-react'
 import { Dropdown, DropdownItem, DropdownDivider } from './ui/Dropdown'
 import { SettingsModal } from './SettingsModal'
 import { useSubscription } from '../contexts/SubscriptionContext'
-import { useLocation, Link } from 'react-router-dom'
+import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { useSidebar } from '../contexts/SidebarContext'
 import { motion } from 'framer-motion'
 import { FeedbackWidget } from './FeedbackWidget'
 import flowLogo from '../assets/logo/flow.svg'
 import pulseLogo from '../assets/logo/pulse.svg'
 import gratisLogo from '../assets/logo/gratis.svg'
+import meuPlanoIcon from '../assets/icones/meuplano.svg'
+import assinaturaIcon from '../assets/icones/assinatura.svg'
+import suporteIcon from '../assets/icones/suporte.svg'
 
 export const Topbar: React.FC = () => {
   const { user, signOut } = useAuth()
   const { toggleMobileMenu } = useSidebar()
   const location = useLocation()
+  const navigate = useNavigate()
   
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<'profile' | 'subscription'>('profile')
+  const [settingsTab, setSettingsTab] = useState<'profile' | 'subscription' | 'integrations'>('profile')
   const profileRef = useRef<HTMLDivElement>(null)
   const { hasFlow, planId, isWorkspaceMember, workspaceModeActive, workspaceMembership, hasOwnPlan, useOwnPlan, togglePlanMode, subscription } = useSubscription()
   const [avatarError, setAvatarError] = useState(false)
@@ -28,6 +32,24 @@ export const Topbar: React.FC = () => {
   useEffect(() => {
     setAvatarError(false)
   }, [user?.user_metadata?.avatar_url])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const settings = params.get('settings')
+    if (!settings || !['profile', 'subscription', 'integrations'].includes(settings)) return
+
+    setSettingsTab(settings as 'profile' | 'subscription' | 'integrations')
+    setIsSettingsModalOpen(true)
+
+    params.delete('settings')
+    navigate(
+      {
+        pathname: location.pathname,
+        search: params.toString() ? `?${params.toString()}` : '',
+      },
+      { replace: true }
+    )
+  }, [location.pathname, location.search, navigate])
   
   const routeLabels: { [key: string]: string } = {
     '/dashboard': 'Painel',
@@ -160,17 +182,17 @@ export const Topbar: React.FC = () => {
             <DropdownDivider />
 
             <DropdownItem
-              icon={<User size={14} />}
+              icon={<img src={meuPlanoIcon} alt="" className="w-3.5 h-3.5 opacity-60" />}
               label="Meu Perfil"
               onClick={() => { setIsDropdownOpen(false); setSettingsTab('profile'); setIsSettingsModalOpen(true) }} 
             />
             <DropdownItem 
-              icon={<CreditCard size={14} />}
+              icon={<img src={assinaturaIcon} alt="" className="w-3.5 h-3.5 opacity-60" />}
               label="Assinatura" 
               onClick={() => { setIsDropdownOpen(false); setSettingsTab('subscription'); setIsSettingsModalOpen(true) }} 
             />
             <DropdownItem 
-              icon={<LifeBuoy size={14} />}
+              icon={<img src={suporteIcon} alt="" className="w-3.5 h-3.5 opacity-60" />}
               label="Suporte" 
               onClick={() => { setIsDropdownOpen(false); window.open('https://wa.me/5518996239335?text=Olá,%20tenho%20uma%20dúvida.', '_blank') }} 
             />

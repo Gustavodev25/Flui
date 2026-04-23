@@ -90,7 +90,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, is
     }, 1500)
 
     return () => clearTimeout(timeoutId)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title])
 
   const handleAIAnalyze = async (textToAnalyze: string) => {
@@ -207,6 +207,7 @@ REGRAS:
       priority,
       source: initialData?.source || 'user',
       dueDate: dueDate ? formatDateForTask(dueDate) : 'Sem prazo',
+      dueTime: null,
       timerAt,
       progress,
       subtasks,
@@ -366,13 +367,11 @@ REGRAS:
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-        {/* Due Date */}
         <DatePicker
           label="Prazo"
           value={dueDate}
           onChange={setDueDate}
         />
-
         <TimePicker
           label="Timer"
           value={timerDuration}
@@ -388,11 +387,10 @@ REGRAS:
             <button
               type="button"
               onClick={() => setVisibility('personal')}
-              className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-bold transition-colors duration-300 ${
-                visibility === 'personal'
+              className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-bold transition-colors duration-300 ${visibility === 'personal'
                   ? 'text-[#37352f]'
                   : 'text-[#37352f]/30 hover:text-[#37352f]/50'
-              }`}
+                }`}
             >
               <Lock size={12} strokeWidth={2.5} />
               <span>Pessoal</span>
@@ -407,11 +405,10 @@ REGRAS:
             <button
               type="button"
               onClick={() => setVisibility('workspace')}
-              className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-bold transition-colors duration-300 ${
-                visibility === 'workspace'
+              className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-bold transition-colors duration-300 ${visibility === 'workspace'
                   ? 'text-[#37352f]'
                   : 'text-[#37352f]/30 hover:text-[#37352f]/50'
-              }`}
+                }`}
             >
               <Users size={12} strokeWidth={2.5} />
               <span>Workspace</span>
@@ -521,11 +518,10 @@ REGRAS:
                       )
                     }}
                     transition={{ type: 'spring', stiffness: 500, damping: 35, mass: 0.8 }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition-colors duration-300 ${
-                      isSelected
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition-colors duration-300 ${isSelected
                         ? 'bg-[#37352f] border-[#37352f] text-white shadow-sm'
                         : 'bg-[#f7f7f5]/60 border-[#e9e9e7]/50 text-[#37352f]/40 hover:border-[#d3d3d1]'
-                    }`}
+                      }`}
                   >
                     <div className={`w-3.5 h-3.5 rounded-full overflow-hidden flex-shrink-0 transition-all duration-300 ${isSelected ? 'ring-1 ring-white/30' : 'grayscale opacity-70'}`}>
                       {m.avatar

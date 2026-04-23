@@ -47,22 +47,48 @@ const WhatsAppOnboardingModal: React.FC<WhatsAppOnboardingModalProps> = ({ isOpe
   const [phone, setPhone] = useState('')
   const [isLinking, setIsLinking] = useState(false)
   const [linked, setLinked] = useState(false)
+  const [pendingPhone, setPendingPhone] = useState<string | null>(null)
+  const [verificationCode, setVerificationCode] = useState('')
+  const [isVerifying, setIsVerifying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isValidating, setIsValidating] = useState(false)
   const [isValid, setIsValid] = useState<boolean | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const codeInputRef = useRef<HTMLInputElement>(null)
 
   // Auto-focus ao abrir
   useEffect(() => {
     if (isOpen && !linked) {
-      const timer = setTimeout(() => inputRef.current?.focus(), 300)
+      const timer = setTimeout(() => {
+        if (pendingPhone) {
+          codeInputRef.current?.focus()
+          return
+        }
+        inputRef.current?.focus()
+      }, 300)
       return () => clearTimeout(timer)
     }
-  }, [isOpen, linked])
+  }, [isOpen, linked, pendingPhone])
 
   // Sincroniza o phoneInput para o backend (apenas dígitos)
   const phoneDigits = phone.replace(/\D/g, '')
   const phoneInput = `${selectedCountry.code}${phoneDigits}`
+
+  useEffect(() => {
+    if (!isOpen || !user) return
+
+    apiFetch<{ phone: string | null; pendingPhone?: string | null }>('/api/whatsapp/linked-phone', undefined, { userId: user.id })
+      .then(({ phone, pendingPhone }) => {
+        if (phone) {
+          setLinked(true)
+          setPendingPhone(null)
+          return
+        }
+        setLinked(false)
+        setPendingPhone(pendingPhone || null)
+      })
+      .catch(() => {})
+  }, [isOpen, user])
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null)
@@ -157,16 +183,21 @@ const WhatsAppOnboardingModal: React.FC<WhatsAppOnboardingModalProps> = ({ isOpe
     setIsLinking(true)
     setError(null)
     try {
-      await apiFetch('/api/whatsapp/link-phone', {
+      const { phone, pendingVerification } = await apiFetch<{ phone: string; pendingVerification?: boolean }>('/api/whatsapp/link-phone', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id, phone: phoneInput })
       })
-      setLinked(true)
-      setTimeout(() => {
-        onClose()
-        navigate('/dashboard', { replace: true })
-      }, 1800)
+      setPendingPhone(phone)
+      setVerificationCode('')
+      if (!pendingVerification) {
+        setLinked(true)
+        setPendingPhone(null)
+        setTimeout(() => {
+          onClose()
+          navigate('/dashboard', { replace: true })
+        }, 1800)
+      }
     } catch (err: any) {
       setError(err.message || 'Não conseguimos validar esse número')
     } finally {
@@ -174,8 +205,78 @@ const WhatsAppOnboardingModal: React.FC<WhatsAppOnboardingModalProps> = ({ isOpe
     }
   }
 
+  const handleVerify = async () => {
+    if (!user || !pendingPhone || verificationCode.replace(/\D/g, '').length !== 6) return
+    setIsVerifying(true)
+    setError(null)
+    try {
+      await apiFetch('/api/whatsapp/link-phone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          phone: pendingPhone,
+          code: verificationCode.replace(/\D/g, ''),
+        }),
+      })
+      setLinked(true)
+      setPendingPhone(null)
+      setVerificationCode('')
+      setTimeout(() => {
+        onClose()
+        navigate('/dashboard', { replace: true })
+      }, 1800)
+    } catch (err: any) {
+      setError(err.message || 'Nao foi possivel confirmar o codigo')
+    } finally {
+      setIsVerifying(false)
+    }
+  }
+
+  const handleResend = async () => {
+    if (!user || !pendingPhone) return
+    setIsLinking(true)
+    setError(null)
+    try {
+      await apiFetch('/api/whatsapp/link-phone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, phone: pendingPhone }),
+      })
+    } catch (err: any) {
+      setError(err.message || 'Nao foi possivel reenviar o codigo')
+    } finally {
+      setIsLinking(false)
+    }
+  }
+
+  const handleCancelPending = async () => {
+    if (!user) return
+    setIsLinking(true)
+    setError(null)
+    try {
+      await apiFetch('/api/whatsapp/link-phone', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      })
+      setPendingPhone(null)
+      setVerificationCode('')
+      setPhone('')
+    } catch (err: any) {
+      setError(err.message || 'Nao foi possivel cancelar a verificacao')
+    } finally {
+      setIsLinking(false)
+    }
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleLink()
+    if (e.key !== 'Enter') return
+    if (pendingPhone) {
+      handleVerify()
+      return
+    }
+    handleLink()
   }
 
   return (
@@ -232,7 +333,9 @@ const WhatsAppOnboardingModal: React.FC<WhatsAppOnboardingModalProps> = ({ isOpe
                     </p>
                   </div>
 
-                  <div className="flex flex-col gap-2">
+                  {!pendingPhone && (
+                    <>
+                    <div className="flex flex-col gap-2">
                     <div className={`w-full p-2 bg-[#f7f7f5] rounded-xl flex items-center gap-1 border transition-all overflow-hidden ${error ? 'border-red-100' : isValid === true ? 'border-green-100' : 'border-[#e9e9e7]'}`}>
                       <CountrySelector 
                         selectedCountry={selectedCountry} 
@@ -270,15 +373,72 @@ const WhatsAppOnboardingModal: React.FC<WhatsAppOnboardingModalProps> = ({ isOpe
                     <p className="px-1 text-[11px] text-[#37352f]/45 leading-relaxed">
                       O código <span className="font-bold text-[#37352f]/60">+{selectedCountry.code}</span> já está incluído. Digite seu DDD e o número sequencialmente.
                     </p>
-                  </div>
+                    </div>
 
-                  <button
-                    onClick={handleLink}
-                    disabled={isLinking || phoneDigits.length < 10}
-                    className="w-full py-3 bg-[#202020] text-white text-[11px] font-bold rounded-xl hover:bg-[#303030] transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {isLinking ? 'Vinculando...' : 'Vincular WhatsApp'}
-                  </button>
+                    <button
+                      onClick={handleLink}
+                      disabled={isLinking || phoneDigits.length < 10}
+                      className="w-full py-3 bg-[#202020] text-white text-[11px] font-bold rounded-xl hover:bg-[#303030] transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {isLinking ? 'Vinculando...' : 'Vincular WhatsApp'}
+                    </button>
+                    </>
+                  )}
+
+                  {pendingPhone && (
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-2">
+                        <div className="w-full p-3 bg-[#f7f7f5] rounded-xl border border-[#e9e9e7]">
+                          <input
+                            ref={codeInputRef}
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            placeholder="123456"
+                            value={verificationCode}
+                            onChange={(e) => {
+                              setError(null)
+                              setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                            }}
+                            onKeyDown={handleKeyDown}
+                            className="w-full text-center text-base font-bold tracking-[0.35em] bg-transparent border-none focus:outline-none text-[#37352f] placeholder:text-[#37352f]/20 p-0"
+                          />
+                        </div>
+                        {error && (
+                          <p className="px-1 text-[10px] text-red-500 font-medium -mt-1">
+                            {error}
+                          </p>
+                        )}
+                        <p className="px-1 text-[11px] text-[#37352f]/45 leading-relaxed">
+                          Digite o codigo enviado para <span className="font-bold text-[#37352f]/65">+{pendingPhone}</span>.
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={handleVerify}
+                        disabled={isVerifying || verificationCode.replace(/\D/g, '').length !== 6}
+                        className="w-full py-3 bg-[#202020] text-white text-[11px] font-bold rounded-xl hover:bg-[#303030] transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {isVerifying ? 'Confirmando...' : 'Confirmar codigo'}
+                      </button>
+
+                      <button
+                        onClick={handleResend}
+                        disabled={isLinking}
+                        className="w-full py-2 text-[11px] font-medium text-[#37352f]/35 hover:text-[#37352f]/60 transition-colors disabled:opacity-40"
+                      >
+                        {isLinking ? 'Reenviando...' : 'Reenviar codigo'}
+                      </button>
+
+                      <button
+                        onClick={handleCancelPending}
+                        disabled={isLinking || isVerifying}
+                        className="w-full py-2 text-[11px] font-medium text-[#37352f]/35 hover:text-[#37352f]/60 transition-colors disabled:opacity-40"
+                      >
+                        Trocar numero
+                      </button>
+                    </div>
+                  )}
 
                   {!mandatory && (
                     <button

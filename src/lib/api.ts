@@ -1,3 +1,5 @@
+import { supabase } from './supabase'
+
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const API_BASE_URL = isLocal 
   ? 'http://localhost:3001' 
@@ -44,10 +46,15 @@ export function buildApiUrl(path: string, query?: Record<string, string | number
 export async function apiFetch<T>(path: string, init?: RequestInit, query?: Record<string, string | number | boolean | undefined | null>): Promise<T> {
   const finalInit = { ...init }
   const headers = new Headers(finalInit.headers || {})
+  const { data: { session } } = await supabase.auth.getSession()
   
   // Se for ngrok, adiciona o header para pular a tela de aviso
   if (API_BASE_URL.includes('ngrok-free.dev')) {
     headers.set('ngrok-skip-browser-warning', 'true')
+  }
+
+  if (session?.access_token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${session.access_token}`)
   }
   
   finalInit.headers = headers

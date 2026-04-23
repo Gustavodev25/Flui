@@ -1,28 +1,49 @@
 import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, User, CreditCard, Check, Loader2, ArrowRight, ExternalLink, Camera, Smartphone, Zap, CheckCircle2, XCircle } from 'lucide-react'
+import { X, Check, Loader2, ArrowRight, ExternalLink, Camera, Smartphone, CheckCircle2, XCircle } from 'lucide-react'
+import perfilIcon from '../assets/icones/perfil.svg'
+import assinaturaIcon from '../assets/icones/assinatura.svg'
+import integracaoIcon from '../assets/icones/integracao.svg'
 import flowLogo from '../assets/logo/flow.svg'
 import pulseLogo from '../assets/logo/pulse.svg'
 import gratisLogo from '../assets/logo/gratis.svg'
+import googleCalendarLogo from '../assets/logo/googlecalendar.svg'
+import { toaster } from './ui/Toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import Avvvatars from 'avvvatars-react'
 import { AvatarUploadModal } from './AvatarUploadModal'
-import { apiFetch } from '../lib/api'
-import { useNavigate } from 'react-router-dom'
+import { apiFetch, buildApiUrl } from '../lib/api'
+import { useLocation, useNavigate } from 'react-router-dom'
 import CountrySelector from './CountrySelector'
 import { countries } from '../constants/countries'
 import type { Country } from '../constants/countries'
 
+type SettingsTab = 'profile' | 'subscription' | 'integrations'
+type IntegrationView = null | 'google-calendar'
+
+
+interface GoogleCalendarStatus {
+  configured: boolean
+  connected: boolean
+  autoSyncEnabled: boolean
+  email?: string | null
+  calendarId?: string | null
+  timeZone?: string | null
+  connectedAt?: string | null
+  lastSyncedAt?: string | null
+  lastError?: string | null
+}
+
 interface SettingsModalProps {
   isOpen: boolean
   onClose: () => void
-  initialTab?: 'profile' | 'subscription'
+  initialTab?: SettingsTab
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, initialTab = 'profile' }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'subscription'>(initialTab)
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
   const { user } = useAuth()
   const fullName = user?.user_metadata?.full_name || user?.user_metadata?.name || 'Usuário'
   const [subscription, setSubscription] = useState<any>(null)
@@ -36,17 +57,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
   const [editName, setEditName] = useState(user?.user_metadata?.full_name || user?.user_metadata?.name || '')
   const [isSavingName, setIsSavingName] = useState(false)
   const [linkedPhone, setLinkedPhone] = useState<string | null>(null)
+  const [pendingPhone, setPendingPhone] = useState<string | null>(null)
+  const [verificationCode, setVerificationCode] = useState('')
   const [ddd, setDdd] = useState('')
   const [phoneRemainder, setPhoneRemainder] = useState('')
   const [phoneLinkSuccess, setPhoneLinkSuccess] = useState(false)
   const [phoneLinkError, setPhoneLinkError] = useState<string | null>(null)
   const [isUnlinkingPhone, setIsUnlinkingPhone] = useState(false)
   const [isLinkingPhone, setIsLinkingPhone] = useState(false)
+  const [isVerifyingPhone, setIsVerifyingPhone] = useState(false)
   const [isValidatingPhone, setIsValidatingPhone] = useState(false)
   const [isPhoneValid, setIsPhoneValid] = useState<boolean | null>(null)
+  const [googleCalendarStatus, setGoogleCalendarStatus] = useState<GoogleCalendarStatus | null>(null)
+  const [loadingGoogleCalendar, setLoadingGoogleCalendar] = useState(false)
+  const [connectingGoogleCalendar, setConnectingGoogleCalendar] = useState(false)
+  const [disconnectingGoogleCalendar, setDisconnectingGoogleCalendar] = useState(false)
+  const [savingGoogleAutoSync, setSavingGoogleAutoSync] = useState(false)
+  const [integrationView, setIntegrationView] = useState<IntegrationView>(null)
 
   const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]) // Brasil (+55) default
   const navigate = useNavigate()
+  const location = useLocation()
   const providers = user?.app_metadata?.providers || []
   const isGoogleUser = providers.includes('google') && !providers.includes('email')
 
@@ -76,9 +107,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
       const timer = setTimeout(() => {
         setIsValidatingPhone(true)
         setIsPhoneValid(null)
-        
+
         const isBR = selectedCountry.iso === 'BR'
-        const validFormat = isBR 
+        const validFormat = isBR
           ? (raw.length === 9 && raw.startsWith('9')) || (raw.length === 8)
           : raw.length >= 8
 
@@ -141,10 +172,115 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
 
   useEffect(() => {
     if (!isOpen || !user || !isGoogleUser) return
-    apiFetch<{ phone: string | null }>('/api/whatsapp/linked-phone', undefined, { userId: user.id })
-      .then(({ phone }) => setLinkedPhone(phone))
-      .catch(() => {})
+    apiFetch<{ phone: string | null; pendingPhone?: string | null }>('/api/whatsapp/linked-phone', undefined, { userId: user.id })
+      .then(({ phone, pendingPhone }) => {
+        setLinkedPhone(phone)
+        setPendingPhone(pendingPhone || null)
+      })
+      .catch(() => { })
   }, [isOpen, user, isGoogleUser])
+
+  const fetchGoogleCalendarStatus = async () => {
+    if (!user) return
+    setLoadingGoogleCalendar(true)
+    try {
+      const data = await apiFetch<GoogleCalendarStatus>('/api/integrations/google/status', undefined, { userId: user.id })
+      setGoogleCalendarStatus(data)
+    } catch (error) {
+      console.error('Erro ao buscar status do Google Calendar:', error)
+      toaster.create({ title: 'Não foi possível carregar o status da integração.', type: 'error' })
+    } finally {
+      setLoadingGoogleCalendar(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'integrations' || !user) return
+    fetchGoogleCalendarStatus()
+  }, [isOpen, activeTab, user])
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const params = new URLSearchParams(location.search)
+    const status = params.get('googleCalendar')
+    if (!status) return
+
+    const message = params.get('googleCalendarMessage')
+      || (status === 'connected'
+        ? 'Google Calendar conectado com sucesso.'
+        : 'Não foi possível concluir a integração com o Google Calendar.')
+
+    toaster.create({ title: message, type: status === 'connected' ? 'success' : 'error' })
+
+    const nextParams = new URLSearchParams(location.search)
+    nextParams.delete('googleCalendar')
+    nextParams.delete('googleCalendarMessage')
+
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextParams.toString() ? `?${nextParams.toString()}` : '',
+      },
+      { replace: true }
+    )
+  }, [isOpen, location.pathname, location.search, navigate])
+
+  const handleGoogleCalendarConnect = () => {
+    if (!user) return
+    setConnectingGoogleCalendar(true)
+
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo'
+    const returnTo = `${location.pathname}?settings=integrations`
+
+    window.location.assign(buildApiUrl('/api/integrations/google/connect', {
+      userId: user.id,
+      returnTo,
+      timeZone,
+    }))
+  }
+
+  const handleGoogleCalendarDisconnect = async () => {
+    if (!user) return
+    setDisconnectingGoogleCalendar(true)
+    try {
+      await apiFetch('/api/integrations/google/disconnect', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      })
+      toaster.create({ title: 'Google Calendar desconectado.', type: 'success' })
+      await fetchGoogleCalendarStatus()
+    } catch (error) {
+      console.error('Erro ao desconectar Google Calendar:', error)
+      toaster.create({ title: 'Não foi possível desconectar o Google Calendar.', type: 'error' })
+    } finally {
+      setDisconnectingGoogleCalendar(false)
+      setConnectingGoogleCalendar(false)
+    }
+  }
+
+  const handleToggleGoogleAutoSync = async () => {
+    if (!user || !googleCalendarStatus?.connected) return
+
+    setSavingGoogleAutoSync(true)
+    try {
+      const nextValue = !googleCalendarStatus.autoSyncEnabled
+      const response = await apiFetch<{ autoSyncEnabled: boolean }>('/api/integrations/google/auto-sync', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, autoSyncEnabled: nextValue }),
+      })
+
+      setGoogleCalendarStatus(prev => prev ? { ...prev, autoSyncEnabled: response.autoSyncEnabled } : prev)
+      toaster.create({ title: response.autoSyncEnabled ? 'Sincronização automática ativada.' : 'Sincronização automática pausada.', type: 'success' })
+    } catch (error) {
+      console.error('Erro ao atualizar sincronização automática:', error)
+      toaster.create({ title: 'Não foi possível atualizar a sincronização automática.', type: 'error' })
+    } finally {
+      setSavingGoogleAutoSync(false)
+    }
+  }
 
 
   const handleSubscribe = async () => {
@@ -187,7 +323,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
 
   useEffect(() => {
     if (isOpen) setActiveTab(initialTab)
+    if (!isOpen) setIntegrationView(null)
   }, [isOpen, initialTab])
+
+  useEffect(() => {
+    if (activeTab !== 'integrations') setIntegrationView(null)
+  }, [activeTab])
 
   useEffect(() => {
     if (user?.user_metadata?.avatar_url) {
@@ -237,7 +378,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id, avatar: publicUrl }),
-      }).catch(() => {})
+      }).catch(() => { })
 
       setAvatarUrl(publicUrl)
       setIsAvatarModalOpen(false)
@@ -267,7 +408,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
             })
           }
         })
-        .catch(() => {})
+        .catch(() => { })
 
       const { error } = await supabase.auth.updateUser({
         data: { full_name: newName, name: newName }
@@ -285,7 +426,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id, name: newName }),
-      }).catch(() => {})
+      }).catch(() => { })
 
     } catch (err: any) {
       console.error('Erro ao atualizar nome:', err)
@@ -300,18 +441,67 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
     setIsLinkingPhone(true)
     setPhoneLinkError(null)
     try {
-      const { phone } = await apiFetch<{ ok: boolean; phone: string }>('/api/whatsapp/link-phone', {
+      const { phone, pendingVerification } = await apiFetch<{ ok: boolean; phone: string; pendingVerification?: boolean }>('/api/whatsapp/link-phone', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id, phone: phoneInput.trim() }),
       })
+      setPendingPhone(phone)
+      setLinkedPhone(null)
+      setVerificationCode('')
+      if (!pendingVerification) {
+        setLinkedPhone(phone)
+        setPendingPhone(null)
+        setPhoneLinkSuccess(true)
+        setTimeout(() => setPhoneLinkSuccess(false), 4000)
+      }
+    } catch (err: any) {
+      setPhoneLinkError(err.message || 'Não foi possível validar este número.')
+    } finally {
+      setIsLinkingPhone(false)
+    }
+  }
+
+  const handleVerifyPhoneCode = async () => {
+    if (!user || !pendingPhone || verificationCode.replace(/\D/g, '').length !== 6) return
+    setIsVerifyingPhone(true)
+    setPhoneLinkError(null)
+    try {
+      const { phone } = await apiFetch<{ ok: boolean; phone: string }>('/api/whatsapp/link-phone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          phone: pendingPhone,
+          code: verificationCode.replace(/\D/g, ''),
+        }),
+      })
       setLinkedPhone(phone)
+      setPendingPhone(null)
+      setVerificationCode('')
       setDdd('')
       setPhoneRemainder('')
       setPhoneLinkSuccess(true)
       setTimeout(() => setPhoneLinkSuccess(false), 4000)
     } catch (err: any) {
-      setPhoneLinkError(err.message || 'Não foi possível validar este número.')
+      setPhoneLinkError(err.message || 'Nao foi possivel confirmar o codigo.')
+    } finally {
+      setIsVerifyingPhone(false)
+    }
+  }
+
+  const handleResendPhoneCode = async () => {
+    if (!user || !pendingPhone) return
+    setIsLinkingPhone(true)
+    setPhoneLinkError(null)
+    try {
+      await apiFetch('/api/whatsapp/link-phone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, phone: pendingPhone }),
+      })
+    } catch (err: any) {
+      setPhoneLinkError(err.message || 'Nao foi possivel reenviar o codigo.')
     } finally {
       setIsLinkingPhone(false)
     }
@@ -327,6 +517,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
         body: JSON.stringify({ userId: user.id }),
       })
       setLinkedPhone(null)
+      setPendingPhone(null)
+      setVerificationCode('')
       setDdd('')
       setPhoneRemainder('')
     } catch (err: any) {
@@ -373,13 +565,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                   onClick={() => setActiveTab('profile')}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${activeTab === 'profile' ? 'bg-[#e9e9e7] text-[#37352f]' : 'text-[#37352f]/60 hover:bg-[#e9e9e7]/50'}`}
                 >
-                  <User size={18} /> Meu Perfil
+                  <img src={perfilIcon} alt="" className={`w-[18px] h-[18px] flex-shrink-0 ${activeTab === 'profile' ? 'opacity-100' : 'opacity-60'}`} /> Meu Perfil
                 </button>
                 <button
                   onClick={() => setActiveTab('subscription')}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${activeTab === 'subscription' ? 'bg-[#e9e9e7] text-[#37352f]' : 'text-[#37352f]/60 hover:bg-[#e9e9e7]/50'}`}
                 >
-                  <CreditCard size={18} /> Assinatura
+                  <img src={assinaturaIcon} alt="" className={`w-[18px] h-[18px] flex-shrink-0 ${activeTab === 'subscription' ? 'opacity-100' : 'opacity-60'}`} /> Assinatura
+                </button>
+                <button
+                  onClick={() => setActiveTab('integrations')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${activeTab === 'integrations' ? 'bg-[#e9e9e7] text-[#37352f]' : 'text-[#37352f]/60 hover:bg-[#e9e9e7]/50'}`}
+                >
+                  <img src={integracaoIcon} alt="" className={`w-[18px] h-[18px] flex-shrink-0 ${activeTab === 'integrations' ? 'opacity-100' : 'opacity-60'}`} /> Integrações
                 </button>
               </nav>
 
@@ -395,19 +593,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
 
             {/* Tabs Mobile */}
             <div className="flex sm:hidden items-center border-b border-[#e9e9e7] bg-[#fcfcfa] flex-shrink-0">
-              <div className="flex items-center gap-1 px-4 py-3 flex-1">
+              <div className="flex items-center gap-1 px-4 py-3 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 <h2 className="text-base font-bold text-[#37352f] mr-4">Configurações</h2>
                 <button
                   onClick={() => setActiveTab('profile')}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-colors ${activeTab === 'profile' ? 'bg-[#e9e9e7] text-[#37352f]' : 'text-[#37352f]/50'}`}
                 >
-                  <User size={15} /> Perfil
+                  <img src={perfilIcon} alt="" className={`w-[15px] h-[15px] flex-shrink-0 ${activeTab === 'profile' ? 'opacity-100' : 'opacity-50'}`} /> Perfil
                 </button>
                 <button
                   onClick={() => setActiveTab('subscription')}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-colors ${activeTab === 'subscription' ? 'bg-[#e9e9e7] text-[#37352f]' : 'text-[#37352f]/50'}`}
                 >
-                  <CreditCard size={15} /> Assinatura
+                  <img src={assinaturaIcon} alt="" className={`w-[15px] h-[15px] flex-shrink-0 ${activeTab === 'subscription' ? 'opacity-100' : 'opacity-50'}`} /> Assinatura
+                </button>
+                <button
+                  onClick={() => setActiveTab('integrations')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-colors whitespace-nowrap ${activeTab === 'integrations' ? 'bg-[#e9e9e7] text-[#37352f]' : 'text-[#37352f]/50'}`}
+                >
+                  <img src={integracaoIcon} alt="" className={`w-[15px] h-[15px] flex-shrink-0 ${activeTab === 'integrations' ? 'opacity-100' : 'opacity-50'}`} /> Integrações
                 </button>
               </div>
               <button
@@ -441,10 +645,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
 
                     {/* Profile Picture Section */}
                     <div className="flex flex-col sm:flex-row items-center sm:items-center gap-4 sm:gap-6 pb-2">
-                      <div className="relative group flex-shrink-0">
+                      <div className="relative flex-shrink-0">
                         <div
                           onClick={() => setIsAvatarModalOpen(true)}
-                          className="w-20 h-20 rounded-full overflow-hidden border border-[#e9e9e7] bg-[#f7f7f5] cursor-pointer ring-0 hover:ring-4 ring-black/5 transition-all duration-300 relative"
+                          className="w-20 h-20 rounded-full overflow-hidden border border-[#e9e9e7] bg-[#f7f7f5] cursor-pointer ring-0 hover:ring-4 ring-black/5 transition-all duration-300"
                         >
                           {avatarUrl ? (
                             <img
@@ -456,22 +660,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                           ) : (
                             <Avvvatars value={user?.email || 'guest'} size={80} style="character" />
                           )}
-
-                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                            {uploading ? (
-                              <Loader2 size={20} className="text-white animate-spin" />
-                            ) : (
-                              <Camera size={20} className="text-white" />
-                            )}
-                          </div>
                         </div>
 
                         <button
                           onClick={() => setIsAvatarModalOpen(true)}
-                          className="absolute -bottom-1 -right-1 w-8 h-8 bg-white border border-[#e9e9e7] rounded-full flex items-center justify-center shadow-sm hover:scale-110 active:scale-95 transition-all z-10"
+                          className="absolute -bottom-1 -right-1 w-7 h-7 bg-white border border-[#e9e9e7] rounded-full flex items-center justify-center shadow-sm hover:scale-110 active:scale-95 transition-all z-10"
                           title="Alterar foto"
                         >
-                          <Camera size={14} className="text-[#37352f]/60" />
+                          <Camera size={12} className="text-[#37352f]/50" />
                         </button>
                       </div>
 
@@ -525,13 +721,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                                 <Smartphone size={11} className="text-[#37352f]/40" />
                                 <label className="text-[11px] font-bold text-[#37352f]/50">Assistente WhatsApp</label>
                               </div>
-                              {linkedPhone && (
+                              {(linkedPhone || pendingPhone) && (
                                 <button
                                   onClick={handleUnlinkPhone}
                                   disabled={isUnlinkingPhone}
                                   className="text-[11px] font-bold text-[#37352f]/40 hover:text-[#37352f] transition-colors disabled:opacity-40"
                                 >
-                                  {isUnlinkingPhone ? <Loader2 size={10} className="animate-spin inline" /> : 'Desconectar'}
+                                  {isUnlinkingPhone ? <Loader2 size={10} className="animate-spin inline" /> : (linkedPhone ? 'Desconectar' : 'Cancelar')}
                                 </button>
                               )}
                             </div>
@@ -550,12 +746,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                             </div>
                           )}
 
-                          {!linkedPhone && !phoneLinkSuccess && (
+                          {!linkedPhone && !phoneLinkSuccess && !pendingPhone && (
                             <>
                               <div className={`w-full flex items-center gap-0 p-2 bg-[#fcfcfa] border rounded-xl focus-within:ring-1 focus-within:ring-black/5 transition-all ${phoneLinkError ? 'border-red-100' : isPhoneValid === true ? 'border-green-100' : 'border-[#e9e9e7] focus-within:border-[#37352f]/30'}`}>
-                                <CountrySelector 
-                                  selectedCountry={selectedCountry} 
-                                  onSelect={setSelectedCountry} 
+                                <CountrySelector
+                                  selectedCountry={selectedCountry}
+                                  onSelect={setSelectedCountry}
                                 />
                                 <div className="h-4 w-[1px] bg-[#e9e9e7] mx-1" />
                                 <span className="text-sm font-bold text-[#37352f]/40 ml-1">
@@ -612,6 +808,55 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                                 </button>
                               </div>
                             </>
+                          )}
+
+                          {!linkedPhone && !phoneLinkSuccess && pendingPhone && (
+                            <div className="space-y-3 px-1">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#37352f]/35">
+                                  Codigo de verificacao
+                                </label>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  maxLength={6}
+                                  value={verificationCode}
+                                  onChange={(e) => {
+                                    setPhoneLinkError(null)
+                                    setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                                  }}
+                                  placeholder="123456"
+                                  className="w-full rounded-xl border border-[#e9e9e7] bg-[#fcfcfa] px-3 py-2 text-sm font-semibold tracking-[0.35em] text-[#37352f] outline-none transition focus:border-[#37352f]/30"
+                                />
+                                <p className="text-[10px] text-[#37352f]/40 leading-relaxed">
+                                  Digite o codigo enviado para <span className="font-semibold text-[#37352f]/65">+{pendingPhone}</span>.
+                                </p>
+                              </div>
+
+                              {phoneLinkError && (
+                                <p className="text-[10px] text-red-500 font-medium">
+                                  {phoneLinkError}
+                                </p>
+                              )}
+
+                              <div className="flex items-center gap-3">
+                                <button
+                                  onClick={handleVerifyPhoneCode}
+                                  disabled={isVerifyingPhone || verificationCode.replace(/\D/g, '').length !== 6}
+                                  className="flex items-center gap-1.5 text-[11px] font-bold text-[#37352f]/50 hover:text-[#37352f] transition-colors disabled:opacity-40"
+                                >
+                                  {isVerifyingPhone ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+                                  Confirmar codigo
+                                </button>
+                                <button
+                                  onClick={handleResendPhoneCode}
+                                  disabled={isLinkingPhone}
+                                  className="text-[11px] font-bold text-[#37352f]/35 hover:text-[#37352f]/60 transition-colors disabled:opacity-40"
+                                >
+                                  {isLinkingPhone ? 'Reenviando...' : 'Reenviar codigo'}
+                                </button>
+                              </div>
+                            </div>
                           )}
                         </div>
                       )}
@@ -795,66 +1040,240 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
                         )}
 
                         {/* Card Ativar Flow */}
-                      <div className="w-full border border-[#e9e9e7] rounded-3xl bg-[#fcfcfa] flex flex-col group transition-all duration-300 overflow-hidden">
-                        {/* Seção Superior: Nome, Preço e Botão */}
-                        <div className="p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
-                          <div className="flex gap-3 sm:gap-4 items-center">
-                            <div className="w-10 h-10 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm flex-shrink-0">
-                              <img src={flowLogo} alt="Flow" className="w-6 h-6 object-contain" />
+                        <div className="w-full border border-[#e9e9e7] rounded-3xl bg-[#fcfcfa] flex flex-col group transition-all duration-300 overflow-hidden">
+                          {/* Seção Superior: Nome, Preço e Botão */}
+                          <div className="p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
+                            <div className="flex gap-3 sm:gap-4 items-center">
+                              <div className="w-10 h-10 rounded-xl bg-white border border-[#e9e9e7] flex items-center justify-center shadow-sm flex-shrink-0">
+                                <img src={flowLogo} alt="Flow" className="w-6 h-6 object-contain" />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-[14px] font-black text-[#37352f] tracking-tight leading-none">
+                                  {membership ? 'Flow Individual' : 'Ativar Flow'}
+                                </h4>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="text-[14px] font-black text-[#37352f] tracking-tight leading-none">
-                                {membership ? 'Flow Individual' : 'Ativar Flow'}
-                              </h4>
+
+                            <div className="flex items-center gap-4 sm:gap-5 w-full sm:w-auto justify-between sm:justify-end">
+                              <div className="text-left sm:text-right">
+                                <div className="flex items-baseline gap-0.5">
+                                  <span className="text-[9px] font-bold text-[#37352f]/30 uppercase">R$</span>
+                                  <span className="text-xl font-black text-[#37352f] leading-none">9,90</span>
+                                </div>
+                                <p className="text-[8px] font-bold text-[#37352f]/20 tracking-wider uppercase mt-0.5">mensal</p>
+                              </div>
+                              <button
+                                onClick={handleSubscribe}
+                                disabled={subscribing}
+                                className="h-9 px-6 bg-[#1a1a1a] text-white text-[11px] font-bold rounded-xl hover:bg-black transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 shadow-sm"
+                              >
+                                {subscribing ? (
+                                  <Loader2 size={14} className="animate-spin text-white/50" />
+                                ) : (
+                                  <>
+                                    Assinar
+                                    <ArrowRight size={14} />
+                                  </>
+                                )}
+                              </button>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-4 sm:gap-5 w-full sm:w-auto justify-between sm:justify-end">
-                            <div className="text-left sm:text-right">
-                              <div className="flex items-baseline gap-0.5">
-                                <span className="text-[9px] font-bold text-[#37352f]/30 uppercase">R$</span>
-                                <span className="text-xl font-black text-[#37352f] leading-none">9,90</span>
-                              </div>
-                              <p className="text-[8px] font-bold text-[#37352f]/20 tracking-wider uppercase mt-0.5">mensal</p>
+
+
+                          {/* Seção Inferior: Recursos (Com o mesmo fundo e divisor sutil) */}
+                          <div className="px-5 sm:px-14 pb-5 pt-4 border-t border-[#37352f]/5 bg-[#37352f]/[0.02]">
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
+                              {[
+                                'Tarefas Ilimitadas',
+                                'Lui Pro AI',
+                                'Sincronização',
+                                'Suporte Prioritário'
+                              ].map((item, i) => (
+                                <div key={i} className="flex items-center gap-2 text-[10px] font-bold text-[#37352f]/40">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/30" />
+                                  {item}
+                                </div>
+                              ))}
                             </div>
-                            <button
-                              onClick={handleSubscribe}
-                              disabled={subscribing}
-                              className="h-9 px-6 bg-[#1a1a1a] text-white text-[11px] font-bold rounded-xl hover:bg-black transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 shadow-sm"
-                            >
-                              {subscribing ? (
-                                <Loader2 size={14} className="animate-spin text-white/50" />
-                              ) : (
-                                <>
-                                  Assinar
-                                  <ArrowRight size={14} />
-                                </>
-                              )}
-                            </button>
                           </div>
                         </div>
-
-
-
-                        {/* Seção Inferior: Recursos (Com o mesmo fundo e divisor sutil) */}
-                        <div className="px-5 sm:px-14 pb-5 pt-4 border-t border-[#37352f]/5 bg-[#37352f]/[0.02]">
-                          <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
-                            {[
-                              'Tarefas Ilimitadas',
-                              'Lui Pro AI',
-                              'Sincronização',
-                              'Suporte Prioritário'
-                            ].map((item, i) => (
-                              <div key={i} className="flex items-center gap-2 text-[10px] font-bold text-[#37352f]/40">
-                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/30" />
-                                {item}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
                       </div>
                     )}
+                  </motion.div>
+                )}
+                {activeTab === 'integrations' && (
+                  <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+
+                    {integrationView === null ? (
+                      <>
+                        <div className="flex items-center justify-between pb-2">
+                          <div>
+                            <h3 className="text-xl font-bold text-[#37352f] tracking-tight leading-none">Integrações</h3>
+                            <p className="text-[13px] text-[#37352f]/50 mt-1.5">
+                              Conecte serviços externos ao Flui.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => setIntegrationView('google-calendar')}
+                            className="w-full flex items-center gap-3 px-4 py-3.5 border border-[#e9e9e7] rounded-2xl bg-[#f7f7f5] hover:bg-[#f0f0ee] transition-all text-left group active:scale-[0.98]"
+                          >
+                            <img src={googleCalendarLogo} alt="Google Calendar" className="w-7 h-7 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[13px] font-semibold text-[#37352f]">Google Calendar</p>
+                              <p className="text-[11px] text-[#37352f]/40 mt-0.5">Sincronize tarefas com seu calendário</p>
+                            </div>
+                            <div className="flex items-center gap-2.5 flex-shrink-0">
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border whitespace-nowrap ${loadingGoogleCalendar
+                                ? 'bg-[#f1f1f0] border-[#e9e9e7] text-[#37352f]/30'
+                                : !googleCalendarStatus?.configured
+                                  ? 'bg-[#f1f1f0] border-[#e9e9e7] text-[#37352f]/45'
+                                  : googleCalendarStatus.connected
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                                    : 'bg-[#f1f1f0] border-[#e9e9e7] text-[#37352f]/55'
+                                }`}>
+                                {loadingGoogleCalendar ? '···' : !googleCalendarStatus?.configured ? 'Indisponível' : googleCalendarStatus.connected ? 'Conectado' : 'Desconectado'}
+                              </span>
+                              <ArrowRight size={12} className="text-[#37352f]/25 group-hover:translate-x-0.5 transition-transform" />
+                            </div>
+                          </button>
+                        </div>
+                      </>
+                    ) : integrationView === 'google-calendar' ? (
+                      <>
+                        <div className="flex items-center gap-2 pb-2">
+                          <button
+                            onClick={() => setIntegrationView(null)}
+                            className="flex items-center gap-1 text-[12px] font-bold text-[#37352f]/40 hover:text-[#37352f] transition-colors"
+                          >
+                            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                              <path d="M8.5 2L4 6.5L8.5 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            Integrações
+                          </button>
+                          <span className="text-[#37352f]/20 text-[12px]">/</span>
+                          <div className="flex items-center gap-1.5">
+                            <img src={googleCalendarLogo} alt="Google Calendar" className="w-3.5 h-3.5" />
+                            <span className="text-[12px] font-bold text-[#37352f]">Google Calendar</span>
+                          </div>
+                        </div>
+
+                        {loadingGoogleCalendar ? (
+                          <div className="space-y-3 animate-pulse">
+                            <div className="border border-[#e9e9e7] rounded-2xl overflow-hidden">
+                              <div className="h-16 bg-[#f7f7f5]" />
+                              <div className="h-20 bg-white px-5 py-4 space-y-2">
+                                <div className="h-2.5 w-20 bg-[#37352f]/8 rounded-full" />
+                                <div className="h-3.5 w-44 bg-[#37352f]/10 rounded-full" />
+                                <div className="h-2.5 w-36 bg-[#37352f]/6 rounded-full" />
+                              </div>
+                            </div>
+                            <div className="border border-[#e9e9e7] rounded-2xl h-16 bg-[#f7f7f5]" />
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {/* Card principal */}
+                            <div className="border border-[#e9e9e7] rounded-2xl overflow-hidden">
+                              {/* Cabeçalho */}
+                              <div className="flex items-center justify-between px-5 py-4 bg-[#f7f7f5]">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <img src={googleCalendarLogo} alt="Google Calendar" className="w-5 h-5 flex-shrink-0" />
+                                  <div className="min-w-0">
+                                    <p className="text-[13px] font-semibold text-[#37352f]">Google Calendar</p>
+                                    <p className="text-[11px] text-[#37352f]/40">Tarefas com data e horário no seu calendário</p>
+                                  </div>
+                                </div>
+                                {googleCalendarStatus?.connected && (
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                    <span className="text-[11px] font-semibold text-emerald-600">Ativo</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Conectado: info da conta */}
+                              {googleCalendarStatus?.connected && (
+                                <>
+                                  <div className="px-5 py-4 border-t border-[#e9e9e7] space-y-0.5">
+                                    <p className="text-[10px] font-bold text-[#37352f]/35 mb-2">Conta conectada</p>
+                                    <p className="text-[13px] font-semibold text-[#37352f] truncate">{googleCalendarStatus.email || 'Google Calendar'}</p>
+                                    <p className="text-[11px] text-[#37352f]/40">{googleCalendarStatus.calendarId || 'primary'} · {googleCalendarStatus.timeZone || 'America/Sao_Paulo'}</p>
+                                  </div>
+                                  {googleCalendarStatus?.lastError && (
+                                    <div className="px-5 pb-3">
+                                      <p className="text-[11px] text-red-500">{googleCalendarStatus.lastError}</p>
+                                    </div>
+                                  )}
+                                  <div className="px-5 pb-4 pt-1 border-t border-[#e9e9e7]/60">
+                                    <button
+                                      onClick={handleGoogleCalendarDisconnect}
+                                      disabled={disconnectingGoogleCalendar}
+                                      className="text-[11px] font-bold text-[#37352f]/35 hover:text-red-500 transition-colors disabled:opacity-40 flex items-center gap-1.5 mt-2"
+                                    >
+                                      {disconnectingGoogleCalendar && <Loader2 size={10} className="animate-spin" />}
+                                      Desconectar conta
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+
+                              {/* Desconectado: explicação + botão */}
+                              {!googleCalendarStatus?.connected && (
+                                <div className="px-5 py-4 border-t border-[#e9e9e7] space-y-4">
+                                  <p className="text-[12px] text-[#37352f]/50 leading-relaxed">
+                                    Conecte sua conta do Google para que tarefas com data e horário apareçam automaticamente no seu Google Calendar. Edições feitas no Flui se refletem no calendário em tempo real.
+                                  </p>
+                                  {!googleCalendarStatus?.configured && (
+                                    <p className="text-[11px] text-amber-600/80 leading-relaxed">
+                                      Integração não configurada no servidor. Fale com o administrador.
+                                    </p>
+                                  )}
+                                  {googleCalendarStatus?.lastError && (
+                                    <p className="text-[11px] text-red-500">{googleCalendarStatus.lastError}</p>
+                                  )}
+                                  <button
+                                    onClick={handleGoogleCalendarConnect}
+                                    disabled={!googleCalendarStatus?.configured || connectingGoogleCalendar}
+                                    className="flex items-center gap-2 h-9 px-5 bg-[#1a1a1a] text-white rounded-xl text-[11px] font-bold hover:bg-black transition-colors disabled:opacity-40"
+                                  >
+                                    {connectingGoogleCalendar && <Loader2 size={12} className="animate-spin" />}
+                                    Conectar com Google
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Sincronização automática — só exibe quando conectado */}
+                            {googleCalendarStatus?.connected && (
+                              <div className="border border-[#e9e9e7] rounded-2xl px-5 py-4">
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="space-y-1 flex-1">
+                                    <p className="text-[13px] font-semibold text-[#37352f]">Sincronização automática</p>
+                                    <p className="text-[11px] text-[#37352f]/40 leading-relaxed">
+                                      {googleCalendarStatus.autoSyncEnabled
+                                        ? 'Ligada novas tarefas com data e horário criam eventos automaticamente no Google Calendar.'
+                                        : 'Desligada tarefas não serão enviadas ao Google Calendar automaticamente.'}
+                                    </p>
+                                  </div>
+                                  <button
+                                    onClick={handleToggleGoogleAutoSync}
+                                    disabled={savingGoogleAutoSync}
+                                    className={`relative mt-0.5 w-11 h-6 rounded-full transition-colors flex-shrink-0 disabled:opacity-50 ${googleCalendarStatus.autoSyncEnabled ? 'bg-[#1a1a1a]' : 'bg-[#d8d8d4]'
+                                      }`}
+                                  >
+                                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${googleCalendarStatus.autoSyncEnabled ? 'translate-x-5' : ''
+                                      }`} />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : null}
                   </motion.div>
                 )}
               </div>
