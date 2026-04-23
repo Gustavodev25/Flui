@@ -1310,6 +1310,65 @@ async function generateWelcomeMessage() {
   }
 }
 
+const PROCESSING_UPDATE_FALLBACKS = [
+  'Ja estou olhando isso com calma para te responder melhor.',
+  'Vou organizar isso direitinho antes de te responder.',
+  'Estou cruzando as informacoes para nao te mandar uma resposta pela metade.',
+  'Estou ajustando a resposta com o seu contexto.',
+  'Um instante, estou buscando o melhor caminho para isso.',
+];
+
+function getFallbackProcessingUpdate(textMessage) {
+  const seed = Array.from(String(textMessage || '')).reduce(
+    (sum, char) => sum + char.charCodeAt(0),
+    0
+  );
+  return PROCESSING_UPDATE_FALLBACKS[seed % PROCESSING_UPDATE_FALLBACKS.length];
+}
+
+function cleanProcessingUpdate(content, fallback) {
+  const cleaned = String(content || '')
+    .replace(/^["'“”]+|["'“”]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned || /processando/i.test(cleaned) || /⏳/.test(cleaned)) {
+    return fallback;
+  }
+
+  return cleaned.length > 140 ? `${cleaned.slice(0, 137).trim()}...` : cleaned;
+}
+
+async function generateProcessingUpdate({ userName, textMessage }) {
+  const fallback = getFallbackProcessingUpdate(textMessage);
+
+  try {
+    const { response } = await createChatCompletion({
+      messages: [
+        {
+          role: 'system',
+          content: `Voce e o Lui, assistente da Flui no WhatsApp. Gere UMA frase curta de acompanhamento enquanto voce resolve o pedido do usuario. Deve soar natural, util e personalizada ao contexto. Nao use a palavra "processando", nao use ampulheta, nao diga que terminou, nao peca para o usuario reenviar nada. Maximo 120 caracteres.`,
+        },
+        {
+          role: 'user',
+          content: `Nome: ${userName || 'usuario'}\nMensagem: ${String(textMessage || '').slice(0, 240)}`,
+        },
+      ],
+      max_tokens: 45,
+      temperature: 0.9,
+    }, {
+      preferFallback: true,
+      turnBudgetMs: 3500,
+      primaryTimeoutMs: 2500,
+      fallbackTimeoutMs: 2000,
+    });
+
+    return cleanProcessingUpdate(response.choices[0]?.message?.content, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
 // ================== AGENTE ==================
 async function processAndRespondWithAI(userPhone, textMessage, messageId, { fromAudio = false } = {}) {
   try {
@@ -1554,11 +1613,18 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     // ===== AGENT LOOP =====
     sendTypingIndicator(userPhone, messageId);
 
-    // Se demorar mais de 5s, avisa o usuário que está processando
-    let processingMsgSent = false;
+    // Se demorar mais de 5s, envia um acompanhamento curto gerado pela IA.
+    let turnFinished = false;
     const processingTimer = setTimeout(() => {
-      processingMsgSent = true;
-      sendWhatsAppMessage(userPhone, "Processando... ⏳").catch(() => {});
+      void (async () => {
+        const update = await generateProcessingUpdate({
+          userName: session.userName,
+          textMessage: cleanMessage,
+        });
+        if (!turnFinished) {
+          await sendWhatsAppMessage(userPhone, update);
+        }
+      })().catch(() => {});
     }, 5000);
 
     // Atualiza janela de 24h: registra último inbound do usuário na binding
@@ -1587,6 +1653,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
         onAck: (ackText) => sendWhatsAppMessage(userPhone, ackText),
       });
     } finally {
+      turnFinished = true;
       clearTimeout(processingTimer);
     }
     console.log(`[AI] Resposta: "${result.reply?.substring(0, 80)}..."`);
