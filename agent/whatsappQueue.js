@@ -9,17 +9,32 @@ const JOB_OPTIONS = {
 };
 
 let _queue = null;
+let _queueUnavailableLogged = false;
+
+function isRedisQuotaError(error) {
+  const message = error?.message ?? '';
+  return (
+    message.includes('max requests limit exceeded') ||
+    message.includes('ERR max requests limit exceeded')
+  );
+}
 
 export function getWhatsAppQueue() {
   if (_queue) return _queue;
+
   const connection = createBullMQConnection();
   if (!connection) {
-    console.warn('[WhatsAppQueue] Fila desativada — processamento direto ativo');
+    if (!_queueUnavailableLogged) {
+      console.warn('[WhatsAppQueue] Fila desativada; processamento direto ativo');
+      _queueUnavailableLogged = true;
+    }
     return null;
   }
+
+  _queueUnavailableLogged = false;
   _queue = new Queue('whatsapp-messages', { connection, defaultJobOptions: JOB_OPTIONS });
   _queue.on('error', (error) => {
-    if (error?.message?.includes('max requests limit exceeded')) {
+    if (isRedisQuotaError(error)) {
       disableBullMQ(`Limite de requisicoes do Redis excedido: ${error.message}`);
       void _queue?.close().catch(() => {});
       _queue = null;
@@ -27,19 +42,19 @@ export function getWhatsAppQueue() {
     }
     console.error('[WhatsAppQueue] Erro na fila:', error.message);
   });
+
   console.log('[WhatsAppQueue] Fila BullMQ inicializada');
   return _queue;
 }
 
-// Enfileira uma mensagem de texto ou áudio para processamento assíncrono.
-// Retorna o Job criado, ou null se a fila não estiver disponível.
 export async function enqueueWhatsAppMessage(data) {
   const queue = getWhatsAppQueue();
   if (!queue) return null;
+
   try {
     return await queue.add('process', data, JOB_OPTIONS);
   } catch (error) {
-    if (error?.message?.includes('max requests limit exceeded')) {
+    if (isRedisQuotaError(error)) {
       disableBullMQ(`Limite de requisicoes do Redis excedido: ${error.message}`);
       await queue.close().catch(() => {});
       _queue = null;
