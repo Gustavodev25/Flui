@@ -2,11 +2,57 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { createClient } from '@supabase/supabase-js';
+import {
+  generateMemoryEmbedding,
+  getMemoryEmbeddingModel,
+  getMemoryEmbeddingStatus,
+  toPgVectorLiteral,
+} from './memoryEmbedding.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
 );
+
+const MEMORY_SEMANTIC_MIN_SIMILARITY = Number(process.env.MEMORY_SEMANTIC_MIN_SIMILARITY || 0.72);
+const MEMORY_DEDUPE_SEMANTIC_THRESHOLD = Number(process.env.MEMORY_DEDUPE_SEMANTIC_THRESHOLD || 0.88);
+const MEMORY_DEDUPE_TEXT_THRESHOLD = Number(process.env.MEMORY_DEDUPE_TEXT_THRESHOLD || 0.7);
+
+const memoryHealth = {
+  last_error: null,
+  last_error_at: null,
+  last_error_scope: null,
+  semantic_search_available: null,
+};
+
+function recordMemoryError(scope, error) {
+  memoryHealth.last_error = error?.message || String(error);
+  memoryHealth.last_error_at = new Date().toISOString();
+  memoryHealth.last_error_scope = scope;
+  console.error(`[MemoryEngine] ${scope}:`, memoryHealth.last_error);
+}
+
+function clearMemoryError(scope) {
+  if (memoryHealth.last_error_scope === scope) {
+    memoryHealth.last_error = null;
+    memoryHealth.last_error_at = null;
+    memoryHealth.last_error_scope = null;
+  }
+}
+
+export function getMemorySystemStatus() {
+  return {
+    ...memoryHealth,
+    embedding: getMemoryEmbeddingStatus(),
+  };
+}
+
+function getRecentMemoryWarning() {
+  if (!memoryHealth.last_error_at) return '';
+  const errorAgeMs = Date.now() - new Date(memoryHealth.last_error_at).getTime();
+  if (!Number.isFinite(errorAgeMs) || errorAgeMs > 5 * 60 * 1000) return '';
+  return `AVISO INTERNO: a memoria pode estar parcial agora (${memoryHealth.last_error_scope}). Nao afirme que lembra algo se a informacao nao aparecer explicitamente aqui ou no MemoryRecall.`;
+}
 
 // ── Armazenamento de memórias ────────────────────────────────────────────────
 
@@ -25,41 +71,56 @@ export async function saveMemory(userId, {
 }) {
   try {
     // Verifica se já existe memória muito similar (evita duplicatas)
-    const existing = await findSimilarMemory(userId, summary || content);
+    const searchableText = buildMemorySearchText({ content, summary, entities, tags });
+    const embedding = await generateMemoryEmbedding(searchableText);
+    const vectorLiteral = toPgVectorLiteral(embedding);
+    const existing = await findSimilarMemory(userId, searchableText, {
+      memoryType,
+      embedding,
+    });
     if (existing) {
       // Atualiza a existente se for similar
-      await supabase
-        .from('user_memories')
-        .update({
-          content: content.length > existing.content.length ? content : existing.content,
-          entities: mergeEntities(existing.entities, entities),
-          tags: [...new Set([...(existing.tags || []), ...tags])],
-          importance: Math.max(existing.importance, importance),
-          access_count: existing.access_count + 1,
-          last_accessed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existing.id);
-      return existing;
+      const updatePayload = {
+        content: content.length > existing.content.length ? content : existing.content,
+        entities: mergeEntities(existing.entities, entities),
+        tags: [...new Set([...(existing.tags || []), ...tags])],
+        importance: Math.max(existing.importance, importance),
+        access_count: (existing.access_count || 0) + 1,
+        last_accessed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      if (vectorLiteral) {
+        updatePayload.embedding = vectorLiteral;
+        updatePayload.embedding_model = getMemoryEmbeddingModel();
+        updatePayload.embedding_updated_at = new Date().toISOString();
+      }
+
+      const data = await persistMemoryUpdate(existing.id, updatePayload, Boolean(vectorLiteral));
+      clearMemoryError('saveMemory');
+      return data;
     }
 
-    const { data, error } = await supabase
-      .from('user_memories')
-      .insert({
-        user_id: userId,
-        memory_type: memoryType,
-        content,
-        summary: summary || content.substring(0, 100),
-        entities,
-        tags,
-        importance,
-        source_message: sourceMessage,
-        expires_at: expiresAt,
-      })
-      .select('*')
-      .single();
+    const insertPayload = {
+      user_id: userId,
+      memory_type: memoryType,
+      content,
+      summary: summary || content.substring(0, 100),
+      entities,
+      tags,
+      importance,
+      source_message: sourceMessage,
+      expires_at: expiresAt,
+    };
 
-    if (error) throw error;
+    if (vectorLiteral) {
+      insertPayload.embedding = vectorLiteral;
+      insertPayload.embedding_model = getMemoryEmbeddingModel();
+      insertPayload.embedding_updated_at = new Date().toISOString();
+    }
+
+    const data = await persistMemoryInsert(insertPayload, Boolean(vectorLiteral));
+    clearMemoryError('saveMemory');
 
     // Atualiza grafo de entidades
     for (const entity of entities) {
@@ -68,15 +129,14 @@ export async function saveMemory(userId, {
 
     return data;
   } catch (err) {
-    console.error('[MemoryEngine] Erro ao salvar memória:', err.message);
+    recordMemoryError('saveMemory', err);
     return null;
   }
 }
 
 /**
- * Recupera memórias relevantes para um contexto.
- * Usa busca textual simples + importância + recência.
- * `query` pode ser string única ou array de palavras-chave (cada uma busca OR).
+ * Recupera memorias relevantes usando busca semantica quando disponivel,
+ * com fallback textual por palavras-chave.
  */
 export async function recallMemories(userId, {
   query = null,
@@ -87,6 +147,15 @@ export async function recallMemories(userId, {
 } = {}) {
   try {
     const nowIso = new Date().toISOString();
+    const queryText = normalizeQueryText(query);
+    const semanticResults = queryText
+      ? await recallMemoriesByEmbedding(userId, queryText, {
+        memoryType,
+        limit,
+        minImportance,
+      })
+      : [];
+
     let dbQuery = supabase
       .from('user_memories')
       .select('*')
@@ -112,11 +181,12 @@ export async function recallMemories(userId, {
 
     const { data, error } = await dbQuery;
     if (error) throw error;
+    const merged = mergeMemoryResults(semanticResults, data || [], limit);
 
     // Marca como acessadas (fire-and-forget; só atualiza last_accessed_at,
     // access_count é incrementado no findSimilarMemory path)
-    if (data?.length > 0) {
-      const ids = data.map(m => m.id);
+    if (merged?.length > 0) {
+      const ids = merged.map(m => m.id);
       supabase
         .from('user_memories')
         .update({ last_accessed_at: nowIso })
@@ -126,8 +196,10 @@ export async function recallMemories(userId, {
         });
     }
 
-    return data || [];
+    clearMemoryError('recallMemories');
+    return merged;
   } catch (err) {
+    recordMemoryError('recallMemories', err);
     console.error('[MemoryEngine] Erro ao recuperar memórias:', err.message);
     return [];
   }
@@ -158,6 +230,7 @@ export async function recallByEntity(userId, entityName, limit = 5) {
     if (error) throw error;
     return data || [];
   } catch (err) {
+    recordMemoryError('recallByEntity', err);
     console.error('[MemoryEngine] Erro ao buscar por entidade:', err.message);
     return [];
   }
@@ -181,6 +254,7 @@ export async function getRecentImportantMemories(userId, limit = 5) {
     if (error) throw error;
     return data || [];
   } catch (err) {
+    recordMemoryError('getRecentImportantMemories', err);
     console.error('[MemoryEngine] getRecentImportantMemories:', err.message);
     return [];
   }
@@ -213,12 +287,14 @@ export async function getMemoryContext(userId, currentMessage = '') {
       return true;
     });
 
-    if (allMemories.length === 0 && pinnedKnowledge.length === 0 && topEntities.length === 0) {
+    const memoryWarning = getRecentMemoryWarning();
+    if (allMemories.length === 0 && pinnedKnowledge.length === 0 && topEntities.length === 0 && !memoryWarning) {
       return '';
     }
 
     const lines = ['═══ MEMORIA DE LONGO PRAZO ═══'];
     lines.push('Voce se lembra dessas informacoes sobre o usuario:');
+    if (memoryWarning) lines.push(memoryWarning);
 
     for (const mem of allMemories.slice(0, 6)) {
       const typeLabel = {
@@ -319,7 +395,8 @@ export async function getEntities(userId, { type = null, query = null, limit = 1
     const { data, error } = await dbQuery;
     if (error) throw error;
     return data || [];
-  } catch {
+  } catch (err) {
+    recordMemoryError('getEntities', err);
     return [];
   }
 }
@@ -337,7 +414,8 @@ export async function getTopEntities(userId, limit = 8) {
       .limit(limit);
 
     return data || [];
-  } catch {
+  } catch (err) {
+    recordMemoryError('getTopEntities', err);
     return [];
   }
 }
@@ -379,27 +457,214 @@ export async function decayMemoryImportance() {
 
 // ── Helpers internos ─────────────────────────────────────────────────────────
 
-async function findSimilarMemory(userId, text) {
+function buildMemorySearchText({ content = '', summary = '', entities = [], tags = [] } = {}) {
+  const entityText = (entities || [])
+    .map((entity) => [entity.name, entity.type, entity.description].filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join(' ');
+  const tagText = (tags || []).map(String).join(' ');
+  return [summary, content, entityText, tagText].filter(Boolean).join('\n').trim();
+}
+
+function isEmbeddingSchemaError(error) {
+  const message = String(error?.message || '');
+  return (
+    message.includes('embedding') &&
+    (
+      message.includes('Could not find') ||
+      message.includes('column') ||
+      message.includes('schema cache') ||
+      message.includes('type vector does not exist')
+    )
+  );
+}
+
+function withoutEmbeddingFields(payload) {
+  const {
+    embedding,
+    embedding_model,
+    embedding_updated_at,
+    ...rest
+  } = payload;
+  return rest;
+}
+
+async function persistMemoryUpdate(id, payload, hasEmbedding) {
+  const run = (nextPayload) => supabase
+    .from('user_memories')
+    .update(nextPayload)
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  const { data, error } = await run(payload);
+  if (!error) return data;
+
+  if (hasEmbedding && isEmbeddingSchemaError(error)) {
+    recordMemoryError('memoryEmbeddingSchema', error);
+    const retry = await run(withoutEmbeddingFields(payload));
+    if (retry.error) throw retry.error;
+    return retry.data;
+  }
+
+  throw error;
+}
+
+async function persistMemoryInsert(payload, hasEmbedding) {
+  const run = (nextPayload) => supabase
+    .from('user_memories')
+    .insert(nextPayload)
+    .select('*')
+    .single();
+
+  const { data, error } = await run(payload);
+  if (!error) return data;
+
+  if (hasEmbedding && isEmbeddingSchemaError(error)) {
+    recordMemoryError('memoryEmbeddingSchema', error);
+    const retry = await run(withoutEmbeddingFields(payload));
+    if (retry.error) throw retry.error;
+    return retry.data;
+  }
+
+  throw error;
+}
+
+function normalizeQueryText(query) {
+  if (Array.isArray(query)) return query.map(String).join(' ').trim();
+  return String(query || '').trim();
+}
+
+async function recallMemoriesByEmbedding(userId, queryText, {
+  memoryType = null,
+  limit = 5,
+  minImportance = 0.3,
+  minSimilarity = MEMORY_SEMANTIC_MIN_SIMILARITY,
+} = {}) {
+  const embedding = await generateMemoryEmbedding(queryText);
+  if (!embedding) return [];
+
+  return matchUserMemoriesByVector(userId, embedding, {
+    memoryType,
+    limit,
+    minImportance,
+    minSimilarity,
+  });
+}
+
+async function matchUserMemoriesByVector(userId, embedding, {
+  memoryType = null,
+  limit = 5,
+  minImportance = 0.3,
+  minSimilarity = MEMORY_SEMANTIC_MIN_SIMILARITY,
+} = {}) {
+  const vectorLiteral = toPgVectorLiteral(embedding);
+  if (!vectorLiteral) return [];
+
+  try {
+    const { data, error } = await supabase.rpc('match_user_memories', {
+      query_user_id: userId,
+      query_embedding: vectorLiteral,
+      match_count: limit,
+      min_importance: minImportance,
+      filter_memory_type: memoryType,
+      min_similarity: minSimilarity,
+    });
+
+    if (error) throw error;
+    memoryHealth.semantic_search_available = true;
+    clearMemoryError('semanticSearch');
+    return data || [];
+  } catch (error) {
+    memoryHealth.semantic_search_available = false;
+    recordMemoryError('semanticSearch', error);
+    return [];
+  }
+}
+
+async function findSimilarMemory(userId, text, { memoryType = null, embedding = null } = {}) {
   if (!text || text.length < 10) return null;
 
-  // Pega palavras-chave significativas e busca por alguma delas no summary/content.
-  const keywords = extractKeywords(text);
-  if (keywords.length < 2) return null;
+  if (embedding) {
+    const semanticMatches = await matchUserMemoriesByVector(userId, embedding, {
+      memoryType,
+      limit: 3,
+      minImportance: 0,
+      minSimilarity: MEMORY_DEDUPE_SEMANTIC_THRESHOLD,
+    });
+    const bestSemantic = semanticMatches[0];
+    if (bestSemantic?.similarity >= MEMORY_DEDUPE_SEMANTIC_THRESHOLD) {
+      return bestSemantic;
+    }
+  }
 
-  // Monta OR com as 3 palavras mais representativas
-  const top = keywords.slice(0, 3);
+  const candidates = await findLexicalMemoryCandidates(userId, text, { memoryType });
+  let best = { score: 0, memory: null };
+  for (const candidate of candidates) {
+    const candidateText = buildMemorySearchText(candidate);
+    const score = textSimilarity(text, candidateText);
+    if (score > best.score) best = { score, memory: candidate };
+  }
+
+  return best.score >= MEMORY_DEDUPE_TEXT_THRESHOLD ? best.memory : null;
+}
+
+async function findLexicalMemoryCandidates(userId, text, { memoryType = null } = {}) {
+  const keywords = extractKeywords(text);
+  if (keywords.length < 2) return [];
+
+  const top = keywords.slice(0, 4);
   const filters = top
     .flatMap(k => [`summary.ilike.%${k}%`, `content.ilike.%${k}%`])
     .join(',');
 
-  const { data } = await supabase
+  let query = supabase
     .from('user_memories')
     .select('*')
     .eq('user_id', userId)
     .or(filters)
-    .limit(1);
+    .order('updated_at', { ascending: false })
+    .limit(10);
 
-  return data?.[0] || null;
+  if (memoryType) query = query.eq('memory_type', memoryType);
+
+  const { data, error } = await query;
+  if (error) {
+    recordMemoryError('findLexicalMemoryCandidates', error);
+    return [];
+  }
+
+  return data || [];
+}
+
+function mergeMemoryResults(primary = [], fallback = [], limit = 5) {
+  const byId = new Map();
+  for (const memory of [...primary, ...fallback]) {
+    if (!memory?.id || byId.has(memory.id)) continue;
+    byId.set(memory.id, memory);
+  }
+
+  return [...byId.values()]
+    .sort((a, b) => {
+      const scoreA = Number(a.similarity || 0) + Number(a.importance || 0) * 0.15;
+      const scoreB = Number(b.similarity || 0) + Number(b.importance || 0) * 0.15;
+      if (scoreA !== scoreB) return scoreB - scoreA;
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    })
+    .slice(0, limit);
+}
+
+function textSimilarity(a, b) {
+  const aTokens = new Set(normalizeSearchTerms(a));
+  const bTokens = new Set(normalizeSearchTerms(b));
+  if (aTokens.size === 0 || bTokens.size === 0) return 0;
+
+  let intersection = 0;
+  for (const token of aTokens) {
+    if (bTokens.has(token)) intersection++;
+  }
+
+  return (2 * intersection) / (aTokens.size + bTokens.size);
 }
 
 function mergeEntities(existing, newOnes) {
@@ -474,7 +739,8 @@ async function getPinnedKnowledge(userId) {
       .limit(3);
 
     return data || [];
-  } catch {
+  } catch (err) {
+    recordMemoryError('getPinnedKnowledge', err);
     return [];
   }
 }

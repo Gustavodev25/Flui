@@ -28,44 +28,40 @@ const THINKING_OFF = { extra_body: { chat_template_kwargs: { thinking_mode: 'off
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getTodayISO() {
+const DEFAULT_TZ = 'America/Sao_Paulo';
+
+function getTodayISO(tz = DEFAULT_TZ) {
   return new Intl.DateTimeFormat('en-CA', {
     year: 'numeric', month: '2-digit', day: '2-digit',
-    timeZone: 'America/Sao_Paulo',
+    timeZone: tz,
   }).format(new Date());
 }
 
-function getTomorrowISO() {
-  const today = new Date(getTodayISO() + 'T12:00:00-03:00');
+function getTomorrowISO(tz = DEFAULT_TZ) {
+  const today = new Date(getTodayISO(tz) + 'T12:00:00Z');
   today.setDate(today.getDate() + 1);
   return today.toISOString().split('T')[0];
 }
 
-function getSPHour() {
+function getUserHour(tz = DEFAULT_TZ) {
   return parseInt(
     new Intl.DateTimeFormat('en-US', {
-      hour: 'numeric', hour12: false, timeZone: 'America/Sao_Paulo',
+      hour: 'numeric', hour12: false, timeZone: tz,
     }).format(new Date()),
     10
   );
 }
 
-function getSPDayOfWeek() {
+function getUserDayOfWeek(tz = DEFAULT_TZ) {
   return new Intl.DateTimeFormat('en-US', {
-    weekday: 'short', timeZone: 'America/Sao_Paulo',
+    weekday: 'short', timeZone: tz,
   }).format(new Date());
 }
 
-/**
- * Período atual de lembrete:
- * - weekly:    8h–10h de segunda
- * - morning:   8h–10h
- * - afternoon: 13h–15h — só enviado se usuário respondeu de manhã
- * - evening:   18h–20h — só enviado se houve morning_sent_at
- */
-function getCurrentPeriod() {
-  const hour = getSPHour();
-  const day = getSPDayOfWeek();
+// Retorna o período de lembrete ativo para o timezone do usuário (ou null se fora da janela).
+function getCurrentPeriodForUser(tz = DEFAULT_TZ) {
+  const hour = getUserHour(tz);
+  const day = getUserDayOfWeek(tz);
   if (day === 'Mon' && hour >= 8 && hour < 10) return 'weekly';
   if (hour >= 8 && hour < 10) return 'morning';
   if (hour >= 13 && hour < 15) return 'afternoon';
@@ -143,21 +139,25 @@ REGRAS:
 }
 
 // ── Processa um único usuário ─────────────────────────────────────────────────
-// phone e userId já vêm da query batch — sem re-fetch de channel_bindings
+// phone, userId e timezone vêm do binding — sem re-fetch de channel_bindings
 
-async function processUserReminder(userId, userName, phone, period, sendMessage) {
+async function processUserReminder(userId, userName, phone, timezone, sendMessage) {
   try {
-    // 1. Verifica se já enviou hoje para este período (DB-backed)
+    // 1. Computa período com base no timezone do usuário
+    const period = getCurrentPeriodForUser(timezone);
+    if (!period) return; // fora da janela para este usuário
+
+    // 2. Verifica se já enviou hoje para este período (DB-backed)
     const alreadySent = await wasPeriodSentToday(userId, period);
     if (alreadySent) return;
 
-    // 2. Tarde e noite só saem se manhã foi enviada
+    // 3. Tarde e noite só saem se manhã foi enviada
     if (period === 'afternoon' || period === 'evening') {
       const commitment = await getTodayCommitment(userId);
       if (!commitment?.morning_sent_at) return;
     }
 
-    // 3. Gera mensagem conforme período
+    // 4. Gera mensagem conforme período
     let message = null;
     if (period === 'weekly') {
       message = await buildWeeklySummary(userId, userName);
@@ -169,15 +169,14 @@ async function processUserReminder(userId, userName, phone, period, sendMessage)
       message = await buildEveningSummary(userId, userName);
     }
 
-    // 4. Envia e registra no Supabase
+    // 5. Envia e registra no Supabase
     if (message) {
       const sent = await sendMessage(userId, phone, message);
       if (sent) {
         await markPeriodSent(userId, period);
-        console.log(`[Reminders] Enviado ${period} → ${phone}`);
+        console.log(`[Reminders] Enviado ${period} → ${phone} (tz=${timezone})`);
       }
     } else {
-      // Nada relevante para dizer — marca como enviado para não tentar novamente
       await markPeriodSent(userId, period);
     }
   } catch (err) {
@@ -198,14 +197,11 @@ const BATCH_SIZE = 10;
  * Elimina o re-fetch de channel_bindings por usuário que existia antes.
  */
 export async function runReminderCycle(sendMessage) {
-  const period = getCurrentPeriod();
-  if (!period) return;
-
   const windowCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const { data: bindings, error } = await supabase
     .from('channel_bindings')
-    .select('user_id, external_user_id, display_name')
+    .select('user_id, external_user_id, display_name, metadata')
     .eq('channel', 'whatsapp')
     .eq('authenticated', true)
     .gte('last_inbound_at', windowCutoff);
@@ -216,19 +212,23 @@ export async function runReminderCycle(sendMessage) {
   }
   if (!bindings?.length) return;
 
-  console.log(`[Reminders] Ciclo ${period} — ${bindings.length} usuário(s) elegíveis`);
+  // Filtra usuários com reminders desativados
+  const eligible = bindings.filter(b => b.metadata?.reminders_enabled !== false);
+  if (!eligible.length) return;
+
+  console.log(`[Reminders] Ciclo — ${eligible.length} usuário(s) elegíveis`);
 
   expireOldInsights().catch(() => {});
-  bindings.forEach(b => generateInsights(b.user_id, b.display_name || 'você').catch(() => {}));
+  eligible.forEach(b => generateInsights(b.user_id, b.display_name || 'você').catch(() => {}));
 
-  for (let i = 0; i < bindings.length; i += BATCH_SIZE) {
-    const batch = bindings.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < eligible.length; i += BATCH_SIZE) {
+    const batch = eligible.slice(i, i + BATCH_SIZE);
     await Promise.allSettled(
       batch.map(b => processUserReminder(
         b.user_id,
         b.display_name || 'você',
         b.external_user_id,
-        period,
+        b.metadata?.timezone || DEFAULT_TZ,
         sendMessage
       ))
     );

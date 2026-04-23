@@ -4,7 +4,7 @@ dotenv.config();
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { trackEvent } from './behavioralProfile.js';
-import { saveMemory, recallMemories, recallByEntity, getEntities } from './memoryEngine.js';
+import { saveMemory, recallMemories, recallByEntity, getEntities, getMemorySystemStatus } from './memoryEngine.js';
 import { saveKnowledge, searchKnowledge, listIdeas, getPersonContext } from './secondBrain.js';
 
 // Usa service_role no backend (agente) para bypassar RLS.
@@ -84,6 +84,7 @@ const taskListSchema = z.object({
 
 const taskDeleteSchema = z.object({
   task_id: z.string(),
+  confirmed: z.boolean().optional(),
 });
 
 const taskSearchSchema = z.object({
@@ -270,13 +271,17 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'TaskDelete',
-      description: 'Exclui permanentemente uma tarefa. Use com cautela — pergunte confirmação antes de deletar. Precisa do task_id (obtido via TaskList).',
+      description: 'Exclui permanentemente uma tarefa. SEMPRE chame primeiro SEM o campo confirmed para obter a mensagem de confirmação. Só inclua confirmed:true depois que o usuário responder "SIM" ou equivalente.',
       parameters: {
         type: 'object',
         properties: {
           task_id: {
             type: 'string',
             description: 'UUID da tarefa a ser excluída (obtido via TaskList).',
+          },
+          confirmed: {
+            type: 'boolean',
+            description: 'Omita ou false na primeira chamada. Passe true SOMENTE após o usuário confirmar explicitamente.',
           },
         },
         required: ['task_id'],
@@ -530,6 +535,27 @@ export const TOOLS = [
           },
         },
         required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'UpdateUserPreferences',
+      description: 'Atualiza preferências do usuário no WhatsApp. Use quando o usuário pedir para parar/reativar lembretes, mudar fuso horário, ou configurar horário silencioso. Exemplos: "para de me mandar mensagem", "não quero mais lembretes", "reativa os lembretes", "sou de Portugal".',
+      parameters: {
+        type: 'object',
+        properties: {
+          reminders_enabled: {
+            type: 'boolean',
+            description: 'false = desativa todos os lembretes automáticos, true = reativa.',
+          },
+          timezone: {
+            type: 'string',
+            description: 'Fuso horário IANA. Ex: "America/Sao_Paulo", "Europe/Lisbon", "America/New_York".',
+          },
+        },
+        required: [],
       },
     },
   },
@@ -1058,19 +1084,31 @@ async function executeTaskDelete(args, userId) {
       };
     }
     deleteId = found.id;
-    console.log(`[TaskDelete] ID resolvido por busca: "${searchTerm}" ÔåÆ ${deleteId}`);
   }
 
-  // Busca o título antes de deletar
+  // Busca o título para usar na confirmação ou na resposta final
   const { data: task } = await supabase
     .from('tasks')
     .select('title')
     .eq('id', deleteId)
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
 
-  const taskTitle = task?.title || 'Tarefa';
+  if (!task) {
+    return { success: false, _hint: 'Tarefa não encontrada ou sem permissão.' };
+  }
 
+  // Requer confirmação explícita do usuário antes de deletar
+  if (!parsed.confirmed) {
+    return {
+      needs_confirmation: true,
+      task_id: deleteId,
+      task_title: task.title,
+      _hint: `Peça confirmação ao usuário EXATAMENTE assim: "Tem certeza que quer deletar a tarefa *${task.title}*? Me manda SIM para confirmar." Só delete (chame TaskDelete com confirmed:true) se o usuário responder confirmando.`
+    };
+  }
+
+  // confirmed === true: executa a exclusão definitiva
   const { error } = await supabase
     .from('tasks')
     .delete()
@@ -1081,8 +1119,8 @@ async function executeTaskDelete(args, userId) {
 
   return {
     success: true,
-    task_title: taskTitle,
-    _hint: `Tarefa "${taskTitle}" foi excluída permanentemente. Confirme ao usuário de forma breve.`
+    task_title: task.title,
+    _hint: `Tarefa "${task.title}" foi excluída permanentemente. Confirme ao usuário de forma breve.`
   };
 }
 
@@ -1385,6 +1423,16 @@ async function executeMemoryRecall(args, userId) {
   }
 
   if (results.length === 0 && entityInfo.length === 0) {
+    const memoryStatus = getMemorySystemStatus();
+    if (memoryStatus.last_error) {
+      return {
+        success: false,
+        found: false,
+        memory_unavailable: true,
+        _hint: 'A memoria esta temporariamente indisponivel ou incompleta. Responda com cuidado: diga que nao conseguiu consultar a memoria agora e peca para o usuario repetir o contexto se for importante.',
+      };
+    }
+
     return {
       success: true,
       found: false,
@@ -1503,6 +1551,50 @@ async function executeKnowledgeSearch(args, userId) {
   };
 }
 
+const updateUserPrefsSchema = z.object({
+  reminders_enabled: z.boolean().optional(),
+  timezone: z.string().optional(),
+});
+
+async function executeUpdateUserPreferences(args, userId) {
+  const parsed = updateUserPrefsSchema.parse(args);
+
+  if (Object.keys(parsed).length === 0) {
+    return { success: false, _hint: 'Nenhuma preferência informada para atualizar.' };
+  }
+
+  const { data: binding, error: fetchError } = await supabase
+    .from('channel_bindings')
+    .select('id, metadata')
+    .eq('user_id', userId)
+    .eq('channel', 'whatsapp')
+    .maybeSingle();
+
+  if (fetchError || !binding) {
+    return { success: false, _hint: 'Binding do WhatsApp não encontrado para este usuário.' };
+  }
+
+  const newMetadata = { ...(binding.metadata || {}), ...parsed };
+
+  const { error: updateError } = await supabase
+    .from('channel_bindings')
+    .update({ metadata: newMetadata, updated_at: new Date().toISOString() })
+    .eq('id', binding.id);
+
+  if (updateError) throw new Error(`Falha ao salvar preferências: ${updateError.message}`);
+
+  const messages = [];
+  if (parsed.reminders_enabled === false) messages.push('lembretes automáticos desativados');
+  if (parsed.reminders_enabled === true) messages.push('lembretes automáticos reativados');
+  if (parsed.timezone) messages.push(`fuso horário definido como ${parsed.timezone}`);
+
+  return {
+    success: true,
+    changes: parsed,
+    _hint: `Preferências salvas: ${messages.join(', ')}. Confirme ao usuário de forma natural.`
+  };
+}
+
 // ÔöÇÔöÇ Dispatcher central ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 /**
@@ -1579,6 +1671,7 @@ export async function executeTool(name, args, context) {
       case 'MemoryRecall': return await executeMemoryRecall(normalizedArgs, context.userId);
       case 'KnowledgeSave': return await executeKnowledgeSave(normalizedArgs, context.userId);
       case 'KnowledgeSearch': return await executeKnowledgeSearch(normalizedArgs, context.userId);
+      case 'UpdateUserPreferences': return await executeUpdateUserPreferences(normalizedArgs, context.userId);
       default: return { success: false, _hint: `Ferramenta "${name}" não existe. Informe ao usuário que não entendeu o pedido.` };
     }
   } catch (err) {

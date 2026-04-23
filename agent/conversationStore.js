@@ -655,17 +655,25 @@ export async function failOutboundJob(jobId, errorMessage, retryable = true) {
   if (!existing) return;
 
   const attempts = (existing.attempts || 0) + 1;
+  const MAX_ATTEMPTS = 3;
+  const isDead = attempts >= MAX_ATTEMPTS;
+  const finalStatus = !retryable || isDead ? 'dead' : 'retrying';
+
   const patch = {
     attempts,
     last_error: errorMessage,
     updated_at: nowIso(),
     lease_owner: null,
     lease_expires_at: null,
-    status: retryable ? 'retrying' : 'failed',
-    next_attempt_at: retryable
+    status: finalStatus,
+    next_attempt_at: finalStatus === 'retrying'
       ? new Date(Date.now() + Math.min(attempts * 15_000, 5 * 60_000)).toISOString()
       : existing.next_attempt_at,
   };
+
+  if (isDead && retryable) {
+    console.warn(`[OutboundJobs] Job ${jobId} movido para dead-letter após ${attempts} tentativas. Último erro: ${errorMessage}`);
+  }
 
   if (await hasConversationTables()) {
     await supabaseAdmin
