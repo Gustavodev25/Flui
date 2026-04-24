@@ -34,6 +34,7 @@ import {
 } from './agent/conversationOrchestrator.js';
 import { trackEvent, analyzeAndUpdateProfile } from './agent/behavioralProfile.js';
 import { detectAndSaveCommitment } from './agent/accountabilityLoop.js';
+import { getMemorySystemStatus } from './agent/memoryEngine.js';
 import { engineEvents as agentEvents } from './agent/queryEngine.js';
 import { sanitizeWhatsAppPayload, sanitizeWhatsAppText } from './agent/textFormatter.js';
 import {
@@ -3980,6 +3981,7 @@ app.get('/api/health', async (req, res) => {
       ...getLlmStatus(),
       ping: llmPing,
     },
+    memory: getMemorySystemStatus(),
     dependencies: {
       supabase: supabaseStatus,
       meta: metaStatus,
