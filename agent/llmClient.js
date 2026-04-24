@@ -4,7 +4,21 @@ dotenv.config();
 import OpenAI from 'openai';
 
 export const PRIMARY_PROVIDER = 'nvidia';
-export const PRIMARY_MODEL_ID = process.env.MODEL_ID || 'nvidia/nemotron-3-super-120b-a12b';
+export const RECOMMENDED_FAST_AGENT_MODEL = 'nvidia/nemotron-3-nano-30b-a3b';
+const LEGACY_TIMEOUT_PRONE_MODELS = new Set(['z-ai/glm4.7']);
+
+function resolvePrimaryModelId() {
+  const configured = process.env.PRIMARY_MODEL_ID || process.env.MODEL_ID || '';
+  const normalized = configured.trim();
+
+  if (!normalized) return RECOMMENDED_FAST_AGENT_MODEL;
+  if (LEGACY_TIMEOUT_PRONE_MODELS.has(normalized) && process.env.ALLOW_LEGACY_LLM_MODEL !== 'true') {
+    return RECOMMENDED_FAST_AGENT_MODEL;
+  }
+  return normalized;
+}
+
+export const PRIMARY_MODEL_ID = resolvePrimaryModelId();
 export const PRIMARY_TIMEOUT_MS = Math.max(Number(process.env.PRIMARY_LLM_TIMEOUT_MS || 45000), 45000);
 
 export const FALLBACK_PROVIDER = 'groq';

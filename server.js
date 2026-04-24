@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { runReminderCycle, getReminderPreview } from './agent/reminders.js';
 import { transcribeWhatsAppAudio } from './agent/transcriber.js';
 import { TOOLS, executeTool } from './agent/tools.js';
-import { createChatCompletion, getLlmStatus, pingPrimaryModel } from './agent/llmClient.js';
+import { PRIMARY_MODEL_ID, createChatCompletion, getLlmStatus, pingPrimaryModel } from './agent/llmClient.js';
 import {
   claimDueJobs,
   completeOutboundJob,
@@ -34,7 +34,9 @@ import {
 } from './agent/conversationOrchestrator.js';
 import { trackEvent, analyzeAndUpdateProfile } from './agent/behavioralProfile.js';
 import { detectAndSaveCommitment } from './agent/accountabilityLoop.js';
+import { getMemorySystemStatus } from './agent/memoryEngine.js';
 import { engineEvents as agentEvents } from './agent/queryEngine.js';
+import { sanitizeWhatsAppPayload, sanitizeWhatsAppText } from './agent/textFormatter.js';
 import {
   getSession,
   setSession,
@@ -42,14 +44,10 @@ import {
   checkAndMarkMessage,
   checkRateLimit,
   checkAndMarkRateLimitNotify,
-  createBullMQConnection,
   deletePhoneLinkChallenge,
-  disableBullMQ,
   getPhoneLinkChallenge,
   setPhoneLinkChallenge,
-} from './agent/redisClient.js';
-import { enqueueWhatsAppMessage, getWhatsAppQueue } from './agent/whatsappQueue.js';
-import { Worker } from 'bullmq';
+} from './agent/whatsappState.js';
 import OpenAI from 'openai';
 import Stripe from 'stripe';
 
@@ -878,7 +876,7 @@ syncConfiguredAdminUsers().catch(error => {
 });
 
 // ================== SESSÕES ==================
-// pendingAuthSessions e processedMessages migrados para Redis (agent/redisClient.js)
+// pendingAuthSessions e processedMessages ficam no Supabase via agent/whatsappState.js.
 const OUTBOUND_WORKER_ID = `server-${crypto.randomUUID()}`;
 
 // Track last proactive message time per userId for engagement detection
@@ -1127,7 +1125,7 @@ async function buildReminderSessions() {
     };
   }
 
-  // Sessões pendentes (auth em andamento) ficam no Redis com TTL curto;
+  // Sessões pendentes (auth em andamento) ficam no Supabase com TTL curto;
   // usuários sem binding ativo ainda não têm lembretes configurados.
   return sessions;
 }
@@ -1167,6 +1165,7 @@ async function sendWhatsAppPayload(to, payload) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15_000);
   try {
+    const safePayload = sanitizeWhatsAppPayload(payload);
     const response = await fetch(`https://graph.facebook.com/v22.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
       method: 'POST',
       headers: {
@@ -1176,7 +1175,7 @@ async function sendWhatsAppPayload(to, payload) {
       body: JSON.stringify({
         messaging_product: 'whatsapp',
         to: to.replace(/\D/g, ''),
-        ...payload,
+        ...safePayload,
       }),
       signal: controller.signal,
     });
@@ -1207,7 +1206,7 @@ async function sendWhatsAppPayload(to, payload) {
 async function sendWhatsAppMessage(to, text) {
   const result = await sendWhatsAppPayload(to, {
     type: 'text',
-    text: { body: text },
+    text: { body: sanitizeWhatsAppText(text) },
   });
   return result.success;
 }
@@ -1275,13 +1274,14 @@ async function dispatchOutboundMessageJobs() {
 async function enqueueSystemWhatsAppMessage(userId, content, messageType = 'assistant_text') {
   const binding = await findBindingByUserId(userId, 'whatsapp');
   if (!binding?.external_user_id) return false;
+  const safeContent = sanitizeWhatsAppText(content);
 
   await enqueueOutboundConversationMessage({
     userId,
     externalUserId: binding.external_user_id,
     threadId: null,
     channel: 'whatsapp',
-    content,
+    content: safeContent,
     role: 'assistant',
     messageType,
   });
@@ -1291,8 +1291,7 @@ async function enqueueSystemWhatsAppMessage(userId, content, messageType = 'assi
 }
 
 // ================== DEDUPLICAÇÃO ==================
-// Migrado para Redis (checkAndMarkMessage em agent/redisClient.js).
-// Garantia atômica via SET NX — funciona em múltiplas instâncias.
+// Deduplicacao feita no Supabase por messageId; funciona em multiplas instancias.
 
 // ================== BOAS-VINDAS COM IA ==================
 async function generateWelcomeMessage() {
@@ -1314,6 +1313,65 @@ async function generateWelcomeMessage() {
   }
 }
 
+const PROCESSING_UPDATE_FALLBACKS = [
+  'Ja estou olhando isso com calma para te responder melhor.',
+  'Vou organizar isso direitinho antes de te responder.',
+  'Estou cruzando as informacoes para nao te mandar uma resposta pela metade.',
+  'Estou ajustando a resposta com o seu contexto.',
+  'Um instante, estou buscando o melhor caminho para isso.',
+];
+
+function getFallbackProcessingUpdate(textMessage) {
+  const seed = Array.from(String(textMessage || '')).reduce(
+    (sum, char) => sum + char.charCodeAt(0),
+    0
+  );
+  return PROCESSING_UPDATE_FALLBACKS[seed % PROCESSING_UPDATE_FALLBACKS.length];
+}
+
+function cleanProcessingUpdate(content, fallback) {
+  const cleaned = String(content || '')
+    .replace(/^["'“”]+|["'“”]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned || /processando/i.test(cleaned) || /⏳/.test(cleaned)) {
+    return fallback;
+  }
+
+  return cleaned.length > 140 ? `${cleaned.slice(0, 137).trim()}...` : cleaned;
+}
+
+async function generateProcessingUpdate({ userName, textMessage }) {
+  const fallback = getFallbackProcessingUpdate(textMessage);
+
+  try {
+    const { response } = await createChatCompletion({
+      messages: [
+        {
+          role: 'system',
+          content: `Voce e o Lui, assistente da Flui no WhatsApp. Gere UMA frase curta de acompanhamento enquanto voce resolve o pedido do usuario. Deve soar natural, util e personalizada ao contexto. Nao use a palavra "processando", nao use ampulheta, nao diga que terminou, nao peca para o usuario reenviar nada. Maximo 120 caracteres.`,
+        },
+        {
+          role: 'user',
+          content: `Nome: ${userName || 'usuario'}\nMensagem: ${String(textMessage || '').slice(0, 240)}`,
+        },
+      ],
+      max_tokens: 45,
+      temperature: 0.9,
+    }, {
+      preferFallback: true,
+      turnBudgetMs: 3500,
+      primaryTimeoutMs: 2500,
+      fallbackTimeoutMs: 2000,
+    });
+
+    return cleanProcessingUpdate(response.choices[0]?.message?.content, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
 // ================== AGENTE ==================
 async function processAndRespondWithAI(userPhone, textMessage, messageId, { fromAudio = false } = {}) {
   try {
@@ -1324,6 +1382,8 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     }
 
     const cleanMessage = textMessage.trim();
+    const normalizedMessage = cleanMessage.toLowerCase();
+    const LOGOUT_KEYWORDS = ['sair', 'desconectar', 'logout', 'deslogar'];
     let session = await getWhatsAppSession(userPhone);
 
     // ===== BLOQUEADO (plano expirado/inativo) =====
@@ -1333,6 +1393,12 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     }
 
     console.log(`[AI] Processando de ${userPhone}: "${cleanMessage.substring(0, 50)}..." | Sessão: ${session ? (session.authenticated ? '✅ auth' : `⏳ ${session.step}`) : '❌ nova'}`);
+
+    if (!session?.authenticated && LOGOUT_KEYWORDS.includes(normalizedMessage)) {
+      await deleteSession(userPhone);
+      await sendWhatsAppMessage(userPhone, "Sessão reiniciada. Me manda seu *e-mail* para conectar de novo.");
+      return;
+    }
 
     // ===== INIT =====
     if (!session) {
@@ -1400,7 +1466,6 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
               session.authenticated = true;
               session.userId = foundUser.id;
               session.userName = foundUser.user_metadata?.full_name || foundUser.user_metadata?.name || 'Usuário';
-              await deleteSession(userPhone);
 
               // Atualiza o binding existente explicitamente para evitar duplicatas errôneas e cobrir o número atual
               try {
@@ -1415,6 +1480,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
 
               const thread = await getDefaultThreadForUser(foundUser.id);
               session.threadId = thread?.id || null;
+              await setSession(userPhone, session, 0);
 
               await sendWhatsAppMessage(userPhone,
                 `Fechou, *${session.userName}*! 🚀\n\nConectei com sua conta automaticamente.\n\nO que vamos fazer hoje?`
@@ -1432,7 +1498,6 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
               session.authenticated = true;
               session.userId = foundUser.id;
               session.userName = foundUser.user_metadata?.full_name || foundUser.user_metadata?.name || 'Usuário';
-              await deleteSession(userPhone);
 
               // Cria binding com o número real do WhatsApp
               await upsertChannelBinding({
@@ -1446,6 +1511,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
 
               const thread = await getDefaultThreadForUser(foundUser.id);
               session.threadId = thread?.id || null;
+              await setSession(userPhone, session, 0);
 
               await sendWhatsAppMessage(userPhone,
                 `Fechou, *${session.userName}*! 🚀\n\nConectei com sua conta Google automaticamente.\n\nO que vamos fazer hoje?`
@@ -1486,7 +1552,6 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
         session.authenticated = true;
         session.userId = data.user.id;
         session.userName = data.user.user_metadata?.name || 'Usuário';
-        await deleteSession(userPhone);
 
         const binding = await upsertChannelBinding({
           userId: session.userId,
@@ -1502,6 +1567,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
 
         const thread = await getDefaultThreadForUser(session.userId);
         session.threadId = thread?.id || null;
+        await setSession(userPhone, session, 0);
 
         await sendWhatsAppMessage(userPhone,
           `Fechou, *${session.userName}* 🚀\n\nO que vamos fazer hoje?`
@@ -1511,8 +1577,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     }
 
     // ===== COMANDO SAIR =====
-    const LOGOUT_KEYWORDS = ['sair', 'desconectar', 'logout', 'deslogar'];
-    if (LOGOUT_KEYWORDS.includes(cleanMessage.toLowerCase())) {
+    if (LOGOUT_KEYWORDS.includes(normalizedMessage)) {
       console.log(`[WhatsApp] 👋 Logout solicitado por ${userPhone} (${session.userName})`);
 
       // Remove o binding do banco
@@ -1522,7 +1587,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
         console.error('[WhatsApp] Erro ao remover binding:', err.message);
       }
 
-      // Limpa sessão no Redis
+      // Limpa sessão local
       await deleteSession(userPhone);
 
       await sendWhatsAppMessage(userPhone,
@@ -1551,12 +1616,15 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     // ===== AGENT LOOP =====
     sendTypingIndicator(userPhone, messageId);
 
-    // Se demorar mais de 5s, avisa o usuário que está processando
-    let processingMsgSent = false;
+    // Se demorar mais de 8s, envia mensagem estática de espera (NÃO usa LLM para evitar
+    // resposta dupla — o LLM geraria uma mensagem tão natural que pareceria a resposta real).
+    let turnFinished = false;
     const processingTimer = setTimeout(() => {
-      processingMsgSent = true;
-      sendWhatsAppMessage(userPhone, "Processando... ⏳").catch(() => {});
-    }, 5000);
+      if (!turnFinished) {
+        const update = getFallbackProcessingUpdate(cleanMessage);
+        sendWhatsAppMessage(userPhone, update).catch(() => {});
+      }
+    }, 8000);
 
     // Atualiza janela de 24h: registra último inbound do usuário na binding
     supabaseAdmin
@@ -1584,6 +1652,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
         onAck: (ackText) => sendWhatsAppMessage(userPhone, ackText),
       });
     } finally {
+      turnFinished = true;
       clearTimeout(processingTimer);
     }
     console.log(`[AI] Resposta: "${result.reply?.substring(0, 80)}..."`);
@@ -1732,7 +1801,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const message = messages[0];
     if (!message) return;
 
-    // ── FILTRO 3: Deduplicação (Redis atômico, funciona em múltiplas instâncias) ──
+    // ── FILTRO 3: Deduplicação no Supabase ──
     if (await checkAndMarkMessage(message.id)) {
       console.log(`[Webhook] Mensagem duplicada ignorada: ${message.id}`);
       return;
@@ -1761,26 +1830,19 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
     console.log(`[Webhook] 📩 ${messageType} de ${userPhone} (${messageId})`);
 
-    // ── Enfileira para processamento assíncrono via BullMQ ──
+    // ── Processa diretamente, sem fila externa ──
     if (messageType === 'text') {
       const body = message.text?.body;
       if (!body || !body.trim()) {
         console.log('[Webhook] Texto vazio ignorado');
         return;
       }
-      const queued = await enqueueWhatsAppMessage({ userPhone, content: body, messageId, type: 'text' });
-      if (!queued) {
-        // Fila não disponível (Redis não configurado) — processa diretamente
-        await processAndRespondWithAI(userPhone, body, messageId);
-      }
+      await processAndRespondWithAI(userPhone, body, messageId);
       return;
     }
 
     if (messageType === 'audio' && message.audio?.id) {
-      const queued = await enqueueWhatsAppMessage({ userPhone, audioId: message.audio.id, messageId, type: 'audio' });
-      if (!queued) {
-        await handleAudioMessage(userPhone, message.audio.id, messageId);
-      }
+      await handleAudioMessage(userPhone, message.audio.id, messageId);
       return;
     }
 
@@ -1788,51 +1850,6 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     console.error('[Webhook] Erro ao processar evento:', err.message);
   }
 });
-
-// ================== BULLMQ WORKER ==================
-// Processa mensagens do WhatsApp de forma assíncrona com retry automático.
-// Concurrency=5: até 5 mensagens simultâneas por instância do servidor.
-{
-  const workerConnection = createBullMQConnection();
-  if (workerConnection) {
-    const whatsappWorker = new Worker(
-      'whatsapp-messages',
-      async (job) => {
-        const { userPhone, content, messageId, type, audioId } = job.data;
-        if (type === 'audio') {
-          await handleAudioMessage(userPhone, audioId, messageId);
-        } else {
-          await processAndRespondWithAI(userPhone, content, messageId);
-        }
-      },
-      { connection: workerConnection, concurrency: 5 }
-    );
-
-    whatsappWorker.on('error', (err) => {
-      if (err?.message?.includes('max requests limit exceeded')) {
-        disableBullMQ(`Worker desativado por limite de requisicoes do Redis: ${err.message}`);
-        void whatsappWorker.close().catch(() => {});
-        return;
-      }
-      console.error('[Worker] Erro no worker:', err.message);
-    });
-
-    whatsappWorker.on('failed', (job, err) => {
-      console.error(`[Worker] Job ${job?.id} falhou (tentativa ${job?.attemptsMade}): ${err.message}`);
-    });
-
-    whatsappWorker.on('completed', (job) => {
-      console.log(`[Worker] Job ${job.id} concluído (${job.data.userPhone})`);
-    });
-
-    process.on('SIGTERM', () => whatsappWorker.close());
-    process.on('SIGINT',  () => whatsappWorker.close());
-
-    console.log('[Worker] BullMQ Worker WhatsApp iniciado (concurrency=5)');
-  } else {
-    console.warn('[Worker] Worker BullMQ desativado — processamento direto ativo');
-  }
-}
 
 // ================== STRIPE ==================
 
@@ -2222,7 +2239,7 @@ REGRAS GERAIS:
 
     for (let turn = 0; turn < MAX_CHAT_AGENT_TURNS; turn++) {
       const response = await nimClient.chat.completions.create({
-        model: process.env.MODEL_ID || 'deepseek-ai/deepseek-v3.2',
+        model: PRIMARY_MODEL_ID,
         messages: turnMessages,
         tools: CHAT_AGENT_TOOLS,
         tool_choice: 'auto',
@@ -2260,7 +2277,7 @@ REGRAS GERAIS:
     if (!finalContent) {
       // Força resposta final se o loop acabou sem texto
       const finalResponse = await nimClient.chat.completions.create({
-        model: process.env.MODEL_ID || 'deepseek-ai/deepseek-v3.2',
+        model: PRIMARY_MODEL_ID,
         messages: turnMessages,
         temperature: 0.6,
         max_tokens: 2048,
@@ -3868,9 +3885,9 @@ app.post('/api/workspace/accept-invite', async (req, res) => {
 
 app.get('/api/admin/model-info', requireAdmin, (req, res) => {
   res.json({
-    modelId: process.env.MODEL_ID || 'meta/llama-3.1-70b-instruct',
+    modelId: PRIMARY_MODEL_ID,
     provider: 'NVIDIA NIM',
-    description: 'Meta Llama 3.1 70B Instruct (State-of-the-art)'
+    description: 'Nemotron 3 Nano 30B A3B (fast agentic tool-use default)'
   });
 });
 
@@ -3960,6 +3977,7 @@ app.get('/api/health', async (req, res) => {
       ...getLlmStatus(),
       ping: llmPing,
     },
+    memory: getMemorySystemStatus(),
     dependencies: {
       supabase: supabaseStatus,
       meta: metaStatus,

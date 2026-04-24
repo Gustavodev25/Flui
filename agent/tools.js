@@ -469,7 +469,7 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'KnowledgeSave',
-      description: 'Salva uma informação no "segundo cérebro" do usuário. Use para anotações, ideias, decisões, informações de referência, dados sobre pessoas, ou qualquer conhecimento que o usuário queira guardar. Diferente de tarefas ÔÇö isso é INFORMAÇÃO, não ação.',
+      description: 'Salva uma informação no "segundo cérebro" do usuário. Use para anotações, ideias, decisões, informações de referência, dados sobre pessoas, ou qualquer conhecimento que o usuário queira guardar. Diferente de tarefas - isso é INFORMAÇÃO, não ação.',
       parameters: {
         type: 'object',
         properties: {
@@ -593,6 +593,30 @@ function getTodayISO() {
   }).format(new Date());
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function makeDateOnlyUtc(dateStr) {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+}
+
+function addCalendarDaysIso(dateStr, days) {
+  const date = makeDateOnlyUtc(dateStr);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function diffCalendarDays(fromIso, toIso) {
+  return Math.round((makeDateOnlyUtc(fromIso).getTime() - makeDateOnlyUtc(toIso).getTime()) / DAY_MS);
+}
+
+function formatDateOnlyPtBr(dateStr, options) {
+  return new Intl.DateTimeFormat('pt-BR', {
+    ...options,
+    timeZone: 'UTC',
+  }).format(makeDateOnlyUtc(dateStr));
+}
+
 /**
  * Corrige datas com ano errado geradas pela IA.
  */
@@ -632,42 +656,29 @@ function humanizeDate(dateStr) {
   if (!dateStr) return 'sem prazo definido';
 
   const todayISO = getTodayISO();
-  const spDate = new Date(todayISO + 'T12:00:00-03:00');
-
-  const tomorrow = new Date(spDate);
-  tomorrow.setDate(spDate.getDate() + 1);
-  const tomorrowISO = tomorrow.toISOString().split('T')[0];
-
-  const dayAfter = new Date(spDate);
-  dayAfter.setDate(spDate.getDate() + 2);
-  const dayAfterISO = dayAfter.toISOString().split('T')[0];
+  const tomorrowISO = addCalendarDaysIso(todayISO, 1);
+  const dayAfterISO = addCalendarDaysIso(todayISO, 2);
 
   // Atrasada
   if (dateStr < todayISO) {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const target = new Date(year, month - 1, day);
-    const diffMs = spDate.getTime() - target.getTime();
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    const [, , day] = dateStr.split('-').map(Number);
+    const diffDays = diffCalendarDays(todayISO, dateStr);
     if (diffDays === 1) return 'ontem (atrasada)';
-    if (diffDays <= 7) return `${diffDays} dias atrás (atrasada)`;
-    const weekday = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' }).format(target);
-    const dayNum = target.getDate();
-    const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(target);
-    return `${weekday}, ${dayNum} de ${monthName} (atrasada)`;
+    if (diffDays <= 7) return `${diffDays} dias atr\u00e1s (atrasada)`;
+    const weekday = formatDateOnlyPtBr(dateStr, { weekday: 'long' });
+    const monthName = formatDateOnlyPtBr(dateStr, { month: 'long' });
+    return `${weekday}, ${day} de ${monthName} (atrasada)`;
   }
 
   if (dateStr === todayISO) return 'hoje';
-  if (dateStr === tomorrowISO) return 'amanhã';
-  if (dateStr === dayAfterISO) return 'depois de amanhã';
+  if (dateStr === tomorrowISO) return 'amanh\u00e3';
+  if (dateStr === dayAfterISO) return 'depois de amanh\u00e3';
 
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const targetDate = new Date(year, month - 1, day);
+  const [, , day] = dateStr.split('-').map(Number);
+  const weekday = formatDateOnlyPtBr(dateStr, { weekday: 'long' });
+  const monthName = formatDateOnlyPtBr(dateStr, { month: 'long' });
 
-  const weekday = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' }).format(targetDate);
-  const dayNum = targetDate.getDate();
-  const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(targetDate);
-
-  return `${weekday}, ${dayNum} de ${monthName}`;
+  return `${weekday}, ${day} de ${monthName}`;
 }
 
 const PRIORITY_LABEL = { high: 'alta', medium: 'média', low: 'baixa' };
@@ -810,7 +821,7 @@ async function executeTaskCreate(args, userId) {
     const hintTime = mins >= 60
       ? `${Math.floor(mins / 60)}h${mins % 60 > 0 ? ` ${mins % 60}min` : ''}`
       : `${mins} minutos`;
-    timerHint = ` Timer de ${hintTime} configurado ÔÇö vou te avisar aqui pelo WhatsApp quando chegar a hora.`;
+    timerHint = ` Timer de ${hintTime} configurado - vou te avisar aqui pelo WhatsApp quando chegar a hora.`;
   }
 
   return {
@@ -973,7 +984,7 @@ async function executeTaskUpdate(args, userId) {
   const timerHint = rest.timer_at === null
     ? ` Timer removido com sucesso.`
     : rest.timer_at
-      ? ` Timer configurado ÔÇö vou avisar no WhatsApp quando chegar a hora.`
+      ? ` Timer configurado - vou avisar no WhatsApp quando chegar a hora.`
       : '';
 
   // Track behavioral events for status changes
@@ -1048,9 +1059,10 @@ async function executeTaskList(args, userId) {
 
   const taskList = tasks.map((t, i) => {
     const statusLabel = STATUS_LABEL[t.status] || t.status;
-    const dateLabel = t.due_date ? ` ÔÇö ${humanizeDate(t.due_date)}` : '';
+    const priorityLabel = PRIORITY_LABEL[t.priority] || t.priority || 'm\u00e9dia';
+    const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
     const tagsStr = t.tags?.length ? ` [${t.tags.join(', ')}]` : '';
-    return `${i + 1}. *${t.title}* (${statusLabel}${dateLabel})${tagsStr}`;
+    return `${i + 1}. *${t.title}* (${statusLabel} - prioridade ${priorityLabel}${dateLabel})${tagsStr}`;
   }).join('\n');
 
   return {
@@ -1154,8 +1166,9 @@ async function executeTaskSearch(args, userId) {
 
   const taskList = tasks.map((t, i) => {
     const statusLabel = STATUS_LABEL[t.status] || t.status;
-    const dateLabel = t.due_date ? ` ÔÇö ${humanizeDate(t.due_date)}` : '';
-    return `${i + 1}. *${t.title}* (${statusLabel}${dateLabel})`;
+    const priorityLabel = PRIORITY_LABEL[t.priority] || t.priority || 'm\u00e9dia';
+    const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
+    return `${i + 1}. *${t.title}* (${statusLabel} - prioridade ${priorityLabel}${dateLabel})`;
   }).join('\n');
 
   return {
@@ -1298,7 +1311,7 @@ async function executeTaskBatchCreate(args, userId) {
   if (error) throw new Error(`Falha ao criar tarefas: ${error.message}`);
 
   const created = (data || []).map((t, i) => {
-    const dateLabel = t.due_date ? ` ÔÇö ${humanizeDate(t.due_date)}` : '';
+    const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
     const subtaskInfo = t.subtasks?.length > 0 ? ` (${t.subtasks.length} subtarefas)` : '';
     return `${i + 1}. *${t.title}*${dateLabel}${subtaskInfo}`;
   }).join('\n');
@@ -1392,7 +1405,7 @@ async function executeMemorySave(args, userId) {
 
   return {
     success: true,
-    _hint: `Memória salva: "${summary || content.substring(0, 50)}". RESPONDA como um amigo responderia numa conversa de WhatsApp ÔÇö reaja ao que a pessoa DISSE, não ao fato de ter salvado. Se ela se apresentou, responda a apresentação ("Fala Gustavo! Massa, dev também aqui haha. No que posso te ajudar?"). Se contou um fato pessoal, reaja a ele naturalmente. NUNCA diga "anotei essa informação" ou "guardei isso" ÔÇö aja como se fosse parte natural da conversa. Salvar na memória é INVISÍVEL pro usuário.`,
+    _hint: `Memória salva: "${summary || content.substring(0, 50)}". RESPONDA como um amigo responderia numa conversa de WhatsApp - reaja ao que a pessoa DISSE, não ao fato de ter salvado. Se ela se apresentou, responda a apresentação ("Fala Gustavo! Massa, dev também aqui haha. No que posso te ajudar?"). Se contou um fato pessoal, reaja a ele naturalmente. NUNCA diga "anotei essa informação" ou "guardei isso" - aja como se fosse parte natural da conversa. Salvar na memória é INVISÍVEL pro usuário.`,
   };
 }
 
@@ -1459,7 +1472,7 @@ async function executeMemoryRecall(args, userId) {
     found: true,
     memories: memoriesFormatted,
     entities: entitiesFormatted,
-    _hint: `Encontrei ${results.length} memória(s) e ${entityInfo.length} entidade(s) sobre "${query || entity_name}". Use essas informações para responder ao usuário de forma NATURAL ÔÇö como se você realmente lembrasse. Ex: "Sim, lembro! Você me contou que..." NUNCA liste memórias como itens técnicos. Integre na conversa.`,
+    _hint: `Encontrei ${results.length} memória(s) e ${entityInfo.length} entidade(s) sobre "${query || entity_name}". Use essas informações para responder ao usuário de forma NATURAL - como se você realmente lembrasse. Ex: "Sim, lembro! Você me contou que..." NUNCA liste memórias como itens técnicos. Integre na conversa.`,
   };
 }
 
@@ -1498,7 +1511,7 @@ async function executeKnowledgeSave(args, userId) {
     entry_title: title,
     category_label: categoryLabels[category] || 'Nota',
     pinned: pinned || false,
-    _hint: `Salvo no segundo cérebro como ${categoryLabels[category] || 'nota'}: "${title}"${pinned ? ' (fixado ÔÇö sempre visível)' : ''}. Confirme ao usuário de forma natural. Ex: "Guardei! Quando precisar, é só perguntar." NUNCA use emojis ou jargão técnico.`,
+    _hint: `Salvo no segundo cérebro como ${categoryLabels[category] || 'nota'}: "${title}"${pinned ? ' (fixado - sempre visível)' : ''}. Confirme ao usuário de forma natural. Ex: "Guardei! Quando precisar, é só perguntar." NUNCA use emojis ou jargão técnico.`,
   };
 }
 

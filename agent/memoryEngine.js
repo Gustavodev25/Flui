@@ -17,6 +17,7 @@ const supabase = createClient(
 const MEMORY_SEMANTIC_MIN_SIMILARITY = Number(process.env.MEMORY_SEMANTIC_MIN_SIMILARITY || 0.72);
 const MEMORY_DEDUPE_SEMANTIC_THRESHOLD = Number(process.env.MEMORY_DEDUPE_SEMANTIC_THRESHOLD || 0.88);
 const MEMORY_DEDUPE_TEXT_THRESHOLD = Number(process.env.MEMORY_DEDUPE_TEXT_THRESHOLD || 0.7);
+const MEMORY_LEXICAL_POOL_LIMIT = Math.max(Number(process.env.MEMORY_LEXICAL_POOL_LIMIT || 20), 5);
 
 const memoryHealth = {
   last_error: null,
@@ -43,6 +44,7 @@ function clearMemoryError(scope) {
 export function getMemorySystemStatus() {
   return {
     ...memoryHealth,
+    lexical_fallback: true,
     embedding: getMemoryEmbeddingStatus(),
   };
 }
@@ -156,6 +158,11 @@ export async function recallMemories(userId, {
       })
       : [];
 
+    const terms = normalizeSearchTerms(query);
+    const lexicalPoolLimit = terms.length > 0
+      ? Math.max(limit * 4, MEMORY_LEXICAL_POOL_LIMIT)
+      : limit;
+
     let dbQuery = supabase
       .from('user_memories')
       .select('*')
@@ -164,14 +171,13 @@ export async function recallMemories(userId, {
       .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
       .order('importance', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .limit(lexicalPoolLimit);
 
     if (memoryType) {
       dbQuery = dbQuery.eq('memory_type', memoryType);
     }
 
     // Busca textual: aceita string ou array; quebra em palavras e ORs em content/summary.
-    const terms = normalizeSearchTerms(query);
     if (terms.length > 0) {
       const orFilters = terms
         .flatMap(t => [`content.ilike.%${t}%`, `summary.ilike.%${t}%`])
@@ -181,7 +187,8 @@ export async function recallMemories(userId, {
 
     const { data, error } = await dbQuery;
     if (error) throw error;
-    const merged = mergeMemoryResults(semanticResults, data || [], limit);
+    const lexicalResults = rankLexicalMemoryResults(data || [], queryText || terms.join(' '), limit);
+    const merged = mergeMemoryResults(semanticResults, lexicalResults, limit);
 
     // Marca como acessadas (fire-and-forget; só atualiza last_accessed_at,
     // access_count é incrementado no findSimilarMemory path)
@@ -194,6 +201,10 @@ export async function recallMemories(userId, {
         .then(({ error: updErr }) => {
           if (updErr) console.error('[MemoryEngine] last_accessed_at update:', updErr.message);
         });
+
+      backfillMissingMemoryEmbeddings(merged).catch((error) => {
+        if (error?.message) console.error('[MemoryEngine] embedding backfill:', error.message);
+      });
     }
 
     clearMemoryError('recallMemories');
@@ -542,7 +553,10 @@ async function recallMemoriesByEmbedding(userId, queryText, {
   minSimilarity = MEMORY_SEMANTIC_MIN_SIMILARITY,
 } = {}) {
   const embedding = await generateMemoryEmbedding(queryText);
-  if (!embedding) return [];
+  if (!embedding) {
+    memoryHealth.semantic_search_available = false;
+    return [];
+  }
 
   return matchUserMemoriesByVector(userId, embedding, {
     memoryType,
@@ -602,7 +616,7 @@ async function findSimilarMemory(userId, text, { memoryType = null, embedding = 
   let best = { score: 0, memory: null };
   for (const candidate of candidates) {
     const candidateText = buildMemorySearchText(candidate);
-    const score = textSimilarity(text, candidateText);
+    const score = Math.max(textSimilarity(text, candidateText), lexicalMemoryScore(text, candidate));
     if (score > best.score) best = { score, memory: candidate };
   }
 
@@ -637,6 +651,29 @@ async function findLexicalMemoryCandidates(userId, text, { memoryType = null } =
   return data || [];
 }
 
+function rankLexicalMemoryResults(memories = [], queryText = '', limit = 5) {
+  if (!queryText) return memories.slice(0, limit);
+
+  return memories
+    .map((memory) => ({
+      ...memory,
+      similarity: Math.max(
+        Number(memory.similarity || 0),
+        lexicalMemoryScore(queryText, memory)
+      ),
+    }))
+    .sort((a, b) => {
+      if (Number(a.similarity || 0) !== Number(b.similarity || 0)) {
+        return Number(b.similarity || 0) - Number(a.similarity || 0);
+      }
+      if (Number(a.importance || 0) !== Number(b.importance || 0)) {
+        return Number(b.importance || 0) - Number(a.importance || 0);
+      }
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    })
+    .slice(0, limit);
+}
+
 function mergeMemoryResults(primary = [], fallback = [], limit = 5) {
   const byId = new Map();
   for (const memory of [...primary, ...fallback]) {
@@ -655,8 +692,8 @@ function mergeMemoryResults(primary = [], fallback = [], limit = 5) {
 }
 
 function textSimilarity(a, b) {
-  const aTokens = new Set(normalizeSearchTerms(a));
-  const bTokens = new Set(normalizeSearchTerms(b));
+  const aTokens = new Set(normalizeSearchTerms(a, 12));
+  const bTokens = new Set(normalizeSearchTerms(b, 80));
   if (aTokens.size === 0 || bTokens.size === 0) return 0;
 
   let intersection = 0;
@@ -665,6 +702,45 @@ function textSimilarity(a, b) {
   }
 
   return (2 * intersection) / (aTokens.size + bTokens.size);
+}
+
+function lexicalMemoryScore(queryText, memory) {
+  const queryTokens = normalizeSearchTerms(queryText, 12);
+  if (queryTokens.length === 0) return 0;
+
+  const memoryText = buildMemorySearchText(memory);
+  const memoryTokens = new Set(normalizeSearchTerms(memoryText, 80));
+  if (memoryTokens.size === 0) return 0;
+
+  let matched = 0;
+  for (const token of queryTokens) {
+    if (memoryTokens.has(token)) matched++;
+  }
+
+  const coverage = matched / queryTokens.length;
+  return Math.max(textSimilarity(queryText, memoryText), coverage * 0.85);
+}
+
+async function backfillMissingMemoryEmbeddings(memories = []) {
+  if (!getMemoryEmbeddingStatus().configured) return;
+
+  const pending = memories
+    .filter((memory) => memory?.id && !memory.embedding)
+    .slice(0, 3);
+
+  for (const memory of pending) {
+    const searchableText = buildMemorySearchText(memory);
+    const embedding = await generateMemoryEmbedding(searchableText);
+    const vectorLiteral = toPgVectorLiteral(embedding);
+    if (!vectorLiteral) return;
+
+    await persistMemoryUpdate(memory.id, {
+      embedding: vectorLiteral,
+      embedding_model: getMemoryEmbeddingModel(),
+      embedding_updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, true);
+  }
 }
 
 function mergeEntities(existing, newOnes) {
@@ -697,7 +773,7 @@ const STOPWORDS_PT = new Set([
  * Mantém acentos — `ilike` é case-insensitive mas NÃO ignora acentos.
  * Stopwords são testadas sem acento pra pegar variações ("está"/"esta").
  */
-function extractKeywords(message) {
+function extractKeywords(message, limit = 6) {
   if (!message || typeof message !== 'string') return [];
 
   const stripAccents = (w) => w.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -712,20 +788,20 @@ function extractKeywords(message) {
       if (STOPWORDS_PT.has(w) || STOPWORDS_PT.has(stripAccents(w))) return false;
       return true;
     })
-    .slice(0, 6);
+    .slice(0, limit);
 }
 
 /**
  * Normaliza entrada de busca: aceita string (frase) ou array (palavras).
  * Aplica escape de chars perigosos para filtros PostgREST.
  */
-function normalizeSearchTerms(input) {
+function normalizeSearchTerms(input, limit = 6) {
   if (!input) return [];
-  const raw = Array.isArray(input) ? input : extractKeywords(input);
+  const raw = Array.isArray(input) ? input : extractKeywords(input, limit);
   return raw
     .map(t => String(t).replace(/[%_,()]/g, '').trim())
     .filter(t => t.length >= 3)
-    .slice(0, 6);
+    .slice(0, limit);
 }
 
 async function getPinnedKnowledge(userId) {

@@ -4,6 +4,7 @@ dotenv.config();
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { getProfile } from './behavioralProfile.js';
+import { PRIMARY_MODEL_ID } from './llmClient.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -15,7 +16,7 @@ const nimClient = new OpenAI({
   baseURL: 'https://integrate.api.nvidia.com/v1',
 });
 
-const MODEL_ID = process.env.MODEL_ID || 'nvidia/nemotron-3-super-120b-a12b';
+const MODEL_ID = process.env.PROACTIVE_MODEL_ID || PRIMARY_MODEL_ID;
 // low_effort: usa raciocínio leve para detectar padrões sem sacrificar latência
 const THINKING_LOW = { extra_body: { chat_template_kwargs: { thinking_mode: 'low_effort' } } };
 

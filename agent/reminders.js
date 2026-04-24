@@ -12,6 +12,7 @@ import {
   wasPeriodSentToday,
 } from './accountabilityLoop.js';
 import { generateInsights, expireOldInsights } from './proactiveIntelligence.js';
+import { PRIMARY_MODEL_ID } from './llmClient.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -23,7 +24,7 @@ const nimClient = new OpenAI({
   baseURL: 'https://integrate.api.nvidia.com/v1',
 });
 
-const REMINDER_MODEL_ID = process.env.MODEL_ID || 'nvidia/nemotron-3-super-120b-a12b';
+const REMINDER_MODEL_ID = process.env.REMINDER_MODEL_ID || PRIMARY_MODEL_ID;
 const THINKING_OFF = { extra_body: { chat_template_kwargs: { thinking_mode: 'off' } } };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
