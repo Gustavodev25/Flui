@@ -585,6 +585,7 @@ function normalizeTextForIntent(message) {
 
 function getSimpleTaskListRequest(message) {
   const lower = normalizeTextForIntent(message);
+  if (hasTaskCompletionIntent(message)) return null;
   // Removemos "tarefas?" e "pendentes?" do hasQuestion porque causava falsos positivos muito fáceis.
   // Focamos em verbos e pronomes interrogativos claros ou "o que tenho".
   const hasQuestion = /\b(quais?|qual|listar?|lista|mostra|mostrar|ver|cad[êê]|cade|o\s+que\s+tenho)\b/.test(lower);
@@ -625,6 +626,131 @@ function buildSimpleTaskListResponse(userMessage, userName, result, filter = {})
   }
 
   return `${prefix}você tem ${result.count} tarefa${result.count > 1 ? 's' : ''} ${scope}:\n${result.formatted_list}`;
+}
+
+const TASK_COMPLETION_PATTERNS = [
+  /\b(j[aá]\s+)?conclu[ií]\b/i,
+  /\bterminei\b/i,
+  /\bfinalizei\b/i,
+  /\bt[aá]\s+feito\b/i,
+  /\bmarc[ae]?\s+(como\s+)?conclu[ií]d[ao]\b/i,
+  /\bmover?\s+(para|pra)\s+conclu[ií]d[ao]\b/i,
+  /\bpassa?r?\s+(para|pra)\s+conclu[ií]d[ao]\b/i,
+];
+
+function hasTaskCompletionIntent(message) {
+  return TASK_COMPLETION_PATTERNS.some(re => re.test(message));
+}
+
+function asksForNextTasks(message) {
+  const lower = normalizeTextForIntent(message);
+  return /\b(em\s+seguida|depois|agora|o\s+que\s+(precisa|falta|tem)|que\s+mais|proxim[ao]s?|mais\s+alguma)\b/.test(lower);
+}
+
+function hasVagueTaskReference(message) {
+  const lower = normalizeTextForIntent(message);
+  return /\b(essa|esta|esse|este|ela|ele|aquela|aquele|isso|essa\s+tarefa|esta\s+tarefa)\b/.test(lower);
+}
+
+function extractTaskNumberReference(message) {
+  const lower = normalizeTextForIntent(message);
+  const numeric = lower.match(/\b(?:numero|n|a|o)?\s*(\d{1,2})\b/);
+  if (numeric) return Number(numeric[1]);
+
+  const ordinals = [
+    ['primeira', 1], ['primeiro', 1],
+    ['segunda', 2], ['segundo', 2],
+    ['terceira', 3], ['terceiro', 3],
+    ['quarta', 4], ['quarto', 4],
+    ['quinta', 5], ['quinto', 5],
+  ];
+  const found = ordinals.find(([word]) => lower.includes(word));
+  return found?.[1] || null;
+}
+
+function parseTaskIndexBlock(content) {
+  const text = String(content || '');
+  const match = text.match(/\[(?:ÍNDICE|INDICE):([^\]]+)\]/i);
+  if (!match) return {};
+
+  const entries = {};
+  for (const item of match[1].split('|')) {
+    const entry = item.match(/(\d+)="([^"]+)"/);
+    if (entry) entries[Number(entry[1])] = entry[2];
+  }
+  return entries;
+}
+
+function extractTaskTitlesFromAssistantContent(content) {
+  const text = String(content || '').replace(/\[(?:ÍNDICE|INDICE):[^\]]+\]/gi, '');
+  const titles = [];
+
+  for (const line of text.split('\n')) {
+    const numbered = line.match(/^\s*\d+\.\s+\*?([^*(\n]+?)\*?\s*(?:\(|$)/);
+    if (numbered?.[1]) {
+      titles.push(numbered[1].trim());
+      continue;
+    }
+
+    const emphasized = line.match(/\*([^*]{3,120})\*/);
+    if (emphasized?.[1] && !/pendente|conclu[ií]d|atrasad/i.test(emphasized[1])) {
+      titles.push(emphasized[1].trim());
+    }
+  }
+
+  return [...new Set(titles)].filter(Boolean);
+}
+
+async function resolveCompletionTargetFromHistory(userMessage, history) {
+  const requestedNumber = extractTaskNumberReference(userMessage);
+  const vague = hasVagueTaskReference(userMessage);
+  const assistantMessages = [...history].reverse().filter(m => m.role === 'assistant');
+
+  for (const message of assistantMessages.slice(0, 8)) {
+    const indexMap = parseTaskIndexBlock(message.content);
+    if (requestedNumber && indexMap[requestedNumber]) {
+      return { taskId: indexMap[requestedNumber] };
+    }
+
+    const indexIds = Object.values(indexMap);
+    if (vague && indexIds.length === 1) {
+      return { taskId: indexIds[0] };
+    }
+    if (vague && indexIds.length > 1) {
+      return { ambiguous: true };
+    }
+
+    const titles = extractTaskTitlesFromAssistantContent(message.content);
+    if (vague && titles.length === 1) {
+      return { taskTitle: titles[0] };
+    }
+    if (vague && titles.length > 1) {
+      return { ambiguous: true };
+    }
+  }
+
+  return { ambiguous: true };
+}
+
+function buildTaskIndexBlock(tasksRaw) {
+  return tasksRaw?.length
+    ? `\n[ÍNDICE:${tasksRaw.map((t, i) => `${i + 1}="${t.id}"`).join('|')}]`
+    : '';
+}
+
+function buildCompletionAndNextResponse(userName, updateResult, listResult, wantsNext) {
+  if (!updateResult?.success) {
+    return `${userName}, nao consegui identificar qual tarefa voce concluiu. Me manda o nome dela ou o numero da lista.`;
+  }
+
+  const doneLine = `Feito, ${userName}! *${updateResult.task_title}* ficou marcada como concluida.`;
+  if (!wantsNext) return `${doneLine} Mandou bem.`;
+
+  if (!listResult?.success || !listResult.count) {
+    return `${doneLine}\n\nNo momento nao encontrei mais tarefas pendentes.`;
+  }
+
+  return `${doneLine}\n\nAgora ainda falta:\n${listResult.formatted_list}`;
 }
 
 const TASK_GLUE_WORDS = new Set([
@@ -1208,6 +1334,62 @@ export async function queryEngineLoop(
     trace.fallback_used = trace.fallback_used || !!telemetry.fallback_used;
     trace.error_class = telemetry.error_class || trace.error_class;
   };
+
+  const shouldResolveCompletionDirectly =
+    hasTaskCompletionIntent(userMessage) &&
+    (hasVagueTaskReference(userMessage) || extractTaskNumberReference(userMessage));
+
+  if (shouldResolveCompletionDirectly) {
+    const startedAt = Date.now();
+    const history = await getHistory(sessionId);
+    const target = await resolveCompletionTargetFromHistory(userMessage, history);
+    const wantsNext = asksForNextTasks(userMessage);
+
+    if (target.ambiguous || (!target.taskId && !target.taskTitle)) {
+      const content = wantsNext
+        ? `${userName}, qual tarefa vocÃª concluiu? Me manda o nome ou o nÃºmero dela que eu marco e jÃ¡ te digo o que falta.`
+        : `${userName}, qual tarefa vocÃª concluiu? Me manda o nome ou o nÃºmero dela que eu marco aqui.`;
+
+      await saveHistory(sessionId, [
+        ...history,
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content },
+      ]);
+
+      trace.provider = 'direct';
+      trace.model = 'task-completion-clarify';
+      trace.latency_ms += Date.now() - startedAt;
+      return returnTelemetry ? { content, telemetry: trace } : content;
+    }
+
+    emit('Atualizando tarefa...', { task_id: target.taskId, task_title: target.taskTitle });
+    const updateResult = await executeTool('TaskUpdate', {
+      task_id: target.taskId || target.taskTitle,
+      status: 'done',
+    }, { userId });
+    trace.tool_count += 1;
+    if (updateResult.success) invalidateContextCache(userId);
+
+    let listResult = null;
+    if (wantsNext) {
+      listResult = await executeTool('TaskList', { limit: 8 }, { userId });
+      trace.tool_count += 1;
+    }
+
+    const content = buildCompletionAndNextResponse(userName, updateResult, listResult, wantsNext);
+    const taskIndexBlock = wantsNext ? buildTaskIndexBlock(listResult?.tasks_raw) : '';
+
+    await saveHistory(sessionId, [
+      ...history,
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content: content + taskIndexBlock },
+    ]);
+
+    trace.provider = 'direct';
+    trace.model = 'task-completion';
+    trace.latency_ms += Date.now() - startedAt;
+    return returnTelemetry ? { content, telemetry: trace } : content;
+  }
 
   const simpleTaskListRequest = getSimpleTaskListRequest(userMessage);
   if (simpleTaskListRequest) {
