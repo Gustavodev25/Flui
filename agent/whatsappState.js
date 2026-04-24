@@ -1,22 +1,29 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+dotenv.config();
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SESSION_FILE_PATH = path.resolve(__dirname, '..', 'whatsapp_sessions.json');
+import { createClient } from '@supabase/supabase-js';
+
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+const supabaseAdmin = SUPABASE_URL && SUPABASE_SERVICE_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+  : null;
 
 const SESSION_TTL_SEC = 1800;
 const PHONE_LINK_CHALLENGE_TTL_SEC = 10 * 60;
-const DEDUP_TTL_MS = 5 * 60 * 1000;
+const DEDUP_TTL_MS = 24 * 60 * 60 * 1000;
 
-const sessions = new Map();
-const sessionExpires = new Map();
+const memorySessions = new Map();
+const memorySessionExpires = new Map();
 const phoneLinkChallenges = new Map();
-const dedupMessages = new Map();
+const memoryDedupMessages = new Map();
 const counters = new Map();
 const rateLimitNotifications = new Map();
 
-let sessionFileLoaded = false;
+let dbTablesReady = null;
+let dbWarningLogged = false;
+let cleanupStarted = false;
 
 function normalizeKey(value) {
   const normalized = String(value || '').replace(/\D/g, '');
@@ -37,76 +44,152 @@ function normalizeSession(session) {
   return session;
 }
 
-function loadSessionFile() {
-  if (sessionFileLoaded) return;
-  sessionFileLoaded = true;
+function isMissingTableError(error) {
+  if (!error) return false;
+  return /does not exist|relation .* does not exist|Could not find the table/i.test(error.message || '');
+}
+
+function logDbFallback(scope, error) {
+  if (dbWarningLogged) return;
+  console.warn(`[WhatsAppState] Supabase indisponivel para ${scope}; usando fallback em memoria: ${error?.message || 'sem cliente configurado'}`);
+  dbWarningLogged = true;
+}
+
+async function hasWhatsAppStateTables() {
+  if (!supabaseAdmin) return false;
+  if (dbTablesReady !== null) return dbTablesReady;
 
   try {
-    if (!fs.existsSync(SESSION_FILE_PATH)) return;
+    const { error } = await supabaseAdmin
+      .from('whatsapp_sessions')
+      .select('phone')
+      .limit(1);
 
-    const raw = fs.readFileSync(SESSION_FILE_PATH, 'utf8').trim();
-    if (!raw) return;
-
-    const storedSessions = JSON.parse(raw);
-    if (!storedSessions || typeof storedSessions !== 'object') return;
-
-    for (const [phone, session] of Object.entries(storedSessions)) {
-      const normalized = normalizeSession(session);
-      if (normalized) sessions.set(normalizeKey(phone), normalized);
+    if (error) {
+      if (isMissingTableError(error)) dbTablesReady = false;
+      logDbFallback('whatsapp_sessions', error);
+      return false;
     }
+
+    dbTablesReady = true;
+    dbWarningLogged = false;
+    return true;
   } catch (error) {
-    console.warn(`[WhatsAppState] Nao foi possivel carregar sessoes locais: ${error.message}`);
+    logDbFallback('whatsapp_sessions', error);
+    return false;
   }
 }
 
-function persistSessionFile() {
-  try {
-    const storedSessions = Object.fromEntries(sessions);
-    fs.writeFileSync(SESSION_FILE_PATH, `${JSON.stringify(storedSessions, null, 2)}\n`);
-  } catch (error) {
-    console.warn(`[WhatsAppState] Nao foi possivel salvar sessoes locais: ${error.message}`);
+function rememberSession(key, session, ttl = SESSION_TTL_SEC) {
+  const normalized = normalizeSession(session);
+  if (!normalized) return;
+
+  memorySessions.set(key, normalized);
+  if (ttl > 0 && !normalized.authenticated) {
+    memorySessionExpires.set(key, Date.now() + ttl * 1000);
+  } else {
+    memorySessionExpires.delete(key);
   }
 }
 
-export async function getSession(phone) {
-  loadSessionFile();
-
-  const key = normalizeKey(phone);
-  const expiresAt = sessionExpires.get(key);
+function getMemorySession(key) {
+  const expiresAt = memorySessionExpires.get(key);
   if (expiresAt && Date.now() > expiresAt) {
-    sessions.delete(key);
-    sessionExpires.delete(key);
-    persistSessionFile();
+    memorySessions.delete(key);
+    memorySessionExpires.delete(key);
     return null;
   }
 
-  return normalizeSession(sessions.get(key)) ?? null;
+  return normalizeSession(memorySessions.get(key)) ?? null;
+}
+
+function forgetMemorySession(key) {
+  memorySessions.delete(key);
+  memorySessionExpires.delete(key);
+}
+
+function toExpiresAt(ttl, session) {
+  const normalized = normalizeSession(session);
+  if (!ttl || ttl <= 0 || normalized?.authenticated) return null;
+  return new Date(Date.now() + ttl * 1000).toISOString();
+}
+
+export async function getSession(phone) {
+  const key = normalizeKey(phone);
+
+  if (await hasWhatsAppStateTables()) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('whatsapp_sessions')
+        .select('session, expires_at')
+        .eq('phone', key)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return null;
+
+      if (data.expires_at && new Date(data.expires_at).getTime() <= Date.now()) {
+        await deleteSession(key);
+        return null;
+      }
+
+      const session = normalizeSession(data.session);
+      if (session) {
+        const ttl = data.expires_at
+          ? Math.max(1, Math.ceil((new Date(data.expires_at).getTime() - Date.now()) / 1000))
+          : 0;
+        rememberSession(key, session, ttl);
+      }
+      return session;
+    } catch (error) {
+      logDbFallback('getSession', error);
+    }
+  }
+
+  return getMemorySession(key);
 }
 
 export async function setSession(phone, data, ttl = SESSION_TTL_SEC) {
-  loadSessionFile();
-
   const key = normalizeKey(phone);
-  const normalized = normalizeSession(data);
-  if (!normalized) return;
+  const session = normalizeSession(data);
+  if (!session) return;
 
-  sessions.set(key, normalized);
-  if (ttl > 0 && !normalized.authenticated) {
-    sessionExpires.set(key, Date.now() + ttl * 1000);
-  } else {
-    sessionExpires.delete(key);
+  rememberSession(key, session, ttl);
+
+  if (!(await hasWhatsAppStateTables())) return;
+
+  try {
+    const { error } = await supabaseAdmin
+      .from('whatsapp_sessions')
+      .upsert({
+        phone: key,
+        session,
+        expires_at: toExpiresAt(ttl, session),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'phone' });
+
+    if (error) throw error;
+  } catch (error) {
+    logDbFallback('setSession', error);
   }
-
-  persistSessionFile();
 }
 
 export async function deleteSession(phone) {
-  loadSessionFile();
-
   const key = normalizeKey(phone);
-  sessions.delete(key);
-  sessionExpires.delete(key);
-  persistSessionFile();
+  forgetMemorySession(key);
+
+  if (!(await hasWhatsAppStateTables())) return;
+
+  try {
+    const { error } = await supabaseAdmin
+      .from('whatsapp_sessions')
+      .delete()
+      .eq('phone', key);
+
+    if (error) throw error;
+  } catch (error) {
+    logDbFallback('deleteSession', error);
+  }
 }
 
 function getPhoneLinkChallengeKey(userId) {
@@ -142,20 +225,62 @@ export async function deletePhoneLinkChallenge(userId) {
   phoneLinkChallenges.delete(getPhoneLinkChallengeKey(userId));
 }
 
-export async function checkAndMarkMessage(messageId) {
-  if (!messageId) return true;
-
+function checkAndMarkMessageInMemory(messageId) {
   const now = Date.now();
-  if (dedupMessages.has(messageId)) return true;
+  if (memoryDedupMessages.has(messageId)) return true;
 
-  dedupMessages.set(messageId, now);
-  if (dedupMessages.size > 500) {
-    for (const [id, timestamp] of dedupMessages) {
-      if (now - timestamp > DEDUP_TTL_MS) dedupMessages.delete(id);
+  memoryDedupMessages.set(messageId, now);
+  if (memoryDedupMessages.size > 1000) {
+    for (const [id, timestamp] of memoryDedupMessages) {
+      if (now - timestamp > DEDUP_TTL_MS) memoryDedupMessages.delete(id);
     }
   }
 
   return false;
+}
+
+async function cleanupExpiredDedupMessages() {
+  if (cleanupStarted || Math.random() > 0.01 || !(await hasWhatsAppStateTables())) return;
+  cleanupStarted = true;
+
+  try {
+    await supabaseAdmin
+      .from('whatsapp_processed_messages')
+      .delete()
+      .lt('expires_at', new Date().toISOString());
+  } catch {
+    // Limpeza oportunista; falha aqui nao deve afetar o webhook.
+  } finally {
+    cleanupStarted = false;
+  }
+}
+
+export async function checkAndMarkMessage(messageId) {
+  if (!messageId) return true;
+
+  if (await hasWhatsAppStateTables()) {
+    try {
+      const { error } = await supabaseAdmin
+        .from('whatsapp_processed_messages')
+        .insert({
+          message_id: String(messageId),
+          channel: 'whatsapp',
+          expires_at: new Date(Date.now() + DEDUP_TTL_MS).toISOString(),
+        });
+
+      if (!error) {
+        void cleanupExpiredDedupMessages();
+        return false;
+      }
+
+      if (error.code === '23505') return true;
+      throw error;
+    } catch (error) {
+      logDbFallback('checkAndMarkMessage', error);
+    }
+  }
+
+  return checkAndMarkMessageInMemory(String(messageId));
 }
 
 function incrementCounter(key, ttlMs) {

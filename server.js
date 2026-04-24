@@ -874,7 +874,7 @@ syncConfiguredAdminUsers().catch(error => {
 });
 
 // ================== SESSÕES ==================
-// pendingAuthSessions e processedMessages ficam no estado local do WhatsApp.
+// pendingAuthSessions e processedMessages ficam no Supabase via agent/whatsappState.js.
 const OUTBOUND_WORKER_ID = `server-${crypto.randomUUID()}`;
 
 // Track last proactive message time per userId for engagement detection
@@ -1123,7 +1123,7 @@ async function buildReminderSessions() {
     };
   }
 
-  // Sessões pendentes (auth em andamento) ficam no estado local com TTL curto;
+  // Sessões pendentes (auth em andamento) ficam no Supabase com TTL curto;
   // usuários sem binding ativo ainda não têm lembretes configurados.
   return sessions;
 }
@@ -1287,8 +1287,7 @@ async function enqueueSystemWhatsAppMessage(userId, content, messageType = 'assi
 }
 
 // ================== DEDUPLICAÇÃO ==================
-// Deduplicacao feita pelo estado local do WhatsApp.
-// Garantia atômica via SET NX — funciona em múltiplas instâncias.
+// Deduplicacao feita no Supabase por messageId; funciona em multiplas instancias.
 
 // ================== BOAS-VINDAS COM IA ==================
 async function generateWelcomeMessage() {
@@ -1802,7 +1801,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const message = messages[0];
     if (!message) return;
 
-    // ── FILTRO 3: Deduplicação local ──
+    // ── FILTRO 3: Deduplicação no Supabase ──
     if (await checkAndMarkMessage(message.id)) {
       console.log(`[Webhook] Mensagem duplicada ignorada: ${message.id}`);
       return;
