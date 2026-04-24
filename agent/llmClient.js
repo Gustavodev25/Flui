@@ -2,9 +2,10 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import OpenAI from 'openai';
+import { sanitizeChatMessagesForInput } from './chatMessageSanitizer.js';
 
 export const PRIMARY_PROVIDER = 'nvidia';
-export const RECOMMENDED_FAST_AGENT_MODEL = 'nvidia/nemotron-3-nano-30b-a3b';
+export const RECOMMENDED_FAST_AGENT_MODEL = 'deepseek-ai/deepseek-v4-pro';
 const LEGACY_TIMEOUT_PRONE_MODELS = new Set(['z-ai/glm4.7']);
 
 function resolvePrimaryModelId() {
@@ -95,7 +96,10 @@ function withNemotronThinking(model, params) {
 
 async function requestCompletion(client, provider, model, params, timeoutMs) {
   const startedAt = Date.now();
-  const finalParams = withNemotronThinking(model, params);
+  const sanitizedParams = Array.isArray(params?.messages)
+    ? { ...params, messages: sanitizeChatMessagesForInput(params.messages) }
+    : params;
+  const finalParams = withNemotronThinking(model, sanitizedParams);
 
   try {
     const response = await withTimeout(

@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { createClient } from '@supabase/supabase-js';
+import { sanitizeChatMessagesForInput } from './chatMessageSanitizer.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -28,7 +29,7 @@ export async function getHistory(sessionId) {
 
   if (error || !data) return [];
 
-  return Array.isArray(data.messages) ? data.messages : [];
+  return sanitizeChatMessagesForInput(data.messages);
 }
 
 /**
@@ -57,7 +58,9 @@ function isMalformed(msg) {
 
 export async function saveHistory(sessionId, messages) {
   // Filtra system prompt — ele é reconstruído a cada turno
-  const conversation = messages.filter(m => m.role !== 'system');
+  const conversation = sanitizeChatMessagesForInput(
+    messages.filter(m => m.role !== 'system')
+  );
 
   // Remove mensagens corrompidas e os tool results órfãos correspondentes
   const orphanedToolIds = new Set();
@@ -83,13 +86,14 @@ export async function saveHistory(sessionId, messages) {
     sanitized.length > MAX_MESSAGES
       ? sanitized.slice(sanitized.length - MAX_MESSAGES)
       : sanitized;
+  const cleanTrimmed = sanitizeChatMessagesForInput(trimmed);
 
   const { error } = await supabase
     .from('agent_sessions')
     .upsert(
       {
         session_id: sessionId,
-        messages: trimmed,
+        messages: cleanTrimmed,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'session_id' }

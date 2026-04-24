@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { TOOLS, executeTool } from './tools.js';
 import { getHistory, saveHistory } from './sessionHistory.js';
 import { PRIMARY_MODEL_ID, createChatCompletion } from './llmClient.js';
+import { sanitizeChatMessageForInput } from './chatMessageSanitizer.js';
 import EventEmitter from 'events';
 
 export const engineEvents = new EventEmitter();
@@ -1787,7 +1788,7 @@ export async function queryEngineLoop(
         }
 
         // Remove campos não-padrão (ex: reasoning_content do deepseek) incompatíveis com outros providers
-        const { reasoning_content, ...cleanAssistantMessage } = assistantMessage;
+        const cleanAssistantMessage = sanitizeChatMessageForInput(assistantMessage);
         messages.push(cleanAssistantMessage);
         toolTurns++;
 

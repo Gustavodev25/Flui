@@ -9,6 +9,7 @@ import { runReminderCycle, getReminderPreview } from './agent/reminders.js';
 import { transcribeWhatsAppAudio } from './agent/transcriber.js';
 import { TOOLS, executeTool } from './agent/tools.js';
 import { PRIMARY_MODEL_ID, createChatCompletion, getLlmStatus, pingPrimaryModel } from './agent/llmClient.js';
+import { sanitizeChatMessageForInput, sanitizeChatMessagesForInput } from './agent/chatMessageSanitizer.js';
 import {
   claimDueJobs,
   completeOutboundJob,
@@ -2229,10 +2230,10 @@ REGRAS GERAIS:
 - NUNCA mostre IDs, JSON ou dados técnicos
 - Se o usuário fizer perguntas gerais sobre tarefas, responda usando as ferramentas disponíveis`;
 
-    const conversationMessages = [
+    const conversationMessages = sanitizeChatMessagesForInput([
       { role: 'system', content: systemPrompt },
       ...messages,
-    ];
+    ]);
 
     let turnMessages = [...conversationMessages];
     let finalContent = '';
@@ -2240,7 +2241,7 @@ REGRAS GERAIS:
     for (let turn = 0; turn < MAX_CHAT_AGENT_TURNS; turn++) {
       const response = await nimClient.chat.completions.create({
         model: PRIMARY_MODEL_ID,
-        messages: turnMessages,
+        messages: sanitizeChatMessagesForInput(turnMessages),
         tools: CHAT_AGENT_TOOLS,
         tool_choice: 'auto',
         temperature: 0.6,
@@ -2248,11 +2249,11 @@ REGRAS GERAIS:
       });
 
       const choice = response.choices[0];
-      const assistantMsg = choice.message;
+      const assistantMsg = sanitizeChatMessageForInput(choice.message);
 
       // Sem tool calls — resposta final
-      if (!assistantMsg.tool_calls || assistantMsg.tool_calls.length === 0) {
-        finalContent = assistantMsg.content || '';
+      if (!assistantMsg?.tool_calls || assistantMsg.tool_calls.length === 0) {
+        finalContent = assistantMsg?.content || '';
         break;
       }
 
@@ -2278,7 +2279,7 @@ REGRAS GERAIS:
       // Força resposta final se o loop acabou sem texto
       const finalResponse = await nimClient.chat.completions.create({
         model: PRIMARY_MODEL_ID,
-        messages: turnMessages,
+        messages: sanitizeChatMessagesForInput(turnMessages),
         temperature: 0.6,
         max_tokens: 2048,
       });
