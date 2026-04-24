@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { runReminderCycle, getReminderPreview } from './agent/reminders.js';
 import { transcribeWhatsAppAudio } from './agent/transcriber.js';
 import { TOOLS, executeTool } from './agent/tools.js';
-import { createChatCompletion, getLlmStatus, pingPrimaryModel } from './agent/llmClient.js';
+import { PRIMARY_MODEL_ID, createChatCompletion, getLlmStatus, pingPrimaryModel } from './agent/llmClient.js';
 import {
   claimDueJobs,
   completeOutboundJob,
@@ -2243,7 +2243,7 @@ REGRAS GERAIS:
 
     for (let turn = 0; turn < MAX_CHAT_AGENT_TURNS; turn++) {
       const response = await nimClient.chat.completions.create({
-        model: process.env.MODEL_ID || 'deepseek-ai/deepseek-v3.2',
+        model: PRIMARY_MODEL_ID,
         messages: turnMessages,
         tools: CHAT_AGENT_TOOLS,
         tool_choice: 'auto',
@@ -2281,7 +2281,7 @@ REGRAS GERAIS:
     if (!finalContent) {
       // Força resposta final se o loop acabou sem texto
       const finalResponse = await nimClient.chat.completions.create({
-        model: process.env.MODEL_ID || 'deepseek-ai/deepseek-v3.2',
+        model: PRIMARY_MODEL_ID,
         messages: turnMessages,
         temperature: 0.6,
         max_tokens: 2048,
@@ -3889,9 +3889,9 @@ app.post('/api/workspace/accept-invite', async (req, res) => {
 
 app.get('/api/admin/model-info', requireAdmin, (req, res) => {
   res.json({
-    modelId: process.env.MODEL_ID || 'meta/llama-3.1-70b-instruct',
+    modelId: PRIMARY_MODEL_ID,
     provider: 'NVIDIA NIM',
-    description: 'Meta Llama 3.1 70B Instruct (State-of-the-art)'
+    description: 'Nemotron 3 Nano 30B A3B (fast agentic tool-use default)'
   });
 });
 

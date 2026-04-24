@@ -10,11 +10,11 @@ import EventEmitter from 'events';
 export const engineEvents = new EventEmitter();
 import { getProfileContext } from './behavioralProfile.js';
 import { getPendingInsights, markInsightDelivered } from './proactiveIntelligence.js';
-import { getMemoryContext } from './memoryEngine.js';
+import { getMemoryContext, recallMemories, saveMemory } from './memoryEngine.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
-  process.env.VITE_SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
 );
 
 // Limite de rodadas de ferramentas por mensagem (proteção contra loops)
@@ -581,6 +581,92 @@ function normalizeTextForIntent(message) {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
+}
+
+function extractBirthdayFact(message) {
+  const text = String(message || '').trim();
+  if (!text) return null;
+
+  const lower = normalizeTextForIntent(text);
+  if (!/\b(aniversario|nascimento|nasci|nascer)\b/.test(lower)) return null;
+
+  const datePatterns = [
+    /\banivers[aá]rio\s*[:\-]\s*([0-3]?\d\s+de\s+[a-zçãéêíóôú]+(?:\s+de\s+\d{4})?)/i,
+    /\banivers[aá]rio\s*[:\-]\s*([0-3]?\d[/-][01]?\d(?:[/-]\d{2,4})?)/i,
+    /\b(?:meu\s+)?anivers[aá]rio\s+(?:[ée]|eh|e|fica|cai)?\s*(?:no\s+dia\s+|dia\s+)?([0-3]?\d\s+de\s+[a-zçãéêíóôú]+(?:\s+de\s+\d{4})?)/i,
+    /\b(?:eu\s+)?nasci\s+(?:no\s+dia\s+|dia\s+|em\s+)?([0-3]?\d\s+de\s+[a-zçãéêíóôú]+(?:\s+de\s+\d{4})?)/i,
+    /\b(?:meu\s+)?anivers[aá]rio\s+(?:[ée]|eh|e|fica|cai)?\s*(?:em\s+)?([0-3]?\d[/-][01]?\d(?:[/-]\d{2,4})?)/i,
+    /\b(?:eu\s+)?nasci\s+(?:em\s+)?([0-3]?\d[/-][01]?\d(?:[/-]\d{2,4})?)/i,
+    /\b([0-3]?\d\s+de\s+[a-zçãéêíóôú]+(?:\s+de\s+\d{4})?)\b/i,
+    /\b([0-3]?\d[/-][01]?\d(?:[/-]\d{2,4})?)\b/i,
+  ];
+
+  for (const pattern of datePatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      return match[1].replace(/[.!?]+$/, '').trim();
+    }
+  }
+
+  return null;
+}
+
+function isBirthdayRecallIntent(message) {
+  const lower = normalizeTextForIntent(message);
+  const asksPersonalDate = /\b(qual|quando|lembra|lembrar|data)\b/.test(lower);
+  const birthdayTopic = /\b(aniversario|nascimento|nasci|nascer)\b/.test(lower);
+  return asksPersonalDate && birthdayTopic;
+}
+
+function findBirthdayInText(text) {
+  return extractBirthdayFact(text);
+}
+
+function findBirthdayInMemories(memories = []) {
+  for (const memory of memories) {
+    const found = findBirthdayInText(`${memory.summary || ''}\n${memory.content || ''}`);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function recallBirthdayFromLegacyCommitments(userId) {
+  try {
+    const { data, error } = await supabase
+      .from('daily_commitments')
+      .select('committed_tasks')
+      .eq('user_id', userId)
+      .order('date', { ascending: false })
+      .limit(30);
+
+    if (error) return null;
+
+    for (const row of data || []) {
+      for (const item of row.committed_tasks || []) {
+        const found = findBirthdayInText(item);
+        if (found) return found;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function saveBirthdayMemory(userId, userName, birthdayLabel, sourceMessage) {
+  await saveMemory(userId, {
+    memoryType: 'semantic',
+    content: `O aniversario de ${userName || 'usuario'} e ${birthdayLabel}.`,
+    summary: `Aniversario: ${birthdayLabel}`,
+    entities: [{
+      name: userName || 'usuario',
+      type: 'person',
+      description: `Aniversario em ${birthdayLabel}`,
+    }],
+    tags: ['aniversario', 'nascimento', 'data_pessoal'],
+    importance: 0.95,
+    sourceMessage,
+  });
 }
 
 function getTaskStatusFilterFromText(lower) {
@@ -1395,6 +1481,59 @@ export async function queryEngineLoop(
     trace.error_class = telemetry.error_class || trace.error_class;
   };
 
+  const birthdayFact = extractBirthdayFact(userMessage);
+  if (birthdayFact && !isBirthdayRecallIntent(userMessage)) {
+    const startedAt = Date.now();
+    const history = await getHistory(sessionId);
+    await saveBirthdayMemory(userId, userName, birthdayFact, userMessage);
+    const content = `Fechado, ${userName}. Seu aniversário é ${birthdayFact}.`;
+
+    await saveHistory(sessionId, [
+      ...history,
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content },
+    ]);
+
+    trace.provider = 'direct';
+    trace.model = 'memory-birthday-save';
+    trace.latency_ms += Date.now() - startedAt;
+    trace.tool_count += 1;
+    return returnTelemetry ? { content, telemetry: trace } : content;
+  }
+
+  if (isBirthdayRecallIntent(userMessage)) {
+    const startedAt = Date.now();
+    const history = await getHistory(sessionId);
+    const memories = await recallMemories(userId, {
+      query: 'aniversario nascimento nasci data pessoal',
+      limit: 5,
+      minImportance: 0,
+    });
+    let birthday = findBirthdayInMemories(memories);
+
+    if (!birthday) {
+      birthday = await recallBirthdayFromLegacyCommitments(userId);
+      if (birthday) {
+        await saveBirthdayMemory(userId, userName, birthday, 'Migrado de compromisso diario salvo incorretamente.');
+      }
+    }
+
+    const content = birthday
+      ? `${userName}, seu aniversário é ${birthday}.`
+      : `${userName}, não achei seu aniversário salvo aqui ainda. Me fala a data uma vez que eu guardo.`;
+
+    await saveHistory(sessionId, [
+      ...history,
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content },
+    ]);
+
+    trace.provider = 'direct';
+    trace.model = 'memory-birthday-recall';
+    trace.latency_ms += Date.now() - startedAt;
+    return returnTelemetry ? { content, telemetry: trace } : content;
+  }
+
   const shouldResolveCompletionDirectly =
     hasTaskCompletionIntent(userMessage) &&
     (hasVagueTaskReference(userMessage) || extractTaskNumberReference(userMessage));
@@ -1592,8 +1731,8 @@ export async function queryEngineLoop(
         ? { type: 'function', function: { name: preferredTool } }
         : 'auto';
       // Reasoning models (nemotron-super) precisam de budget maior pro thinking
-      const isReasoningModel = !!(process.env.MODEL_ID || '').includes('nemotron')
-        || !!(process.env.MODEL_ID || '').includes('reasoning');
+      const isReasoningModel = PRIMARY_MODEL_ID.includes('nemotron')
+        || PRIMARY_MODEL_ID.includes('reasoning');
       const baseMax = isFirstCall ? (multipleTasksIntent ? 900 : 450) : 250;
       const currentMaxTokens = isReasoningModel ? Math.max(baseMax, 2048) : baseMax;
 
