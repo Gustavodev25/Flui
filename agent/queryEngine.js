@@ -583,13 +583,23 @@ function normalizeTextForIntent(message) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+function getTaskStatusFilterFromText(lower) {
+  if (/\b(cancelad[ao]s?|cancelamentos?)\b/.test(lower)) return 'canceled';
+  if (/\b(concluid[ao]s?|finalizad[ao]s?|terminad[ao]s?|feitas?)\b/.test(lower)) return 'done';
+  if (/\b(em\s+progresso|andamento|fazendo)\b/.test(lower)) return 'doing';
+  if (/\b(a\s+fazer|todo)\b/.test(lower)) return 'todo';
+  if (/\b(pendencias?|pendentes)\b/.test(lower)) return undefined;
+  if (/\b(todas?|geral|completas?|all)\b/.test(lower)) return 'all';
+  return undefined;
+}
+
 function getSimpleTaskListRequest(message) {
   const lower = normalizeTextForIntent(message);
   if (hasTaskCompletionIntent(message)) return null;
   // Removemos "tarefas?" e "pendentes?" do hasQuestion porque causava falsos positivos muito fáceis.
   // Focamos em verbos e pronomes interrogativos claros ou "o que tenho".
   const hasQuestion = /\b(quais?|qual|listar?|lista|mostra|mostrar|ver|cad[êê]|cade|o\s+que\s+tenho)\b/.test(lower);
-  const asksTasks = /\b(tarefas?|pendencias?|pendentes|afazeres?|coisas?\s+pra\s+fazer|tenho\s+pra\s+fazer|tenho\s+para\s+fazer)\b/.test(lower);
+  const asksTasks = /\b(tarefas?|pendencias?|pendentes|afazeres?|cancelad[ao]s?|concluid[ao]s?|finalizad[ao]s?|em\s+progresso|coisas?\s+pra\s+fazer|tenho\s+pra\s+fazer|tenho\s+para\s+fazer)\b/.test(lower);
 
   // "?" só conta se estiver PERTO da menção de tarefas (ex: "quais tarefas?")
   // NÃO conta "tudo bem?" seguido de "queria uma tarefa" ⭐ o "?" é da saudação
@@ -601,7 +611,55 @@ function getSimpleTaskListRequest(message) {
 
   return {
     due_date: /\b(hoje|pra\s+hoje|para\s+hoje)\b/.test(lower) ? getTodayISO() : undefined,
+    status: getTaskStatusFilterFromText(lower),
   };
+}
+
+function getTaskListScope(filter = {}, count = 2) {
+  const one = count === 1;
+  let scope;
+
+  switch (filter.status) {
+    case 'canceled':
+      scope = one ? 'cancelada' : 'canceladas';
+      break;
+    case 'done':
+      scope = one ? 'conclu\u00edda' : 'conclu\u00eddas';
+      break;
+    case 'doing':
+      scope = 'em progresso';
+      break;
+    case 'todo':
+      scope = 'a fazer';
+      break;
+    case 'all':
+      scope = 'no total';
+      break;
+    default:
+      scope = one ? 'pendente' : 'pendentes';
+  }
+
+  if (filter.due_date) {
+    const dateScope = filter.due_date === getTodayISO() ? 'pra hoje' : `para ${filter.due_date}`;
+    if (filter.status === 'all') return dateScope;
+    return `${scope} ${dateScope}`;
+  }
+
+  return scope;
+}
+
+function pickTaskListIntro(userMessage, userName, count, scope) {
+  const taskWord = count === 1 ? 'tarefa' : 'tarefas';
+  const demonstrative = count === 1 ? 'essa \u00e9 a tarefa' : 'essas s\u00e3o as tarefas';
+  const variants = [
+    `${userName}, encontrei ${count} ${taskWord} ${scope}:`,
+    `Olhei aqui: ${count} ${taskWord} ${scope}:`,
+    `Achei ${count} ${taskWord} ${scope} por aqui:`,
+    `Aqui vai o que encontrei - ${count} ${taskWord} ${scope}:`,
+    `${userName}, ${demonstrative} ${scope}:`,
+  ];
+  const seed = Array.from(`${userMessage}|${Date.now()}`).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return variants[seed % variants.length];
 }
 
 function buildSimpleTaskListResponse(userMessage, userName, result, filter = {}) {
@@ -612,20 +670,22 @@ function buildSimpleTaskListResponse(userMessage, userName, result, filter = {})
       : /\bboa\s+noite\b/i.test(userMessage)
         ? 'Boa noite'
         : null;
-  const prefix = greeting ? `${greeting}, ${userName}! ` : `${userName}, `;
-  const scope = filter.due_date ? 'pra hoje' : 'pendentes';
+  const greetingPrefix = greeting ? `${greeting}, ${userName}. ` : '';
 
   if (!result?.success) {
-    return `${prefix}não consegui buscar suas tarefas agora. Tenta de novo em alguns instantes.`;
+    return `${greetingPrefix}${userName}, n\u00e3o consegui buscar suas tarefas agora. Tenta de novo em alguns instantes.`;
   }
+
+  const scope = getTaskListScope(filter, result.count || 0);
 
   if (!result.count) {
-    return filter.due_date
-      ? `${prefix}hoje está tranquilo: não encontrei tarefas pendentes pra hoje.`
-      : `${prefix}não encontrei tarefas pendentes no momento.`;
+    if (filter.status === 'all') {
+      return `${greetingPrefix}${userName}, n\u00e3o encontrei tarefas cadastradas por aqui.`;
+    }
+    return `${greetingPrefix}${userName}, n\u00e3o encontrei tarefas ${scope} no momento.`;
   }
 
-  return `${prefix}você tem ${result.count} tarefa${result.count > 1 ? 's' : ''} ${scope}:\n${result.formatted_list}`;
+  return `${greetingPrefix}${pickTaskListIntro(userMessage, userName, result.count, scope)}\n${result.formatted_list}`;
 }
 
 const TASK_COMPLETION_PATTERNS = [
@@ -1398,6 +1458,7 @@ export async function queryEngineLoop(
       emit('Buscando tarefas...', { query: simpleTaskListRequest });
       const result = await executeTool('TaskList', {
         limit: 10,
+        ...(simpleTaskListRequest.status ? { status: simpleTaskListRequest.status } : {}),
         ...(simpleTaskListRequest.due_date ? { due_date: simpleTaskListRequest.due_date } : {}),
       }, { userId });
       const content = buildSimpleTaskListResponse(userMessage, userName, result, simpleTaskListRequest);

@@ -1059,9 +1059,10 @@ async function executeTaskList(args, userId) {
 
   const taskList = tasks.map((t, i) => {
     const statusLabel = STATUS_LABEL[t.status] || t.status;
+    const priorityLabel = PRIORITY_LABEL[t.priority] || t.priority || 'm\u00e9dia';
     const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
     const tagsStr = t.tags?.length ? ` [${t.tags.join(', ')}]` : '';
-    return `${i + 1}. *${t.title}* (${statusLabel}${dateLabel})${tagsStr}`;
+    return `${i + 1}. *${t.title}* (${statusLabel} - prioridade ${priorityLabel}${dateLabel})${tagsStr}`;
   }).join('\n');
 
   return {
@@ -1165,8 +1166,9 @@ async function executeTaskSearch(args, userId) {
 
   const taskList = tasks.map((t, i) => {
     const statusLabel = STATUS_LABEL[t.status] || t.status;
+    const priorityLabel = PRIORITY_LABEL[t.priority] || t.priority || 'm\u00e9dia';
     const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';
-    return `${i + 1}. *${t.title}* (${statusLabel}${dateLabel})`;
+    return `${i + 1}. *${t.title}* (${statusLabel} - prioridade ${priorityLabel}${dateLabel})`;
   }).join('\n');
 
   return {
