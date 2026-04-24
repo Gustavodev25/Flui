@@ -1670,7 +1670,7 @@ export async function queryEngineLoop(
               (toolCall.function.name === 'TaskUpdate' || toolCall.function.name === 'TaskDelete') &&
               result._hint?.includes('não encontrada')
             ) {
-              console.log(`[AutoRecover] ID inválido em ${toolCall.function.name} ÔÇö buscando por título...`);
+              console.log(`[AutoRecover] ID inválido em ${toolCall.function.name} - buscando por título...`);
               // Extrai palavras-chave relevantes (remove stopwords curtas e limita tamanho)
               const searchQuery = userMessage.substring(0, 120).replace(/[,()!?]/g, ' ').replace(/\s+/g, ' ').trim();
               const searchResult = await executeTool('TaskSearch', { query: searchQuery }, { userId });
@@ -1722,7 +1722,7 @@ export async function queryEngineLoop(
       // Safety net: se o modelo ainda assim não chamou ferramenta com intenção clara,
       // loga para diagnóstico (não deve acontecer pois forçamos na 1┬¬ chamada via preferredTool)
       if (toolTurns === 0 && preferredTool) {
-        console.warn(`[Fallback] tool_choice forçado mas modelo não chamou ${preferredTool} ÔÇö respondendo em texto`);
+        console.warn(`[Fallback] tool_choice forçado mas modelo não chamou ${preferredTool} - respondendo em texto`);
       }
 
       // Resposta final — strip de bloco <think>...</think> de modelos de raciocínio (ex: Kimi K2.5)
@@ -1730,11 +1730,11 @@ export async function queryEngineLoop(
         || 'Pode repetir? Não entendi direito.';
 
       // Detecta artefatos internos do modelo (ex: "<´¢£toolÔûüsep´¢£>") na resposta final
-      // Quando presente, o modelo vazou sintaxe interna em vez de gerar texto ÔÇö refaz com tool_choice: 'none'
+      // Quando presente, o modelo vazou sintaxe interna em vez de gerar texto - refaz com tool_choice: 'none'
       const hasModelArtifacts = (s) => s.includes('<´¢£tool') || s.includes('toolÔûü') || s.includes('<tool_call>');
 
       if (hasModelArtifacts(finalContent)) {
-        console.warn('[QueryEngine] Resposta com artefatos detectada ÔÇö reforçando resposta limpa');
+        console.warn('[QueryEngine] Resposta com artefatos detectada - reforçando resposta limpa');
         try {
           const cleanMessages = messages.filter(m => !hasModelArtifacts(m.content || ''));
           cleanMessages.push({

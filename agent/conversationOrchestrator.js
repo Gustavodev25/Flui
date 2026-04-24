@@ -7,6 +7,7 @@ import {
   queueOutboundJob,
 } from './conversationStore.js';
 import { queryEngineLoop } from './queryEngine.js';
+import { sanitizeWhatsAppText } from './textFormatter.js';
 
 async function resolveThread(userId, threadId, preferredChannel = 'whatsapp', externalUserId = null, userName = 'Você') {
   if (threadId) {
@@ -42,6 +43,7 @@ export async function enqueueOutboundConversationMessage({
   metadata = {},
 }) {
   const thread = await resolveThread(userId, threadId, channel, externalUserId);
+  const safeContent = channel === 'whatsapp' ? sanitizeWhatsAppText(content) : content;
   const binding = externalUserId
     ? { external_user_id: externalUserId }
     : await findBindingByUserId(userId, channel);
@@ -53,7 +55,7 @@ export async function enqueueOutboundConversationMessage({
     direction: 'outbound',
     role,
     messageType,
-    content,
+    content: safeContent,
     status: channel === 'whatsapp' ? 'queued' : 'sent',
     metadata,
   });
@@ -68,7 +70,7 @@ export async function enqueueOutboundConversationMessage({
       target: binding.external_user_id,
       payload: metadata.template
         ? { type: 'template', template: metadata.template }
-        : { type: 'text', text: content },
+        : { type: 'text', text: safeContent },
     });
   }
 
@@ -112,6 +114,7 @@ export async function processConversationTurn({
     sourceChannel: incomingChannel === 'whatsapp' ? 'whatsapp' : 'web',
     sseId,
   });
+  const assistantContent = sanitizeWhatsAppText(result.content);
 
   const shouldQueueToWhatsApp = thread.channel === 'whatsapp' && (incomingChannel === 'whatsapp' || mirrorAssistantToWhatsApp);
   const binding = shouldQueueToWhatsApp
@@ -125,7 +128,7 @@ export async function processConversationTurn({
     direction: 'outbound',
     role: 'assistant',
     messageType: 'assistant_text',
-    content: result.content,
+    content: assistantContent,
     status: shouldQueueToWhatsApp ? 'queued' : 'sent',
     telemetry: result.telemetry,
   });
@@ -138,7 +141,7 @@ export async function processConversationTurn({
       userId,
       channel: 'whatsapp',
       target: binding.external_user_id,
-      payload: { type: 'text', text: result.content },
+      payload: { type: 'text', text: assistantContent },
     });
   }
 
@@ -146,7 +149,7 @@ export async function processConversationTurn({
     thread,
     inboundMessage,
     assistantMessage,
-    reply: result.content,
+    reply: assistantContent,
     telemetry: result.telemetry,
     job,
   };

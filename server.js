@@ -35,6 +35,7 @@ import {
 import { trackEvent, analyzeAndUpdateProfile } from './agent/behavioralProfile.js';
 import { detectAndSaveCommitment } from './agent/accountabilityLoop.js';
 import { engineEvents as agentEvents } from './agent/queryEngine.js';
+import { sanitizeWhatsAppPayload, sanitizeWhatsAppText } from './agent/textFormatter.js';
 import {
   getSession,
   setSession,
@@ -1163,6 +1164,7 @@ async function sendWhatsAppPayload(to, payload) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15_000);
   try {
+    const safePayload = sanitizeWhatsAppPayload(payload);
     const response = await fetch(`https://graph.facebook.com/v22.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
       method: 'POST',
       headers: {
@@ -1172,7 +1174,7 @@ async function sendWhatsAppPayload(to, payload) {
       body: JSON.stringify({
         messaging_product: 'whatsapp',
         to: to.replace(/\D/g, ''),
-        ...payload,
+        ...safePayload,
       }),
       signal: controller.signal,
     });
@@ -1203,7 +1205,7 @@ async function sendWhatsAppPayload(to, payload) {
 async function sendWhatsAppMessage(to, text) {
   const result = await sendWhatsAppPayload(to, {
     type: 'text',
-    text: { body: text },
+    text: { body: sanitizeWhatsAppText(text) },
   });
   return result.success;
 }
@@ -1271,13 +1273,14 @@ async function dispatchOutboundMessageJobs() {
 async function enqueueSystemWhatsAppMessage(userId, content, messageType = 'assistant_text') {
   const binding = await findBindingByUserId(userId, 'whatsapp');
   if (!binding?.external_user_id) return false;
+  const safeContent = sanitizeWhatsAppText(content);
 
   await enqueueOutboundConversationMessage({
     userId,
     externalUserId: binding.external_user_id,
     threadId: null,
     channel: 'whatsapp',
-    content,
+    content: safeContent,
     role: 'assistant',
     messageType,
   });
