@@ -10,11 +10,11 @@ import EventEmitter from 'events';
 export const engineEvents = new EventEmitter();
 import { getProfileContext } from './behavioralProfile.js';
 import { getPendingInsights, markInsightDelivered } from './proactiveIntelligence.js';
-import { getMemoryContext } from './memoryEngine.js';
+import { getMemoryContext, recallMemories, saveMemory } from './memoryEngine.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
-  process.env.VITE_SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
 );
 
 // Limite de rodadas de ferramentas por mensagem (proteção contra loops)
@@ -314,10 +314,17 @@ ATRIBUIÇÃO DE TAREFAS (assigned_to_name):
    - "Pronto, ${userName}! *Marcar dentista* tá anotado. Sabe a data? Posso agendar pra você."
 
 ⭐⭐⭐ ROTA DE FUGA (FALLBACK) ⭐⭐⭐
-12. CONFUSÃO DETECTADA: Se você NÃO conseguir entender o que o usuário quer após a mensagem atual E o histórico recente já mostra que a conversa não está fluindo (ex: você já pediu pra repetir ou já tentou interpretar sem sucesso), PARE de adivinhar. Responda:
-   "${userName}, acho que não tô conseguindo entender direito. Pode tentar me explicar de outro jeito? Se preferir, pode acessar o painel web pra fazer direto por lá."
+12. CONFUSÃO DETECTADA: Esta rota SÓ se aplica quando a mensagem for GENUINAMENTE incompreensível (caractere solto, texto aleatório, áudio completamente ininteligível). NUNCA aplique pra mensagens em português claro — mesmo que não peçam uma tarefa.
+   Se aplicável: "${userName}, acho que não tô conseguindo entender direito. Pode tentar me explicar de outro jeito? Se preferir, pode acessar o painel web pra fazer direto por lá."
 13. NUNCA fique preso em loop de "não entendi" repetido. Se já pediu repetição uma vez e a segunda tentativa continuar confusa, use a rota de fuga acima.
 14. NÃO mande mensagens genéricas sem necessidade. Se recebeu algo estranho (tipo um caractere solto ou algo sem sentido), responda com leveza: "${userName}, acho que essa escapou! Me conta o que precisa e eu resolvo."
+
+⭐⭐⭐ COMPARTILHAMENTO DE CONTEXTO PESSOAL ⭐⭐⭐
+REGRA CRÍTICA: Quando alguém compartilha contexto de vida ("estou estudando pra prova", "tô trabalhando em X", "comecei a malhar", "passei no concurso") — isso NÃO é um pedido de ação. É conversa. REAJA NATURALMENTE como um amigo faria:
+- "Massa! Que concurso é esse?" / "Eita, pra quando é a prova?"
+- Salve como memória nos bastidores (MemorySave) SEM mencionar que salvou.
+- NUNCA responda com "Pode repetir?" ou "Não entendi" pra mensagens assim — é português claro.
+PROIBIDO em qualquer mensagem de português compreensível: "Pode repetir?", "Não entendi direito", "Pode elaborar?", "Pode explicar melhor?"
 
 ⭐⭐⭐ MEMÓRIA DE CONTEXTO (CURTO PRAZO) ⭐⭐⭐
 15. REFERÊNCIAS: Entenda "Muda para as 16h", "Coloca como urgente", "Apaga ela", "Tá feito" com base na última tarefa conversada no histórico.
@@ -514,6 +521,10 @@ const CONVERSATIONAL_PATTERNS = [
   /\b(estou\s+(falando|dizendo|contando|explicando))\b/i,
   /\b(não\s+estou\s+falando|não\s+estou\s+pedindo)\b/i,
   /\b(corrige|corrija)\b/i,  // pedindo correção, não tarefa
+  // Compartilhamento de contexto pessoal (ex: "estou estudando pra prova", "tô trabalhando em X")
+  /\b(estou|to|tô|t[aá])\s+(estudando|trabalhando|fazendo|preparando|lendo|treinando|praticando|aprendendo|cursando)\b/i,
+  // "Beleza?" / "Beleza!" como saudação/check-in no final da mensagem
+  /\bbeleza\s*[?!]?\s*$/i,
 ];
 
 function isConversationalMessage(message) {
@@ -583,12 +594,109 @@ function normalizeTextForIntent(message) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+function extractBirthdayFact(message) {
+  const text = String(message || '').trim();
+  if (!text) return null;
+
+  const lower = normalizeTextForIntent(text);
+  if (!/\b(aniversario|nascimento|nasci|nascer)\b/.test(lower)) return null;
+
+  const datePatterns = [
+    /\banivers[aá]rio\s*[:\-]\s*([0-3]?\d\s+de\s+[a-zçãéêíóôú]+(?:\s+de\s+\d{4})?)/i,
+    /\banivers[aá]rio\s*[:\-]\s*([0-3]?\d[/-][01]?\d(?:[/-]\d{2,4})?)/i,
+    /\b(?:meu\s+)?anivers[aá]rio\s+(?:[ée]|eh|e|fica|cai)?\s*(?:no\s+dia\s+|dia\s+)?([0-3]?\d\s+de\s+[a-zçãéêíóôú]+(?:\s+de\s+\d{4})?)/i,
+    /\b(?:eu\s+)?nasci\s+(?:no\s+dia\s+|dia\s+|em\s+)?([0-3]?\d\s+de\s+[a-zçãéêíóôú]+(?:\s+de\s+\d{4})?)/i,
+    /\b(?:meu\s+)?anivers[aá]rio\s+(?:[ée]|eh|e|fica|cai)?\s*(?:em\s+)?([0-3]?\d[/-][01]?\d(?:[/-]\d{2,4})?)/i,
+    /\b(?:eu\s+)?nasci\s+(?:em\s+)?([0-3]?\d[/-][01]?\d(?:[/-]\d{2,4})?)/i,
+    /\b([0-3]?\d\s+de\s+[a-zçãéêíóôú]+(?:\s+de\s+\d{4})?)\b/i,
+    /\b([0-3]?\d[/-][01]?\d(?:[/-]\d{2,4})?)\b/i,
+  ];
+
+  for (const pattern of datePatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      return match[1].replace(/[.!?]+$/, '').trim();
+    }
+  }
+
+  return null;
+}
+
+function isBirthdayRecallIntent(message) {
+  const lower = normalizeTextForIntent(message);
+  const asksPersonalDate = /\b(qual|quando|lembra|lembrar|data)\b/.test(lower);
+  const birthdayTopic = /\b(aniversario|nascimento|nasci|nascer)\b/.test(lower);
+  return asksPersonalDate && birthdayTopic;
+}
+
+function findBirthdayInText(text) {
+  return extractBirthdayFact(text);
+}
+
+function findBirthdayInMemories(memories = []) {
+  for (const memory of memories) {
+    const found = findBirthdayInText(`${memory.summary || ''}\n${memory.content || ''}`);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function recallBirthdayFromLegacyCommitments(userId) {
+  try {
+    const { data, error } = await supabase
+      .from('daily_commitments')
+      .select('committed_tasks')
+      .eq('user_id', userId)
+      .order('date', { ascending: false })
+      .limit(30);
+
+    if (error) return null;
+
+    for (const row of data || []) {
+      for (const item of row.committed_tasks || []) {
+        const found = findBirthdayInText(item);
+        if (found) return found;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function saveBirthdayMemory(userId, userName, birthdayLabel, sourceMessage) {
+  await saveMemory(userId, {
+    memoryType: 'semantic',
+    content: `O aniversario de ${userName || 'usuario'} e ${birthdayLabel}.`,
+    summary: `Aniversario: ${birthdayLabel}`,
+    entities: [{
+      name: userName || 'usuario',
+      type: 'person',
+      description: `Aniversario em ${birthdayLabel}`,
+    }],
+    tags: ['aniversario', 'nascimento', 'data_pessoal'],
+    importance: 0.95,
+    sourceMessage,
+  });
+}
+
+function getTaskStatusFilterFromText(lower) {
+  if (/\b(cancelad[ao]s?|cancelamentos?)\b/.test(lower)) return 'canceled';
+  if (/\b(concluid[ao]s?|finalizad[ao]s?|terminad[ao]s?|feitas?)\b/.test(lower)) return 'done';
+  if (/\b(em\s+progresso|andamento|fazendo)\b/.test(lower)) return 'doing';
+  if (/\b(a\s+fazer|todo)\b/.test(lower)) return 'todo';
+  if (/\b(pendencias?|pendentes)\b/.test(lower)) return undefined;
+  if (/\b(todas?|geral|completas?|all)\b/.test(lower)) return 'all';
+  return undefined;
+}
+
 function getSimpleTaskListRequest(message) {
   const lower = normalizeTextForIntent(message);
+  if (hasTaskCompletionIntent(message)) return null;
   // Removemos "tarefas?" e "pendentes?" do hasQuestion porque causava falsos positivos muito fáceis.
   // Focamos em verbos e pronomes interrogativos claros ou "o que tenho".
   const hasQuestion = /\b(quais?|qual|listar?|lista|mostra|mostrar|ver|cad[êê]|cade|o\s+que\s+tenho)\b/.test(lower);
-  const asksTasks = /\b(tarefas?|pendencias?|pendentes|afazeres?|coisas?\s+pra\s+fazer|tenho\s+pra\s+fazer|tenho\s+para\s+fazer)\b/.test(lower);
+  const asksTasks = /\b(tarefas?|pendencias?|pendentes|afazeres?|cancelad[ao]s?|concluid[ao]s?|finalizad[ao]s?|em\s+progresso|coisas?\s+pra\s+fazer|tenho\s+pra\s+fazer|tenho\s+para\s+fazer)\b/.test(lower);
 
   // "?" só conta se estiver PERTO da menção de tarefas (ex: "quais tarefas?")
   // NÃO conta "tudo bem?" seguido de "queria uma tarefa" ⭐ o "?" é da saudação
@@ -600,7 +708,55 @@ function getSimpleTaskListRequest(message) {
 
   return {
     due_date: /\b(hoje|pra\s+hoje|para\s+hoje)\b/.test(lower) ? getTodayISO() : undefined,
+    status: getTaskStatusFilterFromText(lower),
   };
+}
+
+function getTaskListScope(filter = {}, count = 2) {
+  const one = count === 1;
+  let scope;
+
+  switch (filter.status) {
+    case 'canceled':
+      scope = one ? 'cancelada' : 'canceladas';
+      break;
+    case 'done':
+      scope = one ? 'conclu\u00edda' : 'conclu\u00eddas';
+      break;
+    case 'doing':
+      scope = 'em progresso';
+      break;
+    case 'todo':
+      scope = 'a fazer';
+      break;
+    case 'all':
+      scope = 'no total';
+      break;
+    default:
+      scope = one ? 'pendente' : 'pendentes';
+  }
+
+  if (filter.due_date) {
+    const dateScope = filter.due_date === getTodayISO() ? 'pra hoje' : `para ${filter.due_date}`;
+    if (filter.status === 'all') return dateScope;
+    return `${scope} ${dateScope}`;
+  }
+
+  return scope;
+}
+
+function pickTaskListIntro(userMessage, userName, count, scope) {
+  const taskWord = count === 1 ? 'tarefa' : 'tarefas';
+  const demonstrative = count === 1 ? 'essa \u00e9 a tarefa' : 'essas s\u00e3o as tarefas';
+  const variants = [
+    `${userName}, encontrei ${count} ${taskWord} ${scope}:`,
+    `Olhei aqui: ${count} ${taskWord} ${scope}:`,
+    `Achei ${count} ${taskWord} ${scope} por aqui:`,
+    `Aqui vai o que encontrei - ${count} ${taskWord} ${scope}:`,
+    `${userName}, ${demonstrative} ${scope}:`,
+  ];
+  const seed = Array.from(`${userMessage}|${Date.now()}`).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return variants[seed % variants.length];
 }
 
 function buildSimpleTaskListResponse(userMessage, userName, result, filter = {}) {
@@ -611,20 +767,147 @@ function buildSimpleTaskListResponse(userMessage, userName, result, filter = {})
       : /\bboa\s+noite\b/i.test(userMessage)
         ? 'Boa noite'
         : null;
-  const prefix = greeting ? `${greeting}, ${userName}! ` : `${userName}, `;
-  const scope = filter.due_date ? 'pra hoje' : 'pendentes';
+  const greetingPrefix = greeting ? `${greeting}, ${userName}. ` : '';
 
   if (!result?.success) {
-    return `${prefix}não consegui buscar suas tarefas agora. Tenta de novo em alguns instantes.`;
+    return `${greetingPrefix}${userName}, n\u00e3o consegui buscar suas tarefas agora. Tenta de novo em alguns instantes.`;
   }
+
+  const scope = getTaskListScope(filter, result.count || 0);
 
   if (!result.count) {
-    return filter.due_date
-      ? `${prefix}hoje está tranquilo: não encontrei tarefas pendentes pra hoje.`
-      : `${prefix}não encontrei tarefas pendentes no momento.`;
+    if (filter.status === 'all') {
+      return `${greetingPrefix}${userName}, n\u00e3o encontrei tarefas cadastradas por aqui.`;
+    }
+    return `${greetingPrefix}${userName}, n\u00e3o encontrei tarefas ${scope} no momento.`;
   }
 
-  return `${prefix}você tem ${result.count} tarefa${result.count > 1 ? 's' : ''} ${scope}:\n${result.formatted_list}`;
+  return `${greetingPrefix}${pickTaskListIntro(userMessage, userName, result.count, scope)}\n${result.formatted_list}`;
+}
+
+const TASK_COMPLETION_PATTERNS = [
+  /\b(j[aá]\s+)?conclu[ií]\b/i,
+  /\bterminei\b/i,
+  /\bfinalizei\b/i,
+  /\bt[aá]\s+feito\b/i,
+  /\bmarc[ae]?\s+(como\s+)?conclu[ií]d[ao]\b/i,
+  /\bmover?\s+(para|pra)\s+conclu[ií]d[ao]\b/i,
+  /\bpassa?r?\s+(para|pra)\s+conclu[ií]d[ao]\b/i,
+];
+
+function hasTaskCompletionIntent(message) {
+  return TASK_COMPLETION_PATTERNS.some(re => re.test(message));
+}
+
+function asksForNextTasks(message) {
+  const lower = normalizeTextForIntent(message);
+  return /\b(em\s+seguida|depois|agora|o\s+que\s+(precisa|falta|tem)|que\s+mais|proxim[ao]s?|mais\s+alguma)\b/.test(lower);
+}
+
+function hasVagueTaskReference(message) {
+  const lower = normalizeTextForIntent(message);
+  return /\b(essa|esta|esse|este|ela|ele|aquela|aquele|isso|essa\s+tarefa|esta\s+tarefa)\b/.test(lower);
+}
+
+function extractTaskNumberReference(message) {
+  const lower = normalizeTextForIntent(message);
+  const numeric = lower.match(/\b(?:numero|n|a|o)?\s*(\d{1,2})\b/);
+  if (numeric) return Number(numeric[1]);
+
+  const ordinals = [
+    ['primeira', 1], ['primeiro', 1],
+    ['segunda', 2], ['segundo', 2],
+    ['terceira', 3], ['terceiro', 3],
+    ['quarta', 4], ['quarto', 4],
+    ['quinta', 5], ['quinto', 5],
+  ];
+  const found = ordinals.find(([word]) => lower.includes(word));
+  return found?.[1] || null;
+}
+
+function parseTaskIndexBlock(content) {
+  const text = String(content || '');
+  const match = text.match(/\[(?:ÍNDICE|INDICE):([^\]]+)\]/i);
+  if (!match) return {};
+
+  const entries = {};
+  for (const item of match[1].split('|')) {
+    const entry = item.match(/(\d+)="([^"]+)"/);
+    if (entry) entries[Number(entry[1])] = entry[2];
+  }
+  return entries;
+}
+
+function extractTaskTitlesFromAssistantContent(content) {
+  const text = String(content || '').replace(/\[(?:ÍNDICE|INDICE):[^\]]+\]/gi, '');
+  const titles = [];
+
+  for (const line of text.split('\n')) {
+    const numbered = line.match(/^\s*\d+\.\s+\*?([^*(\n]+?)\*?\s*(?:\(|$)/);
+    if (numbered?.[1]) {
+      titles.push(numbered[1].trim());
+      continue;
+    }
+
+    const emphasized = line.match(/\*([^*]{3,120})\*/);
+    if (emphasized?.[1] && !/pendente|conclu[ií]d|atrasad/i.test(emphasized[1])) {
+      titles.push(emphasized[1].trim());
+    }
+  }
+
+  return [...new Set(titles)].filter(Boolean);
+}
+
+async function resolveCompletionTargetFromHistory(userMessage, history) {
+  const requestedNumber = extractTaskNumberReference(userMessage);
+  const vague = hasVagueTaskReference(userMessage);
+  const assistantMessages = [...history].reverse().filter(m => m.role === 'assistant');
+
+  for (const message of assistantMessages.slice(0, 8)) {
+    const indexMap = parseTaskIndexBlock(message.content);
+    if (requestedNumber && indexMap[requestedNumber]) {
+      return { taskId: indexMap[requestedNumber] };
+    }
+
+    const indexIds = Object.values(indexMap);
+    if (vague && indexIds.length === 1) {
+      return { taskId: indexIds[0] };
+    }
+    if (vague && indexIds.length > 1) {
+      return { ambiguous: true };
+    }
+
+    const titles = extractTaskTitlesFromAssistantContent(message.content);
+    if (vague && titles.length === 1) {
+      return { taskTitle: titles[0] };
+    }
+    if (vague && titles.length > 1) {
+      return { ambiguous: true };
+    }
+  }
+
+  return { ambiguous: true };
+}
+
+function buildTaskIndexBlock(tasksRaw) {
+  return tasksRaw?.length
+    ? `\n[ÍNDICE:${tasksRaw.map((t, i) => `${i + 1}="${t.id}"`).join('|')}]`
+    : '';
+}
+
+function buildCompletionAndNextResponse(userName, updateResult, listResult, wantsNext) {
+  if (!updateResult?.success) {
+    return `${userName}, nao consegui identificar qual tarefa voce concluiu. Me manda o nome dela ou o numero da lista.`;
+  }
+
+  const doneLine = `Feito, ${userName}! *${updateResult.task_title}* ficou marcada como concluida.`;
+  if (!wantsNext) return `${doneLine} Mandou bem.`;
+
+  if (!listResult?.success || !listResult.count) {
+    return `${doneLine}\n\nNo momento nao encontrei mais tarefas pendentes.`;
+  }
+
+  return `${doneLine}\n\nAgora ainda falta:\n${listResult.formatted_list}`;
 }
 
 const TASK_GLUE_WORDS = new Set([
@@ -1209,6 +1492,115 @@ export async function queryEngineLoop(
     trace.error_class = telemetry.error_class || trace.error_class;
   };
 
+  const birthdayFact = extractBirthdayFact(userMessage);
+  if (birthdayFact && !isBirthdayRecallIntent(userMessage)) {
+    const startedAt = Date.now();
+    const history = await getHistory(sessionId);
+    await saveBirthdayMemory(userId, userName, birthdayFact, userMessage);
+    const content = `Fechado, ${userName}. Seu aniversário é ${birthdayFact}.`;
+
+    await saveHistory(sessionId, [
+      ...history,
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content },
+    ]);
+
+    trace.provider = 'direct';
+    trace.model = 'memory-birthday-save';
+    trace.latency_ms += Date.now() - startedAt;
+    trace.tool_count += 1;
+    return returnTelemetry ? { content, telemetry: trace } : content;
+  }
+
+  if (isBirthdayRecallIntent(userMessage)) {
+    const startedAt = Date.now();
+    const history = await getHistory(sessionId);
+    const memories = await recallMemories(userId, {
+      query: 'aniversario nascimento nasci data pessoal',
+      limit: 5,
+      minImportance: 0,
+    });
+    let birthday = findBirthdayInMemories(memories);
+
+    if (!birthday) {
+      birthday = await recallBirthdayFromLegacyCommitments(userId);
+      if (birthday) {
+        await saveBirthdayMemory(userId, userName, birthday, 'Migrado de compromisso diario salvo incorretamente.');
+      }
+    }
+
+    const content = birthday
+      ? `${userName}, seu aniversário é ${birthday}.`
+      : `${userName}, não achei seu aniversário salvo aqui ainda. Me fala a data uma vez que eu guardo.`;
+
+    await saveHistory(sessionId, [
+      ...history,
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content },
+    ]);
+
+    trace.provider = 'direct';
+    trace.model = 'memory-birthday-recall';
+    trace.latency_ms += Date.now() - startedAt;
+    return returnTelemetry ? { content, telemetry: trace } : content;
+  }
+
+  const shouldResolveCompletionDirectly =
+    hasTaskCompletionIntent(userMessage) &&
+    (hasVagueTaskReference(userMessage) || extractTaskNumberReference(userMessage));
+
+  if (shouldResolveCompletionDirectly) {
+    const startedAt = Date.now();
+    const history = await getHistory(sessionId);
+    const target = await resolveCompletionTargetFromHistory(userMessage, history);
+    const wantsNext = asksForNextTasks(userMessage);
+
+    if (target.ambiguous || (!target.taskId && !target.taskTitle)) {
+      const content = wantsNext
+        ? `${userName}, qual tarefa vocÃª concluiu? Me manda o nome ou o nÃºmero dela que eu marco e jÃ¡ te digo o que falta.`
+        : `${userName}, qual tarefa vocÃª concluiu? Me manda o nome ou o nÃºmero dela que eu marco aqui.`;
+
+      await saveHistory(sessionId, [
+        ...history,
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content },
+      ]);
+
+      trace.provider = 'direct';
+      trace.model = 'task-completion-clarify';
+      trace.latency_ms += Date.now() - startedAt;
+      return returnTelemetry ? { content, telemetry: trace } : content;
+    }
+
+    emit('Atualizando tarefa...', { task_id: target.taskId, task_title: target.taskTitle });
+    const updateResult = await executeTool('TaskUpdate', {
+      task_id: target.taskId || target.taskTitle,
+      status: 'done',
+    }, { userId });
+    trace.tool_count += 1;
+    if (updateResult.success) invalidateContextCache(userId);
+
+    let listResult = null;
+    if (wantsNext) {
+      listResult = await executeTool('TaskList', { limit: 8 }, { userId });
+      trace.tool_count += 1;
+    }
+
+    const content = buildCompletionAndNextResponse(userName, updateResult, listResult, wantsNext);
+    const taskIndexBlock = wantsNext ? buildTaskIndexBlock(listResult?.tasks_raw) : '';
+
+    await saveHistory(sessionId, [
+      ...history,
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content: content + taskIndexBlock },
+    ]);
+
+    trace.provider = 'direct';
+    trace.model = 'task-completion';
+    trace.latency_ms += Date.now() - startedAt;
+    return returnTelemetry ? { content, telemetry: trace } : content;
+  }
+
   const simpleTaskListRequest = getSimpleTaskListRequest(userMessage);
   if (simpleTaskListRequest) {
     try {
@@ -1216,6 +1608,7 @@ export async function queryEngineLoop(
       emit('Buscando tarefas...', { query: simpleTaskListRequest });
       const result = await executeTool('TaskList', {
         limit: 10,
+        ...(simpleTaskListRequest.status ? { status: simpleTaskListRequest.status } : {}),
         ...(simpleTaskListRequest.due_date ? { due_date: simpleTaskListRequest.due_date } : {}),
       }, { userId });
       const content = buildSimpleTaskListResponse(userMessage, userName, result, simpleTaskListRequest);
@@ -1349,8 +1742,8 @@ export async function queryEngineLoop(
         ? { type: 'function', function: { name: preferredTool } }
         : 'auto';
       // Reasoning models (nemotron-super) precisam de budget maior pro thinking
-      const isReasoningModel = !!(process.env.MODEL_ID || '').includes('nemotron')
-        || !!(process.env.MODEL_ID || '').includes('reasoning');
+      const isReasoningModel = PRIMARY_MODEL_ID.includes('nemotron')
+        || PRIMARY_MODEL_ID.includes('reasoning');
       const baseMax = isFirstCall ? (multipleTasksIntent ? 900 : 450) : 250;
       const currentMaxTokens = isReasoningModel ? Math.max(baseMax, 2048) : baseMax;
 
@@ -1488,7 +1881,7 @@ export async function queryEngineLoop(
               (toolCall.function.name === 'TaskUpdate' || toolCall.function.name === 'TaskDelete') &&
               result._hint?.includes('não encontrada')
             ) {
-              console.log(`[AutoRecover] ID inválido em ${toolCall.function.name} ÔÇö buscando por título...`);
+              console.log(`[AutoRecover] ID inválido em ${toolCall.function.name} - buscando por título...`);
               // Extrai palavras-chave relevantes (remove stopwords curtas e limita tamanho)
               const searchQuery = userMessage.substring(0, 120).replace(/[,()!?]/g, ' ').replace(/\s+/g, ' ').trim();
               const searchResult = await executeTool('TaskSearch', { query: searchQuery }, { userId });
@@ -1540,7 +1933,7 @@ export async function queryEngineLoop(
       // Safety net: se o modelo ainda assim não chamou ferramenta com intenção clara,
       // loga para diagnóstico (não deve acontecer pois forçamos na 1┬¬ chamada via preferredTool)
       if (toolTurns === 0 && preferredTool) {
-        console.warn(`[Fallback] tool_choice forçado mas modelo não chamou ${preferredTool} ÔÇö respondendo em texto`);
+        console.warn(`[Fallback] tool_choice forçado mas modelo não chamou ${preferredTool} - respondendo em texto`);
       }
 
       // Resposta final — strip de bloco <think>...</think> de modelos de raciocínio (ex: Kimi K2.5)
@@ -1548,11 +1941,11 @@ export async function queryEngineLoop(
         || 'Pode repetir? Não entendi direito.';
 
       // Detecta artefatos internos do modelo (ex: "<´¢£toolÔûüsep´¢£>") na resposta final
-      // Quando presente, o modelo vazou sintaxe interna em vez de gerar texto ÔÇö refaz com tool_choice: 'none'
+      // Quando presente, o modelo vazou sintaxe interna em vez de gerar texto - refaz com tool_choice: 'none'
       const hasModelArtifacts = (s) => s.includes('<´¢£tool') || s.includes('toolÔûü') || s.includes('<tool_call>');
 
       if (hasModelArtifacts(finalContent)) {
-        console.warn('[QueryEngine] Resposta com artefatos detectada ÔÇö reforçando resposta limpa');
+        console.warn('[QueryEngine] Resposta com artefatos detectada - reforçando resposta limpa');
         try {
           const cleanMessages = messages.filter(m => !hasModelArtifacts(m.content || ''));
           cleanMessages.push({
