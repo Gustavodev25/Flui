@@ -184,7 +184,7 @@ export async function buildMorningMessage(userId, userName) {
       .not('due_date', 'is', null)
       .lte('due_date', todayISO)
       .order('due_date', { ascending: true })
-      .limit(10),
+      .limit(20),
     supabase
       .from('tasks')
       .select('title, priority')
@@ -192,56 +192,55 @@ export async function buildMorningMessage(userId, userName) {
       .in('status', ['todo', 'doing'])
       .is('due_date', null)
       .order('priority', { ascending: false })
-      .limit(5),
+      .limit(10),
   ]);
 
   const overdue = (tasksResult.data || []).filter(t => t.due_date < todayISO);
   const today = (tasksResult.data || []).filter(t => t.due_date === todayISO);
   const nodue = noDueResult.data || [];
 
-  if (overdue.length === 0 && today.length === 0 && nodue.length === 0) return null;
+  const allTasks = [...overdue, ...today, ...nodue];
+  if (allTasks.length === 0) return null;
 
-  let taskContext = '';
-  if (overdue.length > 0) taskContext += `\nATRASADAS: ${overdue.map(t => `"${t.title}"`).join(', ')}`;
-  if (today.length > 0) taskContext += `\nPRA HOJE: ${today.map(t => `"${t.title}"`).join(', ')}`;
-  if (nodue.length > 0) taskContext += `\nSEM PRAZO: ${nodue.map(t => `"${t.title}"`).join(', ')}`;
+  // Tarefa principal: a mais urgente (atrasada > hoje > sem prazo)
+  const mainTask = allTasks[0];
+  const othersCount = allTasks.length - 1;
 
-  let styleHint = 'Tom amigável e direto.';
-  if (profile?.communication_style === 'concise') styleHint = 'MUITO BREVE — máximo 3 frases no total.';
-  else if (profile?.communication_style === 'detailed') styleHint = 'Pode elaborar levemente.';
+  let concise = profile?.communication_style === 'concise';
 
-  const systemPrompt = `Você é um coach de produtividade via WhatsApp. Seu objetivo agora: fazer o usuário escolher e SE COMPROMETER com no máximo 3 tarefas para hoje.
+  const systemPrompt = `Você é um assistente de produtividade no WhatsApp. Mande uma mensagem curta e NATURAL de bom dia.
 
 Nome: ${userName}
-Data: ${todayISO} (manhã)
-${styleHint}
+Tarefa principal (a mais urgente): "${mainTask.title}"${mainTask.due_date < todayISO ? ' (atrasada)' : ''}
+Outras tarefas: ${othersCount} no total
 
-TAREFAS DISPONÍVEIS:${taskContext}
-
-REGRAS:
-1. Saudação breve de bom dia.
-2. Destaque 2-3 tarefas que fazem mais sentido hoje (priorize atrasadas).
-3. Encerre com UMA pergunta clara: "Quais você quer fechar hoje? Me manda a lista."
-4. NÃO use emojis. Máximo 4 frases.
-5. NÃO liste todas as tarefas — escolha as mais relevantes.
-6. NÃO se apresente ou descreva o que você é.`;
+REGRAS — SIGA À RISCA:
+1. Bom dia natural, 1 frase só.
+2. Mencione APENAS a tarefa principal pelo nome. Não liste mais nada.
+3. Se houver outras tarefas (othersCount > 0), mencione só a quantidade: "você tem mais ${othersCount} coisa${othersCount > 1 ? 's' : ''} pra hoje" e pergunte se quer ver.
+4. Se só existe essa 1 tarefa, pergunte se ela consegue fechar hoje.
+5. NUNCA use bullets, numeração ou dois pontos para listar tarefas.
+6. Máximo ${concise ? '2' : '3'} frases no total. Tom de amigo mandando mensagem rápida.
+7. Sem emojis. Sem apresentação.`;
 
   try {
     const response = await nimClient.chat.completions.create({
       model: MODEL_ID,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: 'Gere a mensagem de comprometimento matinal.' },
+        { role: 'user', content: 'Gere a mensagem matinal.' },
       ],
-      temperature: 0.65,
-      max_tokens: 250,
+      temperature: 0.7,
+      max_tokens: 120,
       ...THINKING_OFF,
     });
     return response.choices?.[0]?.message?.content?.trim() || null;
   } catch (err) {
     console.error('[AccountabilityLoop] morning LLM error:', err.message);
-    const highlight = [...overdue, ...today].slice(0, 3).map(t => `"${t.title}"`).join(', ');
-    return `Bom dia, ${userName}! Você tem ${highlight} na lista. Quais você quer fechar hoje? Me manda a lista.`;
+    if (othersCount > 0) {
+      return `Bom dia, ${userName}! Tá lembrado de "${mainTask.title}"? Você tem mais ${othersCount} coisa${othersCount > 1 ? 's' : ''} pra hoje também. Quer ver?`;
+    }
+    return `Bom dia, ${userName}! Você tem "${mainTask.title}" pra fechar hoje. Consegue?`;
   }
 }
 

@@ -6,42 +6,30 @@ import { sanitizeChatMessagesForInput } from './chatMessageSanitizer.js';
 
 export const PRIMARY_PROVIDER = 'nvidia';
 export const RECOMMENDED_FAST_AGENT_MODEL = 'deepseek-ai/deepseek-v4-pro';
-const LEGACY_TIMEOUT_PRONE_MODELS = new Set(['z-ai/glm4.7']);
 
 function resolvePrimaryModelId() {
   const configured = process.env.PRIMARY_MODEL_ID || process.env.MODEL_ID || '';
   const normalized = configured.trim();
-
-  if (!normalized) return RECOMMENDED_FAST_AGENT_MODEL;
-  if (LEGACY_TIMEOUT_PRONE_MODELS.has(normalized) && process.env.ALLOW_LEGACY_LLM_MODEL !== 'true') {
-    return RECOMMENDED_FAST_AGENT_MODEL;
-  }
-  return normalized;
+  return normalized || RECOMMENDED_FAST_AGENT_MODEL;
 }
 
 export const PRIMARY_MODEL_ID = resolvePrimaryModelId();
 export const PRIMARY_TIMEOUT_MS = Math.max(Number(process.env.PRIMARY_LLM_TIMEOUT_MS || 45000), 45000);
 
-export const FALLBACK_PROVIDER = 'groq';
-export const FALLBACK_MODEL_ID = process.env.GROQ_MODEL_ID || 'llama-3.3-70b-versatile';
+export const FALLBACK_PROVIDER = 'nvidia';
+export const FALLBACK_MODEL_ID = process.env.FALLBACK_MODEL_ID || 'deepseek-ai/deepseek-v4-flash';
 export const FALLBACK_TIMEOUT_MS = Math.max(Number(process.env.FALLBACK_LLM_TIMEOUT_MS || 25000), 25000);
 export const TURN_BUDGET_MS = Math.max(Number(process.env.LLM_TURN_BUDGET_MS || 90000), 90000);
 
-const primaryClient = process.env.NVIDIA_API_KEY
+const nvidiaClient = process.env.NVIDIA_API_KEY
   ? new OpenAI({
     apiKey: process.env.NVIDIA_API_KEY,
     baseURL: 'https://integrate.api.nvidia.com/v1',
   })
   : null;
 
-const useGroqChatFallback = process.env.ENABLE_GROQ_CHAT_FALLBACK !== 'false';
-
-const fallbackClient = useGroqChatFallback && process.env.GROQ_API_KEY
-  ? new OpenAI({
-    apiKey: process.env.GROQ_API_KEY,
-    baseURL: 'https://api.groq.com/openai/v1',
-  })
-  : null;
+const primaryClient = nvidiaClient;
+const fallbackClient = nvidiaClient;
 
 function isAbortLikeError(err) {
   const message = String(err?.message || '').toLowerCase();
@@ -236,7 +224,7 @@ export function getLlmStatus() {
       configured: !!fallbackClient,
       provider: FALLBACK_PROVIDER,
       model: FALLBACK_MODEL_ID,
-      disabled_reason: useGroqChatFallback ? null : 'ENABLE_GROQ_CHAT_FALLBACK not true',
+      disabled_reason: null,
     },
   };
 }

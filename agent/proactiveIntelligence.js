@@ -240,37 +240,39 @@ export async function buildSmartProactiveMessage(userId, userName, period) {
   const today = pendingTasks.filter(t => t.due_date === todayISO);
   const upcoming = pendingTasks.filter(t => t.due_date > todayISO);
 
-  let taskContext = '';
-  if (overdue.length > 0) {
-    taskContext += `\nATRASADAS (${overdue.length}): ${overdue.map(t => `"${t.title}"`).join(', ')}`;
-  }
-  if (today.length > 0) {
-    taskContext += `\nHOJE (${today.length}): ${today.map(t => `"${t.title}"`).join(', ')}`;
-  }
-  if (upcoming.length > 0) {
-    taskContext += `\nPROXIMOS DIAS (${upcoming.length}): ${upcoming.map(t => `"${t.title}"`).join(', ')}`;
-  }
+  // Tarefa principal: a mais urgente
+  const allSorted = [...overdue, ...today, ...upcoming];
+  const mainTask = allSorted[0] || null;
+  const othersCount = Math.max(0, allSorted.length - 1);
+
+  const mainTaskContext = mainTask
+    ? `\nTAREFA PRINCIPAL (mencione só esta): "${mainTask.title}"${mainTask.due_date < todayISO ? ' — atrasada' : mainTask.due_date === todayISO ? ' — pra hoje' : ' — próximos dias'}`
+    : '\nNenhuma tarefa próxima.';
+
+  const othersContext = othersCount > 0
+    ? `\nOUTRAS TAREFAS: ${othersCount} (não liste — mencione só a quantidade se relevante)`
+    : '';
 
   const systemPrompt = `Voce e um assistente de produtividade inteligente e PROATIVO via WhatsApp. Voce CONHECE este usuario — seus padroes, seus pontos fortes e fracos.
 
 Nome: ${userName || 'Companheiro(a)'}
 Data: ${todayISO} | Periodo: ${period} (${greeting})
 Streak atual: ${streak} dias | Concluidas esta semana: ${doneThisWeek}
-
-TAREFAS:${taskContext || '\nNenhuma tarefa proxima.'}
+${mainTaskContext}${othersContext}
 ${profileContext}${insightContext}
 
-REGRAS:
+REGRAS — SIGA À RISCA:
 1. Comece com saudacao natural ("${greeting}, ${userName}!").
 2. NAO use emojis.
-3. Seja breve (WhatsApp).
-4. Integre o insight de forma NATURAL — como se voce tivesse percebido algo sobre o usuario.
-5. Se tem streak ou progresso bom, RECONHECA genuinamente.
-6. Se detectou procrastinacao, aborde com carinho — nunca julgue.
-7. Termine com uma oferta de ajuda especifica baseada no contexto (nao generica).
-8. Use "hoje", "amanha" em vez de datas ISO.
-9. NUNCA se apresente ou liste funcionalidades.
-10. Tom: como um amigo inteligente que te conhece bem.`;
+3. Seja breve — maximo 3 frases (WhatsApp).
+4. Se tem tarefa principal, mencione APENAS ela pelo nome. NUNCA liste multiplas tarefas.
+5. Se ha outras tarefas alem da principal, mencione so a quantidade e pergunte se quer ver: "voce tem mais X coisas, quer ver?"
+6. Integre o insight de forma NATURAL — como se voce tivesse percebido algo sobre o usuario.
+7. Se tem streak ou progresso bom, RECONHECA genuinamente mas em poucas palavras.
+8. Se detectou procrastinacao, aborde com carinho — nunca julgue.
+9. Use "hoje", "amanha" em vez de datas ISO.
+10. NUNCA se apresente ou liste funcionalidades.
+11. Tom: como um amigo inteligente que te conhece bem, mandando mensagem rapida.`;
 
   try {
     const response = await nimClient.chat.completions.create({
