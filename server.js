@@ -36,7 +36,7 @@ import {
 import { trackEvent, analyzeAndUpdateProfile } from './agent/behavioralProfile.js';
 import { detectAndSaveCommitment } from './agent/accountabilityLoop.js';
 import { getMemorySystemStatus } from './agent/memoryEngine.js';
-import { engineEvents as agentEvents } from './agent/queryEngine.js';
+import { engineEvents as agentEvents, hasMultipleTasks } from './agent/queryEngine.js';
 import { sanitizeWhatsAppPayload, sanitizeWhatsAppText } from './agent/textFormatter.js';
 import {
   getSession,
@@ -1617,15 +1617,18 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
     // ===== AGENT LOOP =====
     sendTypingIndicator(userPhone, messageId);
 
-    // Se demorar mais de 8s, envia mensagem estática de espera (NÃO usa LLM para evitar
-    // resposta dupla — o LLM geraria uma mensagem tão natural que pareceria a resposta real).
+    // Mensagens simples (perguntas curtas, busca em memória) demoram mais pelo embedding search
+    // mas não precisam de aviso — só dispara o "estou processando" para mensagens complexas.
+    const isComplexMessage = hasMultipleTasks(cleanMessage) || cleanMessage.length > 150;
+    const processingDelay = isComplexMessage ? 8000 : 20000;
+
     let turnFinished = false;
     const processingTimer = setTimeout(() => {
       if (!turnFinished) {
         const update = getFallbackProcessingUpdate(cleanMessage);
         sendWhatsAppMessage(userPhone, update).catch(() => {});
       }
-    }, 8000);
+    }, processingDelay);
 
     // Atualiza janela de 24h: registra último inbound do usuário na binding
     supabaseAdmin
