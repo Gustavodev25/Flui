@@ -1,17 +1,20 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
 import NumberFlow from '@number-flow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, MoreHorizontal, Layout, Table as TableIcon, Loader2, Edit2, Trash2, CheckCircle2, Circle, ChevronUp, Users, Lock } from 'lucide-react'
+import { Plus, MoreHorizontal, Layout, Table as TableIcon, Loader2, Edit2, Trash2, CheckCircle2, Circle, ChevronUp, Users, Lock, Calendar, Flag } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useSubscription } from '../contexts/SubscriptionContext'
 import Avvvatars from 'avvvatars-react'
 import { supabase } from '../lib/supabase'
 import { apiFetch } from '../lib/api'
+import { syncTaskWithGoogleCalendar, unlinkTaskFromGoogleCalendar } from '../lib/googleCalendar'
 import Modal from '../components/ui/Modal'
 import TaskForm from '../components/TaskForm'
 import TaskDetailModal from '../components/TaskDetailModal'
 import { Dropdown, DropdownItem, DropdownDivider } from '../components/ui/Dropdown'
 import DeleteConfirmation from '../components/ui/DeleteConfirmation'
+import { Loading } from '../components/ui/Loading'
+import { InfiniteRibbon } from '../components/ui/infinite-ribbon'
 import swingingDoodle from '../assets/doodles/SwingingDoodle.png'
 import finlozLogo from '../assets/logo/lui.svg'
 import {
@@ -70,6 +73,7 @@ interface Task {
   assignedToName?: string
   assignedToAvatar?: string
   assignedToEmail?: string
+  isNew?: boolean
 }
 
 interface WorkspaceMember {
@@ -101,6 +105,11 @@ const formatDate = (dateStr: string) => {
 
   const months = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
   return `${day} ${months[month - 1]}`
+}
+
+const formatDueTime = (timeStr?: string) => {
+  if (!timeStr) return ''
+  return timeStr.slice(0, 5)
 }
 
 /** Retorna quantos dias faltam para a data de vencimento (negativo = atrasado) */
@@ -135,31 +144,59 @@ const getPriorityColor = (priority: Task['priority']) => {
 
 
 // Componente para o Card da Tarefa
-const TaskCardUI = React.forwardRef<HTMLDivElement, {
-  task: Task
-  isDragging?: boolean
-  isOverlay?: boolean
-  dragHandleProps?: any
-  style?: React.CSSProperties
-  onEdit: (task: Task) => void
-  onDelete: (id: string) => void
-  activeDropdownId: string | null
-  setActiveDropdownId: (id: string | null) => void
-  userEmail?: string
-  isPending?: boolean
-  pendingTarget?: Task['status']
-  onConfirm?: () => void
-  onCancel?: () => void
-  onToggleSubtask?: (taskId: string, subtaskId: string) => void
-  onStopTimer?: (taskId: string) => void
-  onCardClick?: (task: Task) => void
-  isWorkspaceView?: boolean
-  onMoveVisibility?: (taskId: string, newVisibility: 'personal' | 'workspace') => void
-  canMoveVisibility?: boolean
-  isExiting?: boolean
-}>(({ task, isDragging, isOverlay, dragHandleProps, style, onEdit, onDelete, activeDropdownId, setActiveDropdownId, userEmail, isPending, pendingTarget, onConfirm, onCancel, onToggleSubtask, onStopTimer, onCardClick, isWorkspaceView, onMoveVisibility, canMoveVisibility, isExiting }, ref) => {
+interface TaskCardProps {
+  task: Task;
+  isDragging?: boolean;
+  isOverlay?: boolean;
+  dragHandleProps?: any;
+  style?: React.CSSProperties;
+  onEdit: (task: Task) => void;
+  onDelete: (id: string) => void;
+  activeDropdownId: string | null;
+  setActiveDropdownId: (id: string | null) => void;
+  userEmail?: string;
+  isPending?: boolean;
+  pendingTarget?: Task['status'];
+  onConfirm?: () => void;
+  onCancel?: () => void;
+  onToggleSubtask?: (taskId: string, subtaskId: string) => void;
+  onStopTimer?: (taskId: string) => void;
+  onCardClick?: (task: Task) => void;
+  isWorkspaceView?: boolean;
+  onMoveVisibility?: (taskId: string, newVisibility: 'personal' | 'workspace') => void;
+  canMoveVisibility?: boolean;
+  isExiting?: boolean;
+}
 
-  const [isSubtasksExpanded, setIsSubtasksExpanded] = useState(false)
+const TaskCardUI = React.forwardRef<
+  HTMLDivElement,
+  TaskCardProps
+>((props, ref) => {
+  const {
+    task,
+    isDragging,
+    isOverlay,
+    dragHandleProps,
+    style,
+    onEdit,
+    onDelete,
+    activeDropdownId,
+    setActiveDropdownId,
+    userEmail,
+    isPending,
+    pendingTarget,
+    onConfirm,
+    onCancel,
+    onToggleSubtask,
+    onStopTimer,
+    onCardClick,
+    isWorkspaceView,
+    onMoveVisibility,
+    canMoveVisibility,
+    isExiting,
+  } = props;
+
+  const [isSubtasksExpanded, setIsSubtasksExpanded] = useState(false);
 
   // Countdown em tempo real (tick a cada 1s) — apenas para tarefas com timer_at (ex: criadas pelo WhatsApp)
   const effectiveTimerAt = task.timerAt || null;
@@ -212,17 +249,17 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
 
   const isPlaceholder = isDragging && !isOverlay;
 
-  // Estilos limpos e minimalistas baseados no estado (Arrastando vs Fixo vs Overlay)
+  // Estilos limpos e premium baseados no estado
   const cardStateClasses = isOverlay
-    ? 'bg-white ring-1 ring-black/5 shadow-xl shadow-black/10 scale-[1.02] rotate-2 cursor-grabbing'
+    ? 'bg-white ring-1 ring-black/[0.06] scale-[1.04] cursor-grabbing shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2),0_16px_32px_-8px_rgba(0,0,0,0.1)]'
     : isPlaceholder
-      ? 'bg-[#f7f7f5]/80 border-2 border-dashed border-[#d3d3d1]/60 opacity-50 shadow-none'
-      : 'bg-white border border-[#e9e9e7] group-hover:border-[#d3d3d1] hover:shadow-md cursor-grab active:cursor-grabbing';
+      ? 'bg-[#f7f7f5]/40 border-2 border-dashed border-[#d3d3d1]/80 opacity-60 shadow-none backdrop-blur-[2px]'
+      : 'bg-white border border-[#e9e9e7] shadow-none group-hover:border-[#37352f]/20 cursor-grab active:cursor-grabbing transition-colors';
 
   return (
     <div
       ref={ref}
-      style={style}
+      style={isOverlay ? { ...style, transform: 'rotate(var(--drag-tilt, 0deg))' } : style}
       className={`relative flex flex-col group w-full min-w-0 ${isOverlay ? 'z-50' : activeDropdownId === task.id ? 'z-[60]' : 'z-0'}`}
       {...dragHandleProps}
     >
@@ -240,380 +277,366 @@ const TaskCardUI = React.forwardRef<HTMLDivElement, {
             ? { duration: 0.18, ease: [0.4, 0, 1, 1] }
             : { duration: 0.28, ease: [0, 0, 0.2, 1] }
         }
-        className={`w-full transition-shadow duration-200 ${isOverlay ? 'z-50' : ''}`}
+        className={`relative w-full transition-all duration-300 ${isOverlay ? 'z-50' : ''}`}
       >
+        {/* TAG DE AUTORIA (Lui ou Usuário) - Fora do overflow-hidden */}
+        {!isPlaceholder && (
+          <div className="absolute -top-2.5 -right-2 bg-white border border-[#e9e9e7] px-2 py-0.5 rounded-md shadow-sm z-50 flex items-center gap-1.5 select-none pointer-events-none rotate-[4deg] group-hover:rotate-[6deg] transition-transform duration-300">
+            {task.source === 'whatsapp' ? (
+              <>
+                <img src={finlozLogo} alt="Finloz" className="w-2.5 h-2.5 object-contain grayscale opacity-70" />
+                <span className="text-[8.5px] font-bold text-[#37352f]/70 uppercase tracking-widest mt-[0.5px]">Lui</span>
+              </>
+            ) : (
+              <>
+                {isWorkspaceView && task.authorAvatar ? (
+                  <img src={task.authorAvatar} alt="" className="w-3 h-3 rounded-full object-cover grayscale opacity-80" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                ) : (
+                  <div className="w-3 h-3 rounded-full overflow-hidden flex-shrink-0 flex grayscale opacity-80 items-center justify-center">
+                    <Avvvatars value={isWorkspaceView && task.authorEmail ? task.authorEmail : (userEmail || 'guest')} size={12} style="character" />
+                  </div>
+                )}
+                <span className="text-[8.5px] font-bold text-[#37352f]/70 uppercase tracking-widest mt-[0.5px] truncate max-w-[70px]">
+                  {isWorkspaceView ? (task.authorEmail === userEmail ? 'Você' : (task.authorName ? task.authorName.split(' ')[0] : 'Você')) : 'Você'}
+                </span>
+              </>
+            )}
+          </div>
+        )}
         {/* 1. CARD PRINCIPAL */}
         <div
           onClick={() => { if (!isDragging && !isOverlay && onCardClick) { onCardClick(task) } }}
-          className={`relative z-10 p-4 rounded-2xl transition-all duration-200 ease-out ${cardStateClasses}`}>
+          className={`relative z-10 rounded-2xl transition-all duration-200 ease-out ${cardStateClasses}`}>
 
-          {/* Overlay de confirmação de alteração */}
-          {isPending && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="absolute inset-0 z-30 bg-white rounded-2xl flex items-center justify-center gap-6 px-4"
-            >
-              <span className="text-[13px] font-bold text-[#37352f] tracking-tight">
-                {pendingTarget === 'done' ? 'Concluir?' : 'Mudar?'}
-              </span>
-              <div className="flex items-center gap-4">
-                <button
-                  onPointerDown={e => e.stopPropagation()}
-                  onClick={e => { e.stopPropagation(); onCancel?.() }}
-                  className="text-[11px] font-bold text-[#37352f]/30 hover:text-[#37352f]/60 transition-colors"
-                >Não</button>
-                <button
-                  onPointerDown={e => e.stopPropagation()}
-                  onClick={e => { e.stopPropagation(); onConfirm?.() }}
-                  className="px-4 py-1.5 rounded-lg text-[11px] font-bold text-white bg-[#202020] hover:bg-black transition-all"
-                >Sim</button>
-              </div>
-            </motion.div>
-          )}
+          {/* Fundo do card */}
+          <div className="absolute inset-0 bg-white rounded-2xl" />
 
-          {/* Cabeçalho */}
-          <div className="flex items-start justify-between gap-3 mb-2">
-            <div className="flex items-start gap-2 flex-1 min-w-0">
-              {task.status === 'done' && (
-                <CheckCircle2 size={16} className="text-[#1a1a1a] mt-0.5 flex-shrink-0" strokeWidth={2.5} />
-              )}
-              <h4 className={`text-[14px] font-semibold leading-snug line-clamp-2 transition-all ${task.status === 'done' ? 'text-[#37352f]/40' : 'text-[#37352f]'}`}>
-                {task.title}
-              </h4>
-            </div>
+          {/* Conteúdo do card - Todo ele será esmaecido se cancelado */}
+          <div className={`relative z-10 p-5 transition-all duration-500 ${task.status === 'canceled' && !isPending ? 'opacity-[0.05] grayscale-[1] blur-[1px] scale-[0.98]' : ''}`}>
 
-            <div className="flex items-center gap-2 flex-shrink-0 -mt-0.5">
-              <div className="relative -mr-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setActiveDropdownId(activeDropdownId === task.id ? null : task.id)
-                  }}
-                  className="p-1 hover:bg-[#000000]/[0.05] rounded-md transition-colors text-[#37352f]/30 hover:text-[#37352f]"
-                >
-                  <MoreHorizontal size={16} className="flex-shrink-0" />
-                </button>
-
-                <Dropdown
-                  isOpen={activeDropdownId === task.id}
-                  onClose={() => setActiveDropdownId(null)}
-                  className="w-[148px]"
-                >
-                  <DropdownItem
-                    icon={<Edit2 size={12} />}
-                    label="Editar"
-                    onClick={() => onEdit(task)}
-                  />
-                  {canMoveVisibility && task.visibility === 'personal' && (
-                    <DropdownItem
-                      icon={<Users size={12} />}
-                      label="Para Workspace"
-                      onClick={() => onMoveVisibility?.(task.id, 'workspace')}
-                    />
-                  )}
-                  {canMoveVisibility && task.visibility === 'workspace' && (
-                    <DropdownItem
-                      icon={<Lock size={12} />}
-                      label="Para Pessoal"
-                      onClick={() => onMoveVisibility?.(task.id, 'personal')}
-                    />
-                  )}
-                  <DropdownDivider />
-                  <DropdownItem
-                    icon={<Trash2 size={12} />}
-                    label="Excluir"
-                    variant="danger"
-                    onClick={() => onDelete(task.id)}
-                  />
-                </Dropdown>
-              </div>
-            </div>
-          </div>
-
-          {/* Tags e Fonte/Avatar */}
-          <div className="flex items-center justify-between gap-2 mb-1">
-            {/* Workspace badge (esquerda) */}
-            {isWorkspaceView && task.visibility === 'workspace' && (
-              <div className="flex items-center gap-1 opacity-50">
-                <Users size={10} className="text-[#37352f]" />
-                {task.authorName && task.authorEmail !== userEmail && (
-                  <span className="text-[9px] font-semibold text-[#37352f]/60 truncate max-w-[80px]">{task.authorName}</span>
-                )}
-              </div>
-            )}
-            {!isWorkspaceView && task.visibility === 'workspace' && (
-              <div className="flex items-center gap-1 opacity-40" title="Tarefa compartilhada no workspace">
-                <Users size={10} className="text-[#37352f]" />
-              </div>
-            )}
-            {task.visibility === 'personal' && <div />}
-
-            {/* Avatares: responsável + autor (Direita) */}
-            <div className="flex items-center gap-[-4px] flex-shrink-0">
-              {/* Assignee badge (se diferente do autor) */}
-              {task.assignedToId && (
-                <div
-                  className="border-2 border-white rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-white z-10"
-                  title={`Responsável: ${task.assignedToName || 'Membro'}`}
-                  style={{ width: 20, height: 20 }}
-                >
-                  {task.assignedToAvatar
-                    ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display='none' }} />
-                    : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={20} style="character" />
-                  }
-                </div>
-              )}
-              {task.source === 'whatsapp' ? (
-                <div className="flex items-center gap-1.5 opacity-30 grayscale hover:grayscale-0 transition-all cursor-help" title="Lui">
-                  <img src={finlozLogo} alt="Finloz" className="w-3 h-3 object-contain" />
-                  <span className="text-[8px] font-bold text-[#37352f] tracking-wider uppercase">Lui</span>
-                </div>
-              ) : isWorkspaceView && task.authorAvatar ? (
-                <div className="border border-[#e9e9e7]/60 rounded-full shadow-sm overflow-hidden scale-90 flex items-center justify-center bg-white" title={task.authorName}>
-                  <img src={task.authorAvatar} alt={task.authorName} className="w-[18px] h-[18px] object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                </div>
-              ) : (
-                <div className="border border-[#e9e9e7]/60 rounded-full shadow-sm overflow-hidden scale-90 flex items-center justify-center bg-white">
-                  <Avvvatars value={isWorkspaceView && task.authorEmail ? task.authorEmail : (userEmail || 'guest')} size={18} style="character" />
-                </div>
-              )}
-            </div>
-          </div> 
-
-          {/* 1.1 SUBTAREFAS EXPANDIDAS (Dentro do corpo do card) */}
-          <AnimatePresence>
-            {isSubtasksExpanded && (
+            {/* Overlay de confirmação de alteração */}
+            {isPending && (
               <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-                className="overflow-hidden"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="absolute inset-0 z-30 bg-white rounded-2xl flex items-center justify-center gap-6 px-4"
               >
-                <div className="pt-2 pb-1 space-y-1.5 border-t border-[#e9e9e7]/60 mt-2">
-                  <div className="flex items-center justify-between mb-2 px-1">
-                        <span className="text-[10px] font-bold text-[#37352f]/30 uppercase tracking-widest">Subtarefas</span>
-                        <motion.span 
-                          animate={task.subtasks?.every(s => s.completed) ? { scale: [1, 1.15, 1], transition: { duration: 0.4 } } : {}}
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md transition-all duration-500 ${task.subtasks?.every(s => s.completed) ? 'text-[#2b8a3e] bg-[#e7f5e9] ring-1 ring-[#2b8a3e]/20 shadow-sm' : 'text-white bg-[#1a1a1a]'}`}
-                        >
-                          {task.subtasks?.filter(s => s.completed).length}/{task.subtasks?.length}
-                        </motion.span>
-                  </div>
-                  <div className="space-y-1">
-                    {task.subtasks?.map((subtask) => (
-                      <motion.div
-                        key={subtask.id}
-                        initial={{ x: -10, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onToggleSubtask?.(task.id, subtask.id)
-                        }}
-                        className="flex items-center gap-2.5 group/sub cursor-pointer p-2 hover:bg-[#f7f7f5] rounded-xl transition-all border border-transparent hover:border-[#e9e9e7]/40"
-                      >
-                        <div className={`transition-all duration-200 flex-shrink-0 ${subtask.completed ? 'text-[#1a1a1a] scale-110' : 'text-[#37352f]/20 group-hover/sub:text-[#37352f]/40'}`}>
-                          {subtask.completed ? <CheckCircle2 size={16} strokeWidth={2.5} /> : <Circle size={16} strokeWidth={2} />}
-                        </div>
-                        <span className={`text-[11px] font-semibold transition-all line-clamp-2 ${subtask.completed ? 'text-[#37352f]/30 line-through font-medium' : 'text-[#37352f]'}`}>
-                          {subtask.title}
-                        </span>
-                      </motion.div>
-                    ))}
-                  </div>
+                <span className="text-[13px] font-bold text-[#37352f] tracking-tight">
+                  {pendingTarget === 'done' ? 'Concluir?' : 'Mudar?'}
+                </span>
+                <div className="flex items-center gap-4">
+                  <button
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); onCancel?.() }}
+                    className="text-[11px] font-bold text-[#37352f]/30 hover:text-[#37352f]/60 transition-colors"
+                  >Não</button>
+                  <button
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); onConfirm?.() }}
+                    className="px-4 py-1.5 rounded-lg text-[11px] font-bold text-white bg-[#202020] hover:bg-black transition-all"
+                  >Sim</button>
                 </div>
               </motion.div>
             )}
-          </AnimatePresence>
-        </div>
 
-        {/* 2. TAGS DE META INFO + Timer/Subtarefas (estrutura vertical quando timer ativo) */}
-        {!isPlaceholder && (
-          <div className={`flex flex-col items-center -mt-[1px] relative z-0 ${isOverlay ? 'scale-[1.02] rotate-2' : ''}`}>
-
-            {/* 2A. LINHA 1: Priority | Timer (ou Subtarefas se timer inativo) | Date */}
-            <motion.div
-              layout
-              className={`grid grid-cols-[auto_1fr_auto] items-start px-4 gap-2 transition-opacity duration-200 w-full ${isOverlay ? 'opacity-100' : 'opacity-100'}`}
-            >
-              {/* Prioridade Esquerda */}
-              <div
-                className={`border border-[#e9e9e7] border-t-0 rounded-b-xl rounded-t-none px-3 py-0.5 bg-white transition-all flex items-center justify-center h-[22px] ${isOverlay ? 'shadow-lg shadow-black/5' : ''}`}
-              >
-                <span className="text-[10px] font-bold tracking-tight text-[#37352f]">
-                  {task.priority === 'high' ? 'Crítica' : task.priority === 'medium' ? 'Média' : 'Baixa'}
-                </span>
+            {/* Cabeçalho */}
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex items-start gap-2 flex-1 min-w-0">
+                {task.status === 'done' && (
+                  <CheckCircle2 size={16} className="text-[#1a1a1a] mt-0.5 flex-shrink-0" strokeWidth={2.5} />
+                )}
+                <h4 className={`text-[15px] font-semibold leading-snug line-clamp-2 transition-all ${task.status === 'done' || task.status === 'canceled' ? 'text-[#37352f]/40' : 'text-[#37352f]'}`}>
+                  {task.title}
+                </h4>
               </div>
 
-              {/* Centro: grupo vertical Timer+Subtarefas fundidos OU apenas Subtarefas */}
-              <div className="flex items-start gap-2 justify-center">
-                {timerParts ? (
-                  /* ── Timer ativo: timer + subtarefas como bloco único ── */
-                  <div className="flex flex-col items-stretch">
-                  <div
-                    onPointerDown={startHold}
-                    onPointerUp={cancelHold}
-                    onPointerLeave={cancelHold}
-                    onPointerCancel={cancelHold}
-                    onMouseDown={startHold}
-                    onMouseUp={cancelHold}
-                    onMouseLeave={cancelHold}
-                    onTouchStart={startHold}
-                    onTouchEnd={cancelHold}
-                    onTouchCancel={cancelHold}
-                    style={{ userSelect: 'none' }}
-                    className={`border border-t-0 py-0.5 flex items-center justify-center transition-all flex-shrink-0 h-[22px] cursor-pointer select-none overflow-hidden
-                      ${task.subtasks && task.subtasks.length > 0 ? 'rounded-none border-b-0' : 'rounded-b-xl'}
-                      ${holdProgress > 0 ? 'border-red-300 bg-red-50 px-3' : 'border-[#e9e9e7] bg-white px-2 gap-0.5'}
-                      ${isOverlay ? 'shadow-lg shadow-black/5' : ''}`}
+              <div className="flex items-center gap-2 flex-shrink-0 -mt-0.5">
+                <div className="relative -mr-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setActiveDropdownId(activeDropdownId === task.id ? null : task.id)
+                    }}
+                    className="p-1 hover:bg-[#000000]/[0.05] rounded-md transition-colors text-[#37352f]/30 hover:text-[#37352f]"
                   >
-                    {holdProgress > 0 ? (
-                      <NumberFlow
-                        value={Math.floor(holdProgress / 10)}
-                        className="text-[13px] font-normal text-red-500 tabular-nums w-[18px] text-center"
-                      />
-                    ) : (
-                      <>
-                        {timerParts.h > 0 && (
-                          <>
-                            <NumberFlow
-                              value={timerParts.h}
-                              format={{ minimumIntegerDigits: 2 }}
-                              className="text-[10px] font-semibold text-[#37352f] tabular-nums"
-                            />
-                            <span className="text-[10px] font-medium text-[#37352f]/40 mx-0.5">:</span>
-                          </>
-                        )}
-                        <NumberFlow
-                          value={timerParts.m}
-                          format={{ minimumIntegerDigits: 2 }}
-                          className="text-[10px] font-semibold text-[#37352f] tabular-nums"
-                        />
-                        <span className="text-[10px] font-medium text-[#37352f]/40 mx-0.5">:</span>
-                        <NumberFlow
-                          value={timerParts.s}
-                          format={{ minimumIntegerDigits: 2 }}
-                          className="text-[10px] font-semibold text-[#37352f] tabular-nums"
-                        />
-                      </>
-                    )}
-                  </div>
+                    <MoreHorizontal size={16} className="flex-shrink-0" />
+                  </button>
 
-                    {/* Subtarefas coladas abaixo do timer — mesmo bloco, border-t-0, rounded-b-xl */}
+                  <Dropdown
+                    isOpen={activeDropdownId === task.id}
+                    onClose={() => setActiveDropdownId(null)}
+                    className="w-[130px]"
+                  >
+                    <DropdownItem
+                      icon={<Edit2 size={12} />}
+                      label="Editar"
+                      onClick={() => onEdit(task)}
+                    />
+                    {canMoveVisibility && task.visibility === 'personal' && (
+                      <DropdownItem
+                        icon={<Users size={12} />}
+                        label="Para Workspace"
+                        holdDuration={5000}
+                        onClick={() => onMoveVisibility?.(task.id, 'workspace')}
+                      />
+                    )}
+                    {canMoveVisibility && task.visibility === 'workspace' && (
+                      <DropdownItem
+                        icon={<Lock size={12} />}
+                        label="Para Pessoal"
+                        holdDuration={5000}
+                        onClick={() => onMoveVisibility?.(task.id, 'personal')}
+                      />
+                    )}
+                    <DropdownDivider />
+                    <DropdownItem
+                      icon={<Trash2 size={12} />}
+                      label="Excluir"
+                      variant="danger"
+                      onClick={() => onDelete(task.id)}
+                    />
+                  </Dropdown>
+                </div>
+              </div>
+            </div>
+
+            {/* Tags e Fonte/Avatar */}
+            <div className="flex items-center justify-between gap-2 mb-1">
+              {/* Workspace badge (esquerda) */}
+              {isWorkspaceView && task.visibility === 'workspace' && (
+                <div className="flex items-center gap-1 opacity-50">
+                  <Users size={10} className="text-[#37352f]" />
+                  {task.authorName && task.authorEmail !== userEmail && (
+                    <span className="text-[9px] font-semibold text-[#37352f]/60 truncate max-w-[80px]">{task.authorName}</span>
+                  )}
+                </div>
+              )}
+              {!isWorkspaceView && task.visibility === 'workspace' && (
+                <div className="flex items-center gap-1 opacity-40" title="Tarefa compartilhada no workspace">
+                  <Users size={10} className="text-[#37352f]" />
+                </div>
+              )}
+              {task.visibility === 'personal' && <div />}
+
+              {/* Avatares: responsável (Direita) */}
+              <div className="flex items-center flex-shrink-0">
+                {task.assignedToId && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    whileHover={{ scale: 1.05, y: -1 }}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-[#f7f7f5] border border-[#e9e9e7]/50 shadow-sm transition-all group-hover:border-[#37352f]/10 cursor-default"
+                    title={`Responsável: ${task.assignedToName || 'Membro'}`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full overflow-hidden flex-shrink-0 border border-white shadow-sm ring-1 ring-black/[0.05]">
+                      {task.assignedToAvatar
+                        ? <img src={task.assignedToAvatar} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                        : <Avvvatars value={task.assignedToEmail || task.assignedToId} size={14} style="character" />
+                      }
+                    </div>
+                    <span className="text-[9px] font-bold text-[#37352f]/60 truncate max-w-[60px] tracking-tight">
+                      {task.assignedToName?.split(' ')[0] || 'Membro'}
+                    </span>
+                  </motion.div>
+                )}
+              </div>
+            </div>
+
+            {/* SUBTAREFAS EXPANDIDAS */}
+            <AnimatePresence>
+              {isSubtasksExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-2 pb-1 space-y-1.5 border-t border-[#e9e9e7]/60 mt-2">
+                    <div className="flex items-center justify-between mb-2 px-1">
+                      <span className="text-[10px] font-bold text-[#37352f]/30 uppercase tracking-widest">Subtarefas</span>
+                      <motion.span
+                        animate={task.subtasks?.every(s => s.completed) ? { scale: [1, 1.15, 1], transition: { duration: 0.4 } } : {}}
+                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md transition-all duration-500 ${task.subtasks?.every(s => s.completed) ? 'text-[#2b8a3e] bg-[#e7f5e9] ring-1 ring-[#2b8a3e]/20 shadow-sm' : 'text-white bg-[#1a1a1a]'}`}
+                      >
+                        {task.subtasks?.filter(s => s.completed).length}/{task.subtasks?.length}
+                      </motion.span>
+                    </div>
+                    <div className="space-y-1">
+                      {task.subtasks?.map((subtask) => (
+                        <motion.div
+                          key={subtask.id}
+                          initial={{ x: -10, opacity: 0 }}
+                          animate={{ x: 0, opacity: 1 }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onToggleSubtask?.(task.id, subtask.id)
+                          }}
+                          className="flex items-center gap-2.5 group/sub cursor-pointer p-2 hover:bg-[#f7f7f5] rounded-xl transition-all border border-transparent hover:border-[#e9e9e7]/40"
+                        >
+                          <div className={`transition-all duration-200 flex-shrink-0 ${subtask.completed ? 'text-[#1a1a1a] scale-110' : 'text-[#37352f]/20 group-hover/sub:text-[#37352f]/40'}`}>
+                            {subtask.completed ? <CheckCircle2 size={16} strokeWidth={2.5} /> : <Circle size={16} strokeWidth={2} />}
+                          </div>
+                          <span className={`text-[11px] font-semibold transition-all line-clamp-2 ${subtask.completed ? 'text-[#37352f]/30 line-through font-medium' : 'text-[#37352f]'}`}>
+                            {subtask.title}
+                          </span>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Footer */}
+            {!isPlaceholder && (() => {
+              const days = getDaysUntilDue(task.dueDate)
+              const isDone = task.status === 'done' || task.status === 'canceled'
+
+              const priorityGlow = task.priority === 'high'
+                ? 'rgba(239,68,68,0.13)'
+                : task.priority === 'medium'
+                  ? 'rgba(245,158,11,0.11)'
+                  : null
+
+              const dateGlow = isDone || formatDate(task.dueDate) === 'Sem prazo' ? null
+                : days !== null && days < 0 ? 'rgba(239,68,68,0.15)'
+                  : days === 0 ? 'rgba(248,113,113,0.13)'
+                    : days === 1 ? 'rgba(249,115,22,0.13)'
+                      : days !== null && days <= 3 ? 'rgba(245,158,11,0.11)'
+                        : null
+
+              const dateColor = isDone
+                ? 'text-[#37352f]/25'
+                : days !== null && days < 0 ? 'text-red-500'
+                  : days === 0 ? 'text-red-400'
+                    : days === 1 ? 'text-orange-500'
+                      : days !== null && days <= 3 ? 'text-amber-500'
+                        : 'text-[#37352f]/30'
+
+              return (
+                <div className="flex items-center -mx-5 -mb-5 mt-3 px-4 py-2 border-t border-[#f1f1f0] rounded-b-2xl relative overflow-hidden">
+                  {priorityGlow && (
+                    <motion.div
+                      animate={{ opacity: [0.4, 0.7, 0.4], scale: [1, 1.1, 1] }}
+                      transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                      className="absolute left-0 inset-y-0 w-28 pointer-events-none rounded-bl-2xl blur-3xl opacity-50"
+                      style={{ background: priorityGlow.replace('0.1', '0.2') }}
+                    />
+                  )}
+                  {dateGlow && (
+                    <motion.div
+                      animate={{ opacity: [0.4, 0.6, 0.4], scale: [1, 1.15, 1] }}
+                      transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+                      className="absolute right-0 inset-y-0 w-28 pointer-events-none rounded-br-2xl blur-3xl opacity-50"
+                      style={{ background: dateGlow.replace('0.1', '0.2') }}
+                    />
+                  )}
+                  <span className={`relative flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 ${task.priority === 'high' ? 'text-red-500' : task.priority === 'medium' ? 'text-amber-500' : 'text-[#37352f]/30'
+                    }`}>
+                    <Flag size={10} strokeWidth={2.5} />
+                    {task.priority === 'high' ? 'Crítica' : task.priority === 'medium' ? 'Média' : 'Baixa'}
+                  </span>
+                  <div className="relative flex items-center gap-1.5 flex-1 justify-center">
                     {task.subtasks && task.subtasks.length > 0 && (
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setIsSubtasksExpanded(!isSubtasksExpanded)
-                        }}
-                        className={`border border-[#e9e9e7] border-t-0 rounded-b-xl rounded-t-none bg-white transition-all duration-500 overflow-hidden flex items-center px-2 py-1 gap-1.5 justify-center h-[22px] w-full
-                          ${isSubtasksExpanded ? (task.subtasks.every(s => s.completed) ? 'ring-1 ring-green-500/30 border-green-500/40 bg-[#f4fcf4]' : 'ring-1 ring-black/10 border-black/20') : ''}
-                          ${isOverlay ? 'shadow-lg shadow-black/5' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); setIsSubtasksExpanded(!isSubtasksExpanded) }}
+                        className={`flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 rounded-md transition-all duration-300 ${isSubtasksExpanded ? 'bg-[#f7f7f5]' : 'text-[#37352f]/40 hover:bg-[#f7f7f5]'}`}
                       >
-                        <div className="relative w-3.5 h-3.5 flex-shrink-0 flex items-center justify-center">
-                          <svg className="w-full h-full -rotate-90 transform">
-                            <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="1 1" className="text-[#37352f]/10" />
-                            <motion.circle
-                              initial={{ strokeDashoffset: 2 * Math.PI * 6 }}
-                              animate={{ 
-                                strokeDashoffset: 2 * Math.PI * 6 * (1 - (task.subtasks.filter(s => s.completed).length / task.subtasks.length)),
-                                color: task.subtasks.every(s => s.completed) ? '#40c057' : '#1a1a1a'
-                              }}
-                              cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeDasharray={2 * Math.PI * 6} strokeLinecap="round" 
-                              className="transition-colors duration-500"
-                            />
-                          </svg>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <motion.span 
-                            animate={task.subtasks.every(s => s.completed) ? { scale: [1, 1.2, 1] } : {}}
-                            className={`text-[10px] font-bold tabular-nums tracking-tight transition-all duration-500 ${task.subtasks.every(s => s.completed) ? 'text-[#2b8a3e]' : isSubtasksExpanded ? 'text-[#1a1a1a]' : 'text-[#37352f]'}`}
-                          >
-                            {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
-                          </motion.span>
-                          <ChevronUp size={10} className={`text-[#37352f]/30 transition-transform duration-300 ${isSubtasksExpanded ? 'rotate-0' : 'rotate-180'}`} />
-                        </div>
+                        <motion.span className="text-[10px] font-semibold">{task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}</motion.span>
+                        <ChevronUp size={9} className={`transition-transform duration-300 ${isSubtasksExpanded ? 'rotate-0' : 'rotate-180'}`} />
                       </button>
                     )}
                   </div>
-                ) : (
-                  /* ── Timer inativo/expirado: subtarefas viram tag independente no lugar do timer ── */
-                  task.subtasks && task.subtasks.length > 0 && (
-                    <motion.button
-                      layout
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setIsSubtasksExpanded(!isSubtasksExpanded)
-                      }}
-                      className={`border border-[#e9e9e7] border-t-0 rounded-b-xl rounded-t-none bg-white transition-all duration-500 overflow-hidden flex items-center px-2 py-1 gap-1.5 group-hover:border-[#d3d1d1] min-w-0 max-w-[120px] justify-center h-[22px] 
-                        ${isSubtasksExpanded ? (task.subtasks.every(s => s.completed) ? 'ring-1 ring-green-500/30 border-green-500/40 bg-[#f4fcf4]' : 'ring-1 ring-black/10 border-black/20') : ''} 
-                        ${isOverlay ? 'shadow-lg shadow-black/5' : ''}`}
-                    >
-                      <div className="relative w-3.5 h-3.5 flex-shrink-0 flex items-center justify-center">
-                        <svg className="w-full h-full -rotate-90 transform">
-                          <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="1 1" className="text-[#37352f]/10" />
-                          <motion.circle
-                            initial={{ strokeDashoffset: 2 * Math.PI * 6 }}
-                            animate={{ 
-                              strokeDashoffset: 2 * Math.PI * 6 * (1 - (task.subtasks.filter(s => s.completed).length / task.subtasks.length)),
-                              color: task.subtasks.every(s => s.completed) ? '#40c057' : '#1a1a1a'
-                            }}
-                            cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeDasharray={2 * Math.PI * 6} strokeLinecap="round" 
-                            className="transition-colors duration-500"
-                          />
-                        </svg>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <motion.span 
-                          animate={task.subtasks.every(s => s.completed) ? { scale: [1, 1.2, 1] } : {}}
-                          className={`text-[10px] font-bold tabular-nums tracking-tight transition-all duration-500 ${task.subtasks.every(s => s.completed) ? 'text-[#2b8a3e]' : isSubtasksExpanded ? 'text-[#1a1a1a]' : 'text-[#37352f]'}`}
-                        >
-                          {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
-                        </motion.span>
-                        <ChevronUp size={10} className={`text-[#37352f]/30 transition-transform duration-300 ${isSubtasksExpanded ? 'rotate-0' : 'rotate-180'}`} />
-                      </div>
-                    </motion.button>
-                  )
-                )}
-
-                {/* Badge "faltam X dias" */}
-                {(() => {
-                  const days = getDaysUntilDue(task.dueDate)
-                  if (days === null || task.status === 'done' || task.status === 'canceled') return null
-                  if (days > 7 || days <= 0) return null
-                  const label = days === 1 ? 'Amanhã' : `faltam ${days}d`
-                  const color = days === 1
-                      ? 'border-orange-300 bg-orange-50 text-orange-600'
-                      : days <= 3
-                        ? 'border-amber-300 bg-amber-50 text-amber-600'
-                        : 'border-yellow-200 bg-yellow-50 text-yellow-600'
-                  return (
-                    <div className={`border border-t-0 rounded-b-xl rounded-t-none px-2 py-0.5 flex items-center h-[22px] flex-shrink-0 ${color} ${isOverlay ? 'shadow-lg shadow-black/5' : ''}`}>
-                      <span className="text-[10px] font-bold tracking-tight whitespace-nowrap">{label}</span>
-                    </div>
-                  )
-                })()}
-
-                {!timerParts && (!task.subtasks || task.subtasks.length === 0) && getDaysUntilDue(task.dueDate) === null && <div className="w-1" />}
-              </div>
-
-              {/* Data Direita */}
-              <div className={`flex bg-white rounded-b-xl border border-[#e9e9e7] border-t-0 shadow-sm overflow-hidden flex-shrink-0 h-[22px] max-w-[120px] justify-self-end ${isOverlay ? 'shadow-lg shadow-black/5' : ''}`}>
-                <div className="px-2 flex items-center justify-center flex-shrink-0 min-w-0">
-                  <span className="text-[9px] font-bold text-[#37352f]/60 tracking-tight truncate">
-                    {formatDate(task.dueDate)}
-                  </span>
+                  {formatDate(task.dueDate) !== 'Sem prazo' && (
+                    <span className={`relative flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 tabular-nums ${dateColor}`}>
+                      <Calendar size={10} strokeWidth={2.5} />
+                      {formatDate(task.dueDate)}
+                      {task.dueTime && <span className="text-[#37352f]/35">· {formatDueTime(task.dueTime)}</span>}
+                    </span>
+                  )}
                 </div>
-              </div>
-            </motion.div>
+              )
+            })()}
+          </div>
 
+          {/* Efeito de Cancelado: Fitas Infinitas Minimalistas */}
+          {task.status === 'canceled' && !isPending && (
+            <div className="absolute inset-0 z-[20] flex flex-col items-center justify-center pointer-events-none overflow-hidden rounded-2xl">
+              <div className="absolute inset-0 bg-white/60 backdrop-blur-[4px] z-0" />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <InfiniteRibbon
+                  rotation={7}
+                  className="w-[140%] py-2 bg-white/60 border-y border-[#37352f]/5 shadow-sm"
+                  speed={600}
+                  backgroundColor="bg-white/60"
+                  textColor="text-[#37352f]/40"
+                >
+                  Tarefa Cancelada • Registro Interrompido • Cancelado • Arquivo Interno
+                </InfiniteRibbon>
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <InfiniteRibbon
+                  reverse={true}
+                  rotation={-7}
+                  className="w-[140%] py-2 bg-slate-50/50 border-y border-[#37352f]/5 shadow-sm"
+                  speed={900}
+                  backgroundColor="bg-slate-50/50"
+                  textColor="text-[#37352f]/30"
+                >
+                  Suspenso Temporariamente • Aguardando Revisão • Fluxo Detido • Suspenso
+                </InfiniteRibbon>
+              </div>
+            </div>
+          )}
+        </div>
+
+
+
+        {/* Timer pendurado abaixo do card */}
+        {!isPlaceholder && timerParts && (
+          <div className="flex justify-center -mt-[1px] relative z-0">
+            <div
+              onPointerDown={startHold}
+              onPointerUp={cancelHold}
+              onPointerLeave={cancelHold}
+              onPointerCancel={cancelHold}
+              onMouseDown={startHold}
+              onMouseUp={cancelHold}
+              onMouseLeave={cancelHold}
+              onTouchStart={startHold}
+              onTouchEnd={cancelHold}
+              onTouchCancel={cancelHold}
+              style={{ userSelect: 'none' }}
+              className={`border border-t-0 rounded-b-xl px-3 py-0.5 flex items-center justify-center gap-0.5 h-[26px] cursor-pointer select-none transition-all ${holdProgress > 0 ? 'border-red-300 bg-red-50' : 'border-[#e9e9e7] bg-white'
+                }`}
+            >
+              {holdProgress > 0 ? (
+                <NumberFlow value={Math.floor(holdProgress / 10)} className="text-[13px] font-normal text-red-500 tabular-nums w-[18px] text-center" />
+              ) : (
+                <>
+                  {timerParts.h > 0 && (
+                    <>
+                      <NumberFlow value={timerParts.h} format={{ minimumIntegerDigits: 2 }} className="text-[10px] font-semibold text-[#37352f] tabular-nums" />
+                      <span className="text-[10px] font-medium text-[#37352f]/40 mx-0.5">:</span>
+                    </>
+                  )}
+                  <NumberFlow value={timerParts.m} format={{ minimumIntegerDigits: 2 }} className="text-[10px] font-semibold text-[#37352f] tabular-nums" />
+                  <span className="text-[10px] font-medium text-[#37352f]/40 mx-0.5">:</span>
+                  <NumberFlow value={timerParts.s} format={{ minimumIntegerDigits: 2 }} className="text-[10px] font-semibold text-[#37352f] tabular-nums" />
+                </>
+              )}
+            </div>
           </div>
         )}
+
       </motion.div>
     </div>
   )
 })
+TaskCardUI.displayName = 'TaskCardUI'
+
+const MemoizedTaskCardUI = React.memo(TaskCardUI)
 
 const SortableTaskCard: React.FC<{
   task: Task
@@ -651,7 +674,7 @@ const SortableTaskCard: React.FC<{
 
   return (
     <div ref={setNodeRef} style={style} className={`relative w-full min-w-0 ${isDragging ? 'z-50' : props.activeDropdownId === props.task.id ? 'z-[60]' : 'z-10'}`}>
-      <TaskCardUI
+      <MemoizedTaskCardUI
         isDragging={isDragging}
         dragHandleProps={{ ...attributes, ...listeners }}
         onEdit={props.onEdit}
@@ -687,7 +710,7 @@ const DroppableContainer: React.FC<{
   return (
     <div
       ref={setNodeRef}
-      className={`${className} rounded-2xl transition-all duration-300 ease-in-out overflow-hidden shadow-inner ${isOver ? 'bg-[#f1f1ef] ring-2 ring-inset ring-[#e9e9e7]' : 'bg-[#f9f9f8]/50 border border-[#f1f1f0]'
+      className={`${className} rounded-2xl transition-all duration-300 ease-in-out overflow-hidden ${isOver ? 'bg-[#f1f1f0] ring-2 ring-inset ring-[#e9e9e7]' : 'bg-[#f7f7f5] border border-black/[0.04]'
         }`}
     >
       {children}
@@ -705,13 +728,19 @@ const Tasks: React.FC = () => {
   const isAdmin = hasPulse && !workspaceModeActive
   const isGuest = workspaceModeActive
   const [viewMode, setViewMode] = useState<'board' | 'table'>('board')
-  
+
   const initialView = workspaceModeActive ? 'workspace' : 'personal'
   const [taskView, setTaskView] = useState<'personal' | 'workspace'>(initialView)
-  
+
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [loading, setLoading] = useState(lastTaskView === initialView ? cachedTasks.length === 0 : true)
   const [tasks, setTasks] = useState<Task[]>(lastTaskView === initialView ? cachedTasks : [])
+  const [personalCount, setPersonalCount] = useState(0)
+  const [workspaceCount, setWorkspaceCount] = useState(0)
+  const [personalHighlighted, setPersonalHighlighted] = useState(false)
+  const [workspaceHighlighted, setWorkspaceHighlighted] = useState(false)
+  const prevPersonalCount = useRef(0)
+  const prevWorkspaceCount = useRef(0)
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -722,6 +751,17 @@ const Tasks: React.FC = () => {
   const [exitingTaskIds, setExitingTaskIds] = useState<Set<string>>(new Set())
   const dragOriginalStatus = useRef<{ id: string; status: Task['status'] } | null>(null)
   const justDraggedRef = useRef(false)
+  const dragVelocityX = useRef(0)
+  const lastDragX = useRef(0)
+  const animationFrameRef = useRef<number>()
+
+  // Ref estável para taskView — evita closure stale nos callbacks do Realtime
+  const taskViewRef = useRef(taskView)
+  useEffect(() => { taskViewRef.current = taskView }, [taskView])
+
+  // Ref estável para o user id
+  const userIdRef = useRef(user?.id)
+  useEffect(() => { userIdRef.current = user?.id }, [user?.id])
 
   // Keep module-level cache always in sync
   useEffect(() => {
@@ -788,6 +828,8 @@ const Tasks: React.FC = () => {
         )
         const mappedTasks = (result.tasks || []).map(mapDbTask)
         setTasks(mappedTasks)
+        setWorkspaceCount(mappedTasks.length)
+        prevWorkspaceCount.current = mappedTasks.length
       } else {
         // Busca tarefas pessoais do usuário
         const { data, error } = await supabase
@@ -801,6 +843,8 @@ const Tasks: React.FC = () => {
 
         const mappedTasks = (data || []).map(mapDbTask)
         setTasks(mappedTasks)
+        setPersonalCount(mappedTasks.length)
+        prevPersonalCount.current = mappedTasks.length
       }
     } catch (error) {
       console.error('Erro ao buscar tarefas:', error)
@@ -812,8 +856,76 @@ const Tasks: React.FC = () => {
 
   // Sincroniza a view de tarefas com o modo ativo (workspace ou plano próprio)
   useEffect(() => {
-    setTaskView(workspaceModeActive ? 'workspace' : 'personal')
+    const targetView = workspaceModeActive ? 'workspace' : 'personal'
+    setTaskView(targetView)
+
+    // Limpa o destaque da aba que está sendo aberta
+    if (targetView === 'personal') setPersonalHighlighted(false)
+    else setWorkspaceHighlighted(false)
   }, [workspaceModeActive])
+
+  // Limpa o destaque da aba ao alternar manualmente
+  useEffect(() => {
+    if (taskView === 'personal') setPersonalHighlighted(false)
+    else setWorkspaceHighlighted(false)
+  }, [taskView])
+
+
+  // Dispara o destaque quando o número de tarefas aumenta
+  useEffect(() => {
+    if (personalCount > prevPersonalCount.current) {
+      setPersonalHighlighted(true)
+      // Se já estiver na aba, limpa após 5s. Se não, fica pra sempre até clicar.
+      if (taskView === 'personal') {
+        setTimeout(() => setPersonalHighlighted(false), 5000)
+      }
+    }
+    if (workspaceCount > prevWorkspaceCount.current) {
+      setWorkspaceHighlighted(true)
+      // Se já estiver na aba, limpa após 5s. Se não, fica pra sempre até clicar.
+      if (taskView === 'workspace') {
+        setTimeout(() => setWorkspaceHighlighted(false), 5000)
+      }
+    }
+
+    prevPersonalCount.current = personalCount
+    prevWorkspaceCount.current = workspaceCount
+  }, [personalCount, workspaceCount])
+
+  // Busca a contagem da visualização "oposta" ao trocar de view ou montar
+  useEffect(() => {
+    if (!user) return
+    if (taskView === 'personal') {
+      apiFetch<{ tasks: any[] }>('/api/workspace/shared-tasks', undefined, { userId: user.id })
+        .then(r => {
+          const count = r.tasks?.length || 0
+          setWorkspaceCount(count)
+          prevWorkspaceCount.current = count
+        })
+        .catch(() => { })
+    } else {
+      supabase.from('tasks')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('visibility', 'personal')
+        .then(({ count }) => {
+          const c = count || 0
+          setPersonalCount(c)
+          prevPersonalCount.current = c
+        })
+        .catch(() => { })
+    }
+  }, [taskView, user])
+
+  // Limpa o estado 'isNew' após um tempo para parar a animação
+  useEffect(() => {
+    const hasNewTasks = tasks.some(t => t.isNew)
+    if (!hasNewTasks) return
+    const timer = setTimeout(() => {
+      setTasks(prev => prev.map(t => t.isNew ? { ...t, isNew: false } : t))
+    }, 15000)
+    return () => clearTimeout(timer)
+  }, [tasks])
 
   // Recarrega quando muda de view
   useEffect(() => {
@@ -827,24 +939,31 @@ const Tasks: React.FC = () => {
     if (!isAdmin || !user) return
     apiFetch<{ members: WorkspaceMember[] }>('/api/workspace/members', undefined, { userId: user.id })
       .then(r => setWorkspaceMembers((r.members || []).filter(m => !m.is_invite)))
-      .catch(() => {})
+      .catch(() => { })
   }, [isAdmin, user])
 
+  // Canal Realtime — montado APENAS UMA VEZ (mount-only).
+  // Usa refs para ler taskView e userId atualizados sem recriar o canal.
   useEffect(() => {
-    fetchTasks()
-
     const channel = supabase
       .channel('tasks-realtime')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'tasks' },
         (payload) => {
-          const newTask = mapDbTask(payload.new)
-          // Só adiciona se for da view atual
-          const isPersonalView = taskView === 'personal'
-          const taskIsPersonal = !newTask.visibility || newTask.visibility === 'personal'
-          const taskIsWorkspace = newTask.visibility === 'workspace'
-          if (isPersonalView && taskIsPersonal && payload.new.user_id === user?.id) {
+          const newTask = { ...mapDbTask(payload.new), isNew: true }
+          const isPersonalView = taskViewRef.current === 'personal'
+          const taskIsPersonal = payload.new.visibility === 'personal' || !payload.new.visibility
+          const taskIsWorkspace = payload.new.visibility === 'workspace'
+
+          // Atualiza as contagens apenas se a mudança veio de OUTRO usuário
+          // Pois mudanças locais já são tratadas instantaneamente nas funções handle...
+          if (payload.new.user_id !== userIdRef.current) {
+            if (taskIsWorkspace) setWorkspaceCount(prev => prev + 1)
+            else if (taskIsPersonal) setPersonalCount(prev => prev + 1)
+          }
+
+          if (isPersonalView && taskIsPersonal && payload.new.user_id === userIdRef.current) {
             setTasks(prev => {
               if (prev.some(t => t.id === newTask.id)) return prev
               return [newTask, ...prev]
@@ -870,7 +989,16 @@ const Tasks: React.FC = () => {
         { event: 'DELETE', schema: 'public', table: 'tasks' },
         (payload) => {
           const deletedId = (payload.old as any).id
-          setTasks(prev => prev.filter(t => t.id !== deletedId))
+          // Decrementa contagem se veio de outro usuário (nós já decrementamos localmente)
+          // Nota: DELETE payload.old pode não ter visibility, então tentamos achar na lista
+          setTasks(prev => {
+            const taskToRemove = prev.find(t => t.id === deletedId)
+            if (taskToRemove && (payload.old as any).user_id !== userIdRef.current) {
+              if (taskToRemove.visibility === 'workspace') setWorkspaceCount(p => Math.max(0, p - 1))
+              else setPersonalCount(p => Math.max(0, p - 1))
+            }
+            return prev.filter(t => t.id !== deletedId)
+          })
         }
       )
       .subscribe()
@@ -878,7 +1006,8 @@ const Tasks: React.FC = () => {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [fetchTasks, mapDbTask])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapDbTask])
 
   const columns = [
     { id: 'todo' as const, title: 'A Fazer', color: 'bg-slate-400' },
@@ -947,6 +1076,7 @@ const Tasks: React.FC = () => {
             status: newTask.status,
             priority: newTask.priority,
             due_date: (newTask.dueDate && newTask.dueDate !== 'Sem prazo') ? newTask.dueDate : null,
+            due_time: newTask.dueTime || null,
             source: newTask.source,
             progress: newTask.progress,
             description: newTask.description,
@@ -958,6 +1088,7 @@ const Tasks: React.FC = () => {
 
         if (error) throw error
         setTasks(tasks.map(t => t.id === editingTask.id ? { ...t, ...newTask } : t))
+        await syncTaskWithGoogleCalendar(editingTask.id, user?.id)
       } else if (isWorkspaceTask) {
         // Cria tarefa workspace via API (garante workspace_owner_id correto)
         const result = await apiFetch<{ task: any }>('/api/workspace/shared-tasks', {
@@ -966,8 +1097,10 @@ const Tasks: React.FC = () => {
           body: JSON.stringify({ userId: user?.id, task: newTask }),
         })
         if (result.task) {
-          const newTaskWithId = { ...mapDbTask(result.task), authorName: user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0], authorEmail: user?.email }
+          const newTaskWithId = { ...mapDbTask(result.task), isNew: true, authorName: user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0], authorEmail: user?.email }
           setTasks([newTaskWithId, ...tasks])
+          setWorkspaceCount(prev => prev + 1)
+          await syncTaskWithGoogleCalendar(result.task.id, user?.id)
         }
       } else {
         const { id, ...taskData } = newTask
@@ -975,18 +1108,22 @@ const Tasks: React.FC = () => {
           .from('tasks')
           .insert([{
             user_id: user?.id,
-            title: taskData.title, status: taskData.status, priority: taskData.priority,
-            due_date: (taskData.dueDate && taskData.dueDate !== 'Sem prazo') ? taskData.dueDate : null, source: taskData.source, progress: taskData.progress,
-            description: taskData.description, subtasks: taskData.subtasks,
-            timer_at: taskData.timerAt || null,
+            title: newTask.title, status: newTask.status, priority: newTask.priority,
+            due_date: (newTask.dueDate && newTask.dueDate !== 'Sem prazo') ? newTask.dueDate : null,
+            due_time: newTask.dueTime || null,
+            source: newTask.source, progress: newTask.progress,
+            description: newTask.description, subtasks: newTask.subtasks,
+            timer_at: newTask.timerAt || null,
             timer_fired: false,
             visibility: 'personal',
           }]).select()
 
         if (error) throw error
         if (data && data[0]) {
-          const newTaskWithId = { ...newTask, id: data[0].id, visibility: 'personal' }
+          const newTaskWithId = { ...mapDbTask(data[0]), isNew: true }
           setTasks([newTaskWithId, ...tasks])
+          setPersonalCount(prev => prev + 1)
+          await syncTaskWithGoogleCalendar(data[0].id, user?.id)
         }
       }
       setIsModalOpen(false)
@@ -1008,12 +1145,42 @@ const Tasks: React.FC = () => {
     setTaskToDelete(null)
 
     try {
-      const { error } = await supabase.from('tasks').delete().eq('id', id)
-      if (error) throw error
-      setTasks(tasks.filter(t => t.id !== id))
+      const task = tasks.find(t => t.id === id) || cachedTasks.find(t => t.id === id)
+      const isWorkspace = taskView === 'workspace' || task?.visibility === 'workspace'
+
+      if (isWorkspace) {
+        // Usa API server-side (supabaseAdmin) para lidar com RLS corretamente no workspace
+        await apiFetch(`/api/workspace/tasks/${id}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user?.id }),
+        })
+      } else {
+        // Tenta deletar direto via Supabase se for pessoal (o usuário logado é o autor)
+        await unlinkTaskFromGoogleCalendar(id, user?.id)
+        const { error: directErr } = await supabase
+          .from('tasks')
+          .delete()
+          .eq('id', id)
+
+        if (directErr) throw directErr
+      }
+
+      // Usar forma funcional do setState para evitar stale closure e remover a tarefa imediatamente.
+      setTasks(prev => {
+        const task = prev.find(t => t.id === id)
+        if (task) {
+          if (task.visibility === 'workspace') setWorkspaceCount(p => Math.max(0, p - 1))
+          else setPersonalCount(p => Math.max(0, p - 1))
+        }
+        const filtered = prev.filter(t => t.id !== id);
+        // Atualiza o cache também para evitar que volte localmente
+        cachedTasks = filtered;
+        return filtered;
+      });
     } catch (error) {
-      console.error('Erro ao excluir:', error)
-      alert('Erro ao excluir tarefa.')
+      console.error('Erro ao excluir tarefa:', error)
+      alert('Erro ao excluir tarefa. Tente novamente.')
     }
   }
 
@@ -1070,6 +1237,33 @@ const Tasks: React.FC = () => {
     if (task) {
       dragOriginalStatus.current = { id: task.id, status: task.status }
     }
+    lastDragX.current = 0
+    dragVelocityX.current = 0
+    document.documentElement.style.setProperty('--drag-tilt', '0deg')
+  }
+
+  const handleDragMove = (event: any) => {
+    const currentX = event.delta.x
+    const velocity = currentX - lastDragX.current
+    lastDragX.current = currentX
+
+    // Filtro exponencial para suavizar a velocidade lida a cada movimento (amortecimento)
+    dragVelocityX.current = dragVelocityX.current * 0.7 + velocity * 0.3
+
+    // Calcula o tilt (inclinação) limite de -15 a +15 graus dependendo da vel
+    let tilt = dragVelocityX.current * 0.6
+    if (tilt > 15) tilt = 15
+    if (tilt < -15) tilt = -15
+
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
+    animationFrameRef.current = requestAnimationFrame(() => {
+      document.documentElement.style.setProperty('--drag-tilt', `${tilt}deg`)
+    })
+  }
+
+  const resetDragTilt = () => {
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
+    document.documentElement.style.setProperty('--drag-tilt', '0deg')
   }
 
   const handleDragOver = (event: DragOverEvent) => {
@@ -1106,6 +1300,7 @@ const Tasks: React.FC = () => {
     const { active, over } = event
     setActiveId(null)
     setTimeout(() => { justDraggedRef.current = false }, 50)
+    resetDragTilt()
 
     const orig = dragOriginalStatus.current
     dragOriginalStatus.current = null
@@ -1176,7 +1371,7 @@ const Tasks: React.FC = () => {
     }
   }
 
-  const confirmStatusChange = useCallback(() => {
+  const confirmStatusChange = useCallback(async () => {
     if (!pendingStatusTask) return
     const { id, targetStatus } = pendingStatusTask
     setPendingStatusTask(null)
@@ -1184,17 +1379,19 @@ const Tasks: React.FC = () => {
     if (targetStatus === 'done' || targetStatus === 'canceled') {
       updates.timer_fired = true
     }
-    supabase
+    const { error } = await supabase
       .from('tasks')
       .update(updates)
       .eq('id', id)
-      .then(({ error }) => {
-        if (error) {
-          console.error('Erro ao atualizar status:', error)
-          fetchTasks()
-        }
-      })
-  }, [pendingStatusTask, fetchTasks])
+
+    if (error) {
+      console.error('Erro ao atualizar status:', error)
+      fetchTasks()
+      return
+    }
+
+    await syncTaskWithGoogleCalendar(id, user?.id)
+  }, [pendingStatusTask, fetchTasks, user?.id])
 
   const cancelStatusChange = useCallback(() => {
     if (!pendingStatusTask) return
@@ -1227,7 +1424,7 @@ const Tasks: React.FC = () => {
       const totalSubtasks = updatedSubtasks.length
       const completedSubtasks = updatedSubtasks.filter(s => s.completed).length
       const progress = Math.round((completedSubtasks / totalSubtasks) * 100)
-      
+
       // Fire and forget database update
       supabase
         .from('tasks')
@@ -1266,8 +1463,8 @@ const Tasks: React.FC = () => {
     <>
       <div className="px-4 sm:px-6 lg:px-10 pt-4 sm:pt-6 bg-white sticky top-[56px] lg:top-0 z-20">
         <div className="max-w-full mx-auto w-full">
-          <div className="flex items-center justify-between mb-4 sm:mb-6">
-            <div className="min-w-0">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between mb-4 sm:mb-6 gap-3 sm:gap-4">
+            <div className="min-w-0 flex-1">
               <h1 className="text-lg sm:text-2xl font-bold tracking-tight mb-0.5 sm:mb-1">Tarefas</h1>
               <p className="text-xs sm:text-sm text-[#37352f]/50 font-medium truncate">
                 {taskView === 'workspace'
@@ -1275,92 +1472,149 @@ const Tasks: React.FC = () => {
                   : 'Veja e organize seu fluxo de trabalho.'}
               </p>
             </div>
-            <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-              {!loading && tasks.length > 0 && (
-                <motion.button
-                  onClick={openCreateModal}
-                  whileHover={{ y: -1 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="hidden sm:flex items-center gap-2 px-5 bg-[#202020] text-white rounded-[6px] text-xs font-semibold hover:bg-[#202020]/90 transition-all shadow-md shadow-black/10 h-[38px]"
-                >
-                  <Plus size={14} strokeWidth={2.5} />
-                  Novo Item
-                </motion.button>
-              )}
+            <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0 ml-auto">
+              <motion.button
+                onClick={openCreateModal}
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.98 }}
+                className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-5 bg-[#202020] text-white rounded-[6px] text-[11px] sm:text-xs font-semibold hover:bg-[#202020]/90 transition-all shadow-md shadow-black/10 h-[32px] sm:h-[38px] flex-shrink-0"
+              >
+                <Plus size={14} strokeWidth={2.5} />
+                <span className="hidden sm:inline">Nova Tarefa</span>
+                <span className="sm:hidden">Novo</span>
+              </motion.button>
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4 sm:gap-6">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setViewMode(tab.id as any)}
-                  className={`flex items-center gap-1.5 sm:gap-2 pb-3 text-xs sm:text-sm font-semibold transition-all relative ${viewMode === tab.id
-                    ? 'text-[#37352f]'
-                    : 'text-[#37352f]/40 hover:text-[#37352f]/60'
-                    }`}
-                >
-                  <tab.icon size={16} strokeWidth={viewMode === tab.id ? 2.5 : 2} />
-                  {tab.label}
-                  {viewMode === tab.id && (
-                    <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#37352f]" />
-                  )}
-                </button>
-              ))}
+          <div className="flex items-center justify-between w-full gap-4">
+            <div className="flex items-center gap-4 sm:gap-6 overflow-x-auto hide-scrollbar flex-1 min-w-0">
+              {tabs.map((tab) => {
+                const isDisabled = tab.id === 'table'
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => !isDisabled && setViewMode(tab.id as any)}
+                    disabled={isDisabled}
+                    className={`flex shrink-0 items-center gap-1.5 sm:gap-2 pb-3 text-xs sm:text-sm font-semibold transition-all relative ${isDisabled
+                      ? 'text-[#37352f]/25 cursor-not-allowed'
+                      : viewMode === tab.id
+                        ? 'text-[#37352f]'
+                        : 'text-[#37352f]/40 hover:text-[#37352f]/60'
+                      }`}
+                  >
+                    <tab.icon size={16} strokeWidth={viewMode === tab.id ? 2.5 : 2} />
+                    {tab.label}
+                    {isDisabled && (
+                      <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-[#f1f1ef] text-[#37352f]/35 rounded-full leading-none">
+                        Em breve
+                      </span>
+                    )}
+                    {viewMode === tab.id && (
+                      <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#37352f]" />
+                    )}
+                  </button>
+                )
+              })}
             </div>
 
-            {/* Toggle pessoal / workspace — somente para admin (dono), convidados ficam fixos em workspace */}
-            {hasWorkspaceAccess && isAdmin && (
-              <div className="relative flex items-center bg-[#f7f7f5]/80 border border-[#e9e9e7]/50 rounded-full p-1 mb-3">
-                <button
-                  onClick={() => setTaskView('personal')}
-                  className={`relative z-10 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[11px] font-semibold transition-colors duration-300 ${
-                    taskView === 'personal'
-                      ? 'text-[#37352f]'
-                      : 'text-[#37352f]/30 hover:text-[#37352f]/50'
-                  }`}
-                >
-                  <Lock size={11} strokeWidth={2.5} />
-                  <span className="hidden sm:inline">Pessoal</span>
-                  {taskView === 'personal' && (
+            {/* View Toggle (Pessoal / Workspace) - Restaurado o estilo pílula original, mas posicionado à direita */}
+            {(hasWorkspaceAccess && isAdmin) || isGuest ? (
+              <div className="flex items-center shrink-0 mb-3">
+                {isAdmin ? (
+                  <div className="flex items-center bg-[#f7f7f5] border border-[#e9e9e7]/50 rounded-full p-0.5 shadow-sm">
+                    <button
+                      onClick={() => setTaskView('personal')}
+                      className={`relative z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] font-bold transition-colors duration-300 ${taskView === 'personal'
+                        ? 'text-[#37352f]'
+                        : 'text-[#37352f]/30 hover:text-[#37352f]/50'
+                        }`}
+                    >
+                      <Lock size={10} strokeWidth={2.5} />
+                      <span className="hidden sm:inline">Pessoal</span>
+                      <motion.div
+                        animate={personalHighlighted ? { backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#ef4444' } : {}}
+                        className={`ml-1 px-1.5 py-0.5 rounded-full relative overflow-hidden transition-colors ${taskView === 'personal' && !personalHighlighted ? 'bg-[#37352f]/10 text-[#37352f]' : 'bg-[#37352f]/5 text-[#37352f]/30'}`}
+                      >
+                        <NumberFlow value={personalCount} />
+                        {personalHighlighted && (
+                          <motion.div
+                            initial={{ x: '-100%' }}
+                            animate={{ x: '100%' }}
+                            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent"
+                          />
+                        )}
+                      </motion.div>
+                      {taskView === 'personal' && (
+                        <motion.div
+                          layoutId="task-view-active"
+                          className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
+                          transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
+                        />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setTaskView('workspace')}
+                      className={`relative z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] font-bold transition-colors duration-300 ${taskView === 'workspace'
+                        ? 'text-[#37352f]'
+                        : 'text-[#37352f]/30 hover:text-[#37352f]/50'
+                        }`}
+                    >
+                      <Users size={10} strokeWidth={2.5} />
+                      <span className="hidden sm:inline">Workspace</span>
+                      <motion.div
+                        animate={workspaceHighlighted ? { backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#ef4444' } : {}}
+                        className={`ml-1 px-1.5 py-0.5 rounded-full relative overflow-hidden transition-colors ${taskView === 'workspace' && !workspaceHighlighted ? 'bg-[#37352f]/10 text-[#37352f]' : 'bg-[#37352f]/5 text-[#37352f]/30'}`}
+                      >
+                        <NumberFlow value={workspaceCount} />
+                        {workspaceHighlighted && (
+                          <motion.div
+                            initial={{ x: '-100%' }}
+                            animate={{ x: '100%' }}
+                            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent"
+                          />
+                        )}
+                      </motion.div>
+                      {taskView === 'workspace' && (
+                        <motion.div
+                          layoutId="task-view-active"
+                          className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
+                          transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
+                        />
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f7f7f5] border border-[#e9e9e7] text-[10px] font-bold text-[#37352f]/50">
+                    <Users size={10} strokeWidth={2.5} />
+                    <span>Workspace</span>
                     <motion.div
-                      layoutId="task-view-active"
-                      className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
-                      transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
-                    />
-                  )}
-                </button>
-                <button
-                  onClick={() => setTaskView('workspace')}
-                  className={`relative z-10 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[11px] font-semibold transition-colors duration-300 ${
-                    taskView === 'workspace'
-                      ? 'text-[#37352f]'
-                      : 'text-[#37352f]/30 hover:text-[#37352f]/50'
-                  }`}
-                >
-                  <Users size={11} strokeWidth={2.5} />
-                  <span className="hidden sm:inline">Workspace</span>
-                  {taskView === 'workspace' && (
-                    <motion.div
-                      layoutId="task-view-active"
-                      className="absolute inset-0 bg-white shadow-sm border border-[#e9e9e7] rounded-full -z-10"
-                      transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.8 }}
-                    />
-                  )}
-                </button>
+                      animate={workspaceHighlighted ? { backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#ef4444' } : {}}
+                      className="ml-1 px-1.5 py-0.5 rounded-full relative overflow-hidden bg-[#37352f]/5 text-[#37352f]/30"
+                    >
+                      <NumberFlow value={workspaceCount} />
+                      {workspaceHighlighted && (
+                        <motion.div
+                          initial={{ x: '-100%' }}
+                          animate={{ x: '100%' }}
+                          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent"
+                        />
+                      )}
+                    </motion.div>
+                  </div>
+                )}
               </div>
-            )}
+            ) : null}
           </div>
+
         </div>
       </div>
 
-      <div className="flex-1 overflow-x-auto lg:overflow-y-hidden bg-white">
+      <div className="flex-1 overflow-x-hidden lg:overflow-x-auto lg:overflow-y-hidden bg-white">
         {loading ? (
-          <div className="min-h-[50vh] w-full flex flex-col items-center justify-center gap-3 opacity-40">
-            <Loader2 className="animate-spin text-[#37352f]" size={24} />
-            <p className="text-xs font-semibold">Carregando tarefas...</p>
-          </div>
+          <Loading fullScreen={false} />
         ) : tasks.length === 0 ? (
           <div className="min-h-[50vh] w-full flex flex-col items-center justify-center p-8 sm:p-20 text-center bg-white">
             <motion.div
@@ -1399,26 +1653,29 @@ const Tasks: React.FC = () => {
                 sensors={sensors}
                 collisionDetection={closestCorners}
                 onDragStart={handleDragStart}
+                onDragMove={handleDragMove}
                 onDragOver={handleDragOver}
                 onDragEnd={handleDragEnd}
+                onDragCancel={resetDragTilt}
               >
-                <div className="p-4 sm:p-6 lg:p-10 flex flex-row gap-4 sm:gap-6 min-w-max lg:h-full lg:items-stretch items-start">
+                <div className="px-4 sm:px-6 lg:px-10 pt-2 sm:pt-4 lg:pt-5 pb-4 sm:pb-6 lg:pb-10 flex flex-col lg:flex-row gap-6 lg:gap-6 w-full lg:w-auto lg:min-w-max lg:h-full lg:items-stretch items-stretch lg:items-start">
                   {columns.map((column) => {
                     const columnTasks = tasks.filter(t => t.status === column.id)
                     return (
-                      <div key={column.id} className="w-[260px] sm:w-72 lg:w-[320px] flex-shrink-0 flex flex-col">
-                        <div className="flex items-center justify-between px-1 mb-3 sm:mb-4">
-                          <div className="flex items-center gap-2.5">
-                            <span className={`w-2 h-2 rounded-full ${column.color}`}></span>
-                            <h3 className="text-xs sm:text-sm font-bold text-[#37352f]/80 tracking-wider">{column.title}</h3>
-                            <span className="text-[10px] sm:text-[11px] font-bold text-[#37352f]/30 bg-[#000000]/5 px-1.5 py-0.5 rounded">
-                              {columnTasks.length}
-                            </span>
+                      <div key={column.id} className="w-full lg:w-[320px] flex-shrink-0 flex flex-col">
+                        <div className="flex items-center justify-between px-1 mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-1.5 h-1.5 rounded-full ${column.color} opacity-80`}></span>
+                            <h3 className="text-[13px] font-semibold text-[#37352f]">{column.title}</h3>
+                            <NumberFlow
+                              value={columnTasks.length}
+                              className="text-[12px] font-medium text-[#37352f]/40"
+                            />
                           </div>
                         </div>
 
                         <SortableContext id={column.id} items={columnTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
-                          <DroppableContainer id={column.id} className="flex-1 flex flex-col min-h-[200px] lg:min-h-0 lg:overflow-y-auto hide-scrollbar p-4">
+                          <DroppableContainer id={column.id} className="flex-1 flex flex-col min-h-[120px] md:min-h-[360px] lg:min-h-0 lg:overflow-y-auto hide-scrollbar p-3 sm:p-4 lg:p-5">
                             <div className="flex-1 flex flex-col space-y-3 pb-4 sm:pb-6">
                               {columnTasks.map((task) => (
                                 <SortableTaskCard
@@ -1444,8 +1701,8 @@ const Tasks: React.FC = () => {
                               ))}
                             </div>
 
-                            <button onClick={openCreateModal} className="w-full py-2 sm:py-2.5 px-3 rounded-lg flex items-center gap-2 text-[#37352f]/30 hover:text-[#37352f]/60 hover:bg-[#f7f7f5] transition-all group/btn mt-auto">
-                              <Plus size={14} className="group-hover/btn:scale-110 transition-transform" />
+                            <button onClick={openCreateModal} className="w-full py-3 sm:py-2.5 px-3 rounded-xl flex items-center gap-2 text-[#37352f]/30 hover:text-[#37352f]/60 hover:bg-[#f7f7f5] active:bg-[#f0f0ee] transition-all group/btn mt-auto">
+                              <Plus size={15} className="group-hover/btn:scale-110 transition-transform" />
                               <span className="text-xs font-bold uppercase tracking-tight">Novo</span>
                             </button>
                           </DroppableContainer>
@@ -1457,7 +1714,7 @@ const Tasks: React.FC = () => {
 
                 <DragOverlay dropAnimation={dropAnimationConfig}>
                   {activeTask ? (
-                    <TaskCardUI
+                    <MemoizedTaskCardUI
                       task={activeTask}
                       isOverlay={true}
                       isDragging={true}
@@ -1474,16 +1731,20 @@ const Tasks: React.FC = () => {
             )}
 
             {viewMode === 'table' && (
-              <div className="p-4 sm:p-6 lg:p-10 max-w-full space-y-8 sm:space-y-12 pb-20">
+              <div className="px-4 sm:px-6 lg:px-10 pt-2 sm:pt-4 lg:pt-5 pb-20 max-w-full space-y-8 sm:space-y-12">
                 {columns.map((column) => {
                   const columnTasks = tasks.filter(t => t.status === column.id)
                   if (columnTasks.length === 0) return null
 
                   return (
                     <div key={column.id} className="space-y-3 sm:space-y-4">
-                      <div className="flex items-center gap-3 px-1">
-                        <span className={`w-2 h-2 rounded-full ${column.color}`}></span>
-                        <h3 className="text-xs font-bold text-[#37352f]/80 tracking-widest">{column.title}</h3>
+                      <div className="flex items-center gap-2 px-1">
+                        <span className={`w-1.5 h-1.5 rounded-full ${column.color} opacity-80`}></span>
+                        <h3 className="text-[13px] font-semibold text-[#37352f]">{column.title}</h3>
+                        <NumberFlow
+                          value={columnTasks.length}
+                          className="text-[12px] font-medium text-[#37352f]/40"
+                        />
                       </div>
 
                       <div className="hidden md:block border border-[#e9e9e7] rounded-xl overflow-hidden shadow-sm bg-white">
@@ -1499,12 +1760,12 @@ const Tasks: React.FC = () => {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-[#f1f1f0]">
-                                {columnTasks.map((task) => (
-                                  <tr 
-                                    key={task.id} 
-                                    className="group hover:bg-[#fcfcfa] transition-colors relative cursor-pointer"
-                                    onClick={() => handleCardClick(task)}
-                                  >
+                              {columnTasks.map((task) => (
+                                <tr
+                                  key={task.id}
+                                  className="group hover:bg-[#fcfcfa] transition-colors relative cursor-pointer"
+                                  onClick={() => handleCardClick(task)}
+                                >
                                   <td className="py-4 px-5 border-r border-[#f1f1f0]">
                                     <span className="text-sm font-semibold text-[#37352f] line-clamp-1">{task.title}</span>
                                   </td>
@@ -1517,6 +1778,7 @@ const Tasks: React.FC = () => {
                                   <td className="py-4 px-5 text-right border-r border-[#f1f1f0]">
                                     <span className="text-[11px] font-extrabold text-[#37352f]/40 bg-[#f7f7f5] px-2 py-1 rounded-sm border border-[#e9e9e7]">
                                       {formatDate(task.dueDate)}
+                                      {task.dueTime ? ` · ${formatDueTime(task.dueTime)}` : ''}
                                     </span>
                                   </td>
                                   <td className="py-4 px-2 text-center relative">
@@ -1555,6 +1817,66 @@ const Tasks: React.FC = () => {
                           </table>
                         </div>
                       </div>
+
+                      {/* Mobile card list — visible below md */}
+                      <div className="md:hidden divide-y divide-[#f1f1f0] border border-[#e9e9e7] rounded-xl overflow-hidden bg-white shadow-sm">
+                        {columnTasks.map((task) => (
+                          <div
+                            key={task.id}
+                            className="relative flex items-center gap-3 px-4 py-3.5 active:bg-[#f5f5f3] transition-colors cursor-pointer"
+                            onClick={() => handleCardClick(task)}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 mb-1">
+                                {task.status === 'done' && (
+                                  <CheckCircle2 size={12} className="text-[#1a1a1a] flex-shrink-0" strokeWidth={2.5} />
+                                )}
+                                <span className={`text-[13px] font-semibold line-clamp-1 ${task.status === 'done' ? 'text-[#37352f]/40 line-through' : 'text-[#37352f]'}`}>
+                                  {task.title}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${getPriorityColor(task.priority)}`}>
+                                  {task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Média' : 'Baixa'}
+                                </span>
+                                <span className="text-[10px] text-[#37352f]/40 font-medium">
+                                  {formatDate(task.dueDate)}
+                                  {task.dueTime ? ` · ${formatDueTime(task.dueTime)}` : ''}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="relative flex-shrink-0">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setActiveDropdownId(activeDropdownId === task.id ? null : task.id)
+                                }}
+                                className="p-1.5 hover:bg-[#f1f1f0] rounded-md transition-colors text-[#37352f]/30 hover:text-[#37352f]"
+                              >
+                                <MoreHorizontal size={14} />
+                              </button>
+                              <Dropdown
+                                isOpen={activeDropdownId === task.id}
+                                onClose={() => setActiveDropdownId(null)}
+                                className="w-[110px]"
+                              >
+                                <DropdownItem
+                                  icon={<Edit2 size={12} />}
+                                  label="Editar"
+                                  onClick={() => openEditModal(task)}
+                                />
+                                <DropdownDivider />
+                                <DropdownItem
+                                  icon={<Trash2 size={12} />}
+                                  label="Excluir"
+                                  variant="danger"
+                                  onClick={() => handleDeleteTask(task.id)}
+                                />
+                              </Dropdown>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )
                 })}
@@ -1564,22 +1886,13 @@ const Tasks: React.FC = () => {
         )}
       </div>
 
-      {/* FAB — apenas mobile, sempre visível após carregamento */}
-      {!loading && (
-        <motion.button
-          onClick={openCreateModal}
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25, delay: 0.1 }}
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
-          className="sm:hidden fixed bottom-6 right-5 z-30 w-14 h-14 bg-[#202020] text-white rounded-full shadow-2xl shadow-black/25 flex items-center justify-center"
-        >
-          <Plus size={22} strokeWidth={2.5} />
-        </motion.button>
-      )}
-
-      <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingTask(null); }} title={editingTask ? 'Editar Tarefa' : 'Nova Tarefa'} hideScrollbar={true}>
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => { setIsModalOpen(false); setEditingTask(null); }}
+        title={editingTask ? 'Editar Tarefa' : 'Nova Tarefa'}
+        hideScrollbar={true}
+        bodyClassName="!pb-0"
+      >
         <TaskForm
           initialData={editingTask}
           onSubmit={handleAddTask}
