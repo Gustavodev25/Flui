@@ -91,11 +91,31 @@ function formatDateTimeForTimeZone(value, timeZone) {
 }
 
 function resolveGoogleCalendarSchedule(task, timeZone) {
+  if (task?.timer_at && !task?.timer_fired) {
+    const start = new Date(task.timer_at);
+    if (!Number.isNaN(start.getTime())) {
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      const startDateTime = formatDateTimeForTimeZone(start, timeZone);
+      const endDateTime = formatDateTimeForTimeZone(end, timeZone);
+
+      if (startDateTime && endDateTime) {
+        return {
+          kind: 'dateTime',
+          source: 'timer',
+          startDateTime,
+          endDateTime,
+          timeZone,
+        };
+      }
+    }
+  }
+
   const dueTime = normalizeClockTime(task?.due_time);
   if (task?.due_date && dueTime) {
     const startDateTime = `${task.due_date}T${dueTime}`;
     return {
       kind: 'dateTime',
+      source: 'due_time',
       startDateTime,
       endDateTime: addMinutesToLocalDateTime(task.due_date, dueTime, 60) || startDateTime,
       timeZone,
@@ -108,19 +128,6 @@ function resolveGoogleCalendarSchedule(task, timeZone) {
       startDate: task.due_date,
       endDate: addDaysToDate(task.due_date, 1) || task.due_date,
     };
-  }
-
-  if (task?.timer_at && !task?.timer_fired) {
-    const start = new Date(task.timer_at);
-    if (!Number.isNaN(start.getTime())) {
-      const end = new Date(start.getTime() + 60 * 60 * 1000);
-      const startDateTime = formatDateTimeForTimeZone(start, timeZone);
-      const endDateTime = formatDateTimeForTimeZone(end, timeZone);
-
-      if (startDateTime && endDateTime) {
-        return { kind: 'dateTime', startDateTime, endDateTime, timeZone };
-      }
-    }
   }
 
   return null;
@@ -262,10 +269,14 @@ function buildGoogleCalendarEvent(task, integration) {
     description: [task.description?.trim(), 'Criado no Flui.']
       .filter(Boolean)
       .join('\n\n'),
-    reminders: {
-      useDefault: false,
-      overrides: [{ method: 'popup', minutes: 30 }],
-    },
+    reminders: schedule.kind === 'dateTime'
+      ? {
+        useDefault: false,
+        overrides: [{ method: 'popup', minutes: 0 }],
+      }
+      : {
+        useDefault: true,
+      },
     source: {
       title: 'Flui',
       url: FRONTEND_URL,
