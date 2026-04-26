@@ -37,7 +37,9 @@ import { trackEvent, analyzeAndUpdateProfile } from './agent/behavioralProfile.j
 import { detectAndSaveCommitment } from './agent/accountabilityLoop.js';
 import { getMemorySystemStatus } from './agent/memoryEngine.js';
 import { engineEvents as agentEvents, hasMultipleTasks } from './agent/queryEngine.js';
+import { SIMPLE_CONVERSATION_RULES, polishAssistantText } from './agent/responseStyle.js';
 import { sanitizeWhatsAppPayload, sanitizeWhatsAppText } from './agent/textFormatter.js';
+import * as googleCalendarSync from './services/googleCalendarSync.js';
 import {
   getSession,
   setSession,
@@ -1301,25 +1303,34 @@ async function generateWelcomeMessage() {
       messages: [
         {
           role: 'system',
-          content: `Você é o Lui, assistente de produtividade da Flui. Gere uma mensagem de boas-vindas curta e calorosa em português brasileiro para um usuário novo que chegou pelo WhatsApp. A mensagem DEVE: se apresentar como Lui, assistente da Flui; pedir o e-mail do usuário para começar. Máximo 2 frases curtas. Pode usar no máximo 1 emoji. Seja natural e acolhedor, nunca genérico.`,
+          content: `Você é o Lui, assistente de produtividade da Flui. Gere uma mensagem de boas-vindas curta em português brasileiro para um usuário novo que chegou pelo WhatsApp.
+
+${SIMPLE_CONVERSATION_RULES}
+
+A mensagem DEVE:
+- Se apresentar como Lui, da Flui.
+- Pedir o e-mail do usuário para começar.
+- Ter no máximo 2 frases curtas.
+- Não usar emoji.
+- Não soar genérica.`,
         },
         { role: 'user', content: 'novo usuário' },
       ],
       max_tokens: 80,
       temperature: 0.85,
     });
-    return response.choices[0]?.message?.content?.trim() || null;
+    return polishAssistantText(response.choices[0]?.message?.content?.trim()) || null;
   } catch {
     return null;
   }
 }
 
 const PROCESSING_UPDATE_FALLBACKS = [
-  'Ja estou olhando isso com calma para te responder melhor.',
-  'Vou organizar isso direitinho antes de te responder.',
-  'Estou cruzando as informacoes para nao te mandar uma resposta pela metade.',
-  'Estou ajustando a resposta com o seu contexto.',
-  'Um instante, estou buscando o melhor caminho para isso.',
+  'Ja vejo isso.',
+  'Vou organizar aqui.',
+  'Estou checando isso.',
+  'Um instante.',
+  'Ja te respondo.',
 ];
 
 function getFallbackProcessingUpdate(textMessage) {
@@ -1331,7 +1342,7 @@ function getFallbackProcessingUpdate(textMessage) {
 }
 
 function cleanProcessingUpdate(content, fallback) {
-  const cleaned = String(content || '')
+  const cleaned = polishAssistantText(String(content || ''))
     .replace(/^["'“”]+|["'“”]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -1351,7 +1362,11 @@ async function generateProcessingUpdate({ userName, textMessage }) {
       messages: [
         {
           role: 'system',
-          content: `Voce e o Lui, assistente da Flui no WhatsApp. Gere UMA frase curta de acompanhamento enquanto voce resolve o pedido do usuario. Deve soar natural, util e personalizada ao contexto. Nao use a palavra "processando", nao use ampulheta, nao diga que terminou, nao peca para o usuario reenviar nada. Maximo 120 caracteres.`,
+          content: `Voce e o Lui, assistente da Flui no WhatsApp. Gere UMA frase curta de acompanhamento enquanto voce resolve o pedido do usuario.
+
+${SIMPLE_CONVERSATION_RULES}
+
+Nao use a palavra "processando", nao use ampulheta, nao diga que terminou, nao peca para o usuario reenviar nada. Maximo 80 caracteres.`,
         },
         {
           role: 'user',
@@ -1407,7 +1422,7 @@ async function processAndRespondWithAI(userPhone, textMessage, messageId, { from
       await setSession(userPhone, session);
 
       const welcomeMsg = await generateWelcomeMessage()
-        || "Oi! Eu sou o Lui, assistente da Flui \n\nMe passa seu *e-mail* pra gente começar.";
+        || "Oi! Eu sou o Lui, da Flui. Me passa seu *e-mail* pra começar.";
       await sendWhatsAppMessage(userPhone, welcomeMsg);
       return;
     }
@@ -2195,6 +2210,8 @@ ${taskSnapshot || 'Nenhuma tarefa pendente.'}
 
 IMPORTANTE: Os IDs acima são apenas para uso interno nas ferramentas. NUNCA mencione IDs, UUIDs ou dados técnicos para o usuário.
 
+${SIMPLE_CONVERSATION_RULES}
+
 ═══ SUAS CAPACIDADES ═══
 1. Ver e buscar tarefas do usuário (TaskList, TaskSearch)
 2. Marcar subtarefas como concluídas ou pendentes (SubtaskToggle)
@@ -2256,7 +2273,7 @@ REGRAS GERAIS:
 
       // Sem tool calls — resposta final
       if (!assistantMsg?.tool_calls || assistantMsg.tool_calls.length === 0) {
-        finalContent = assistantMsg?.content || '';
+        finalContent = polishAssistantText(assistantMsg?.content || '');
         break;
       }
 
@@ -2512,7 +2529,7 @@ async function buildAdminStatsPayload() {
     supabaseAdmin.from('conversation_threads').select('*', { count: 'exact', head: true }),
     supabaseAdmin
       .from('conversation_messages')
-      .select('id, thread_id, user_id, channel, direction, role, message_type, content, status, provider, model, latency_ms, fallback_used, tool_count, created_at')
+      .select('id, thread_id, user_id, channel, direction, role, message_type, content, status, provider, model, latency_ms, fallback_used, tool_count, error_class, artifact_recovery, created_at')
       .order('created_at', { ascending: false })
       .limit(500),
     supabaseAdmin
@@ -2783,7 +2800,7 @@ app.get('/api/admin/messages', requireAdmin, async (req, res) => {
     // Build query for messages
     let query = supabaseAdmin
       .from('conversation_messages')
-      .select('id, thread_id, user_id, channel, direction, role, message_type, content, status, provider, model, latency_ms, fallback_used, tool_count, created_at', { count: 'exact' })
+      .select('id, thread_id, user_id, channel, direction, role, message_type, content, status, provider, model, latency_ms, fallback_used, tool_count, error_class, artifact_recovery, created_at', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limitNum - 1);
 
@@ -2827,6 +2844,14 @@ app.get('/api/admin/messages', requireAdmin, async (req, res) => {
     // Merge user info into messages
     let enrichedMessages = (messages || []).map(m => ({
       ...m,
+      fallback_used: Boolean(m.fallback_used),
+      artifact_recovery: Boolean(m.artifact_recovery),
+      ai_diagnostics: {
+        provider: m.provider || null,
+        error_class: m.error_class || null,
+        artifact_recovery: Boolean(m.artifact_recovery),
+        fallback_used: Boolean(m.fallback_used),
+      },
       user: usersMap[m.user_id] || { name: 'Desconhecido', email: '—', avatar: null },
     }));
 
@@ -3086,10 +3111,10 @@ app.post('/api/integrations/google/sync-task', async (req, res) => {
   if (!userId || !taskId) return res.status(400).json({ error: 'userId e taskId são obrigatórios' });
 
   try {
-    const result = await syncGoogleCalendarTask({ userId, taskId });
+    const result = await googleCalendarSync.syncGoogleCalendarTask({ userId, taskId, supabaseClient: supabaseAdmin });
     return res.json(result);
   } catch (error) {
-    await setGoogleIntegrationError(userId, error.message);
+    await googleCalendarSync.setGoogleIntegrationError(userId, error.message, supabaseAdmin);
     return res.status(500).json({ error: error.message });
   }
 });
@@ -3099,10 +3124,10 @@ app.delete('/api/integrations/google/sync-task', async (req, res) => {
   if (!userId || !taskId) return res.status(400).json({ error: 'userId e taskId são obrigatórios' });
 
   try {
-    const result = await removeGoogleCalendarSyncForTask({ userId, taskId });
+    const result = await googleCalendarSync.removeGoogleCalendarSyncForTask({ userId, taskId, supabaseClient: supabaseAdmin });
     return res.json(result);
   } catch (error) {
-    await setGoogleIntegrationError(userId, error.message);
+    await googleCalendarSync.setGoogleIntegrationError(userId, error.message, supabaseAdmin);
     return res.status(500).json({ error: error.message });
   }
 });
@@ -3331,9 +3356,137 @@ app.post('/api/workspace/shared-tasks', async (req, res) => {
       .single();
 
     if (error) throw error;
+    await googleCalendarSync.autoSyncGoogleCalendarTask({
+      userId: data.user_id,
+      taskId: data.id,
+      context: 'workspace shared task create',
+      supabaseClient: supabaseAdmin,
+    });
     res.json({ task: data });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+function hasBodyField(source, ...names) {
+  if (!source || typeof source !== 'object') return false;
+  return names.some(name => Object.prototype.hasOwnProperty.call(source, name));
+}
+
+function readBodyField(source, ...names) {
+  for (const name of names) {
+    if (hasBodyField(source, name)) return source[name];
+  }
+  return undefined;
+}
+
+function normalizeWorkspaceTaskUpdates(body = {}) {
+  const source = body.task || body.updates || body;
+  const updates = {};
+
+  if (hasBodyField(source, 'title')) updates.title = String(source.title || '').trim();
+  if (hasBodyField(source, 'status')) updates.status = source.status;
+  if (hasBodyField(source, 'priority')) updates.priority = source.priority;
+  if (hasBodyField(source, 'source')) updates.source = source.source;
+  if (hasBodyField(source, 'progress')) updates.progress = source.progress || 0;
+  if (hasBodyField(source, 'description')) updates.description = source.description || '';
+  if (hasBodyField(source, 'subtasks')) updates.subtasks = Array.isArray(source.subtasks) ? source.subtasks : [];
+
+  if (hasBodyField(source, 'dueDate', 'due_date')) {
+    const dueDate = readBodyField(source, 'dueDate', 'due_date');
+    updates.due_date = dueDate && dueDate !== 'Sem prazo' ? dueDate : null;
+    updates.reminder_fired = false;
+  }
+
+  if (hasBodyField(source, 'dueTime', 'due_time')) {
+    const dueTime = readBodyField(source, 'dueTime', 'due_time');
+    updates.due_time = dueTime || null;
+  }
+
+  if (hasBodyField(source, 'timerAt', 'timer_at')) {
+    const timerAt = readBodyField(source, 'timerAt', 'timer_at');
+    updates.timer_at = timerAt || null;
+    if (!hasBodyField(source, 'timerFired', 'timer_fired')) {
+      updates.timer_fired = false;
+    }
+  }
+
+  if (hasBodyField(source, 'timerFired', 'timer_fired')) {
+    updates.timer_fired = Boolean(readBodyField(source, 'timerFired', 'timer_fired'));
+  }
+
+  if ((updates.status === 'done' || updates.status === 'canceled') && !hasBodyField(updates, 'timer_fired')) {
+    updates.timer_fired = true;
+  }
+
+  return Object.fromEntries(
+    Object.entries(updates).filter(([, value]) => value !== undefined)
+  );
+}
+
+app.patch('/api/workspace/tasks/:taskId', async (req, res) => {
+  const { taskId } = req.params;
+  const { userId } = req.body;
+  if (!taskId || !userId) return res.status(400).json({ error: 'taskId e userId obrigatorios' });
+
+  try {
+    const updates = normalizeWorkspaceTaskUpdates(req.body);
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'Nenhum campo valido para atualizar' });
+    }
+
+    const { data: task, error: fetchErr } = await supabaseAdmin
+      .from('tasks')
+      .select('id, user_id, visibility, workspace_owner_id')
+      .eq('id', taskId)
+      .single();
+
+    if (fetchErr || !task) {
+      return res.status(404).json({ error: 'Tarefa nao encontrada' });
+    }
+
+    if (task.visibility !== 'workspace') {
+      return res.status(403).json({ error: 'Esta rota atualiza apenas tarefas de workspace' });
+    }
+
+    const isCreator = task.user_id === userId;
+    const isWorkspaceOwner = task.workspace_owner_id === userId;
+    let isMemberOfWorkspace = false;
+
+    if (!isCreator && !isWorkspaceOwner) {
+      const { data: membership } = await supabaseAdmin
+        .from('workspace_members')
+        .select('id')
+        .eq('member_user_id', userId)
+        .eq('workspace_owner_id', task.workspace_owner_id)
+        .maybeSingle();
+      isMemberOfWorkspace = !!membership;
+    }
+
+    if (!isCreator && !isWorkspaceOwner && !isMemberOfWorkspace) {
+      return res.status(403).json({ error: 'Sem permissao para atualizar esta tarefa' });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('tasks')
+      .update(updates)
+      .eq('id', taskId)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+
+    await googleCalendarSync.autoSyncGoogleCalendarTask({
+      userId: data.user_id,
+      taskId: data.id,
+      context: 'workspace task update',
+      supabaseClient: supabaseAdmin,
+    });
+
+    return res.json({ success: true, task: data });
+  } catch (err) {
+    console.error('[WorkspaceTasks] Erro ao atualizar tarefa:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -3404,7 +3557,7 @@ app.delete('/api/workspace/tasks/:taskId', async (req, res) => {
     // Deleta via supabaseAdmin (bypass RLS)
     if (task.user_id) {
       try {
-        await removeGoogleCalendarSyncForTask({ userId: task.user_id, taskId });
+        await googleCalendarSync.removeGoogleCalendarSyncForTask({ userId: task.user_id, taskId, supabaseClient: supabaseAdmin });
       } catch (syncErr) {
         console.warn('[GoogleCalendar] Falha ao remover evento ao excluir tarefa:', syncErr.message);
       }
@@ -3908,10 +4061,10 @@ app.get('/api/admin/chat/stream/:sseId', requireAdmin, (req, res) => {
     }
   };
 
-  agentEvents.on('status', onStatus);
+  agentEvents.on('monitor', onStatus);
 
   req.on('close', () => {
-    agentEvents.off('status', onStatus);
+    agentEvents.off('monitor', onStatus);
   });
 });
 
@@ -3934,7 +4087,11 @@ app.post('/api/admin/chat/simulate', requireAdmin, async (req, res) => {
       success: true,
       role: 'assistant',
       content: result.reply,
-      telemetry: result.telemetry
+      telemetry: result.telemetry,
+      provider: result.telemetry?.provider || null,
+      error_class: result.telemetry?.error_class || null,
+      artifact_recovery: Boolean(result.telemetry?.artifact_recovery),
+      fallback_used: Boolean(result.telemetry?.fallback_used)
     });
   } catch (error) {
     console.error('[Simulate] Error:', error);
@@ -4403,6 +4560,8 @@ async function generateTimerMessage(name, title, type, timeLabel) {
 
   const prompt = `Você é o Lui, assistente de produtividade no WhatsApp. Gere UMA mensagem curta (máximo 2 frases) avisando ${name} sobre a tarefa "${title}". ${contextLine}
 
+${SIMPLE_CONVERSATION_RULES}
+
 Regras obrigatórias:
 - Tom casual, de amigo, português brasileiro
 - NUNCA use emojis
@@ -4416,7 +4575,7 @@ Regras obrigatórias:
       temperature: 1.0,
       max_tokens: 80,
     }, { preferFallback: false });
-    const text = response.choices?.[0]?.message?.content?.trim();
+    const text = polishAssistantText(response.choices?.[0]?.message?.content?.trim());
     if (text) return text;
   } catch (err) {
     console.warn(`[Timer] IA falhou ao gerar mensagem, usando fallback: ${err.message}`);

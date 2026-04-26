@@ -159,7 +159,13 @@ export async function createChatCompletion(params, options = {}) {
   for (const attempt of orderedAttempts) {
     try {
       const result = await attempt();
-      if (result) return result;
+      if (result) {
+        if (result.telemetry?.fallback_used && errors.length > 0) {
+          const previousError = errors[errors.length - 1];
+          result.telemetry.error_class = previousError.error_class || classifyError(previousError);
+        }
+        return result;
+      }
     } catch (error) {
       errors.push(error);
       console.warn(

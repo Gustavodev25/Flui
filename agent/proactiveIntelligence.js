@@ -220,7 +220,7 @@ export async function buildSmartProactiveMessage(userId, userName, period) {
     if (profile.communication_style === 'concise') {
       profileContext += '\n- Usuario prefere mensagens CURTAS e diretas. Max 2-3 frases.';
     } else if (profile.communication_style === 'detailed') {
-      profileContext += '\n- Usuario gosta de detalhes. Pode elaborar mais.';
+      profileContext += '\n- Usuario aceita detalhes, mas entregue a ideia principal primeiro e mantenha curto.';
     }
     if (profile.action_triggers?.includes('streak') && streak > 0) {
       profileContext += `\n- MOTIVADOR: Usuario responde bem a streak! Streak atual: ${streak} dias.`;

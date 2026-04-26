@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import { trackEvent } from './behavioralProfile.js';
 import { saveMemory, recallMemories, recallByEntity, getEntities, getMemorySystemStatus } from './memoryEngine.js';
 import { saveKnowledge, searchKnowledge, listIdeas, getPersonContext } from './secondBrain.js';
+import { autoSyncGoogleCalendarTask, autoSyncGoogleCalendarTasks } from '../services/googleCalendarSync.js';
 
 // Usa service_role no backend (agente) para bypassar RLS.
 // O agente já filtra por user_id em todas as queries.
@@ -52,6 +53,7 @@ const taskCreateSchema = z.object({
   description: z.string().optional(),
   priority: z.enum(['low', 'medium', 'high']).optional(),
   due_date: z.string().optional(),
+  due_time: z.string().optional(),
   tags: z.array(z.string()).optional(),
   subtasks: z.array(subtaskItemSchema).optional(),
   timer_minutes: optionalPositiveInt(1440),
@@ -70,6 +72,8 @@ const taskUpdateSchema = z.object({
   status: z.enum(['todo', 'doing', 'done', 'canceled']).optional(),
   priority: z.enum(['low', 'medium', 'high']).optional(),
   due_date: z.string().optional(),
+  due_time: z.string().optional(),
+  remove_due_date: z.boolean().optional(),
   subtasks: z.array(z.string()).optional(),
   timer_minutes: optionalPositiveInt(1440),
   remove_timer: z.boolean().optional(),
@@ -100,6 +104,7 @@ const taskBatchCreateSchema = z.object({
     description: z.string().optional(),
     priority: z.enum(['low', 'medium', 'high']).optional(),
     due_date: z.string().optional(),
+    due_time: z.string().optional(),
     tags: z.array(z.string()).optional(),
     subtasks: z.array(subtaskItemSchema).optional(),
     timer_minutes: optionalPositiveInt(1440),
@@ -145,6 +150,10 @@ export const TOOLS = [
           due_date: {
             type: 'string',
             description: 'Data de vencimento no formato YYYY-MM-DD. Resolva datas relativas ("amanhã", "semana que vem") para o formato exato. NUNCA deixe vazio se o usuário mencionou prazo.',
+          },
+          due_time: {
+            type: 'string',
+            description: 'Horario do prazo no formato HH:mm quando o usuario mencionar uma hora especifica.',
           },
           tags: {
             type: 'array',
@@ -212,6 +221,14 @@ export const TOOLS = [
           due_date: {
             type: 'string',
             description: 'Nova data (YYYY-MM-DD). Resolva datas relativas.',
+          },
+          due_time: {
+            type: 'string',
+            description: 'Novo horario do prazo no formato HH:mm.',
+          },
+          remove_due_date: {
+            type: 'boolean',
+            description: 'Use true para remover ou cancelar o prazo da tarefa.',
           },
           subtasks: {
             type: 'array',
@@ -365,6 +382,7 @@ export const TOOLS = [
                 description: { type: 'string', description: 'Resumo inteligente do que precisa ser feito. NUNCA use "Criado a partir da mensagem: ..." — resuma com suas próprias palavras.' },
                 priority: { type: 'string', enum: ['low', 'medium', 'high'] },
                 due_date: { type: 'string', description: 'Data YYYY-MM-DD.' },
+                due_time: { type: 'string', description: 'Horario do prazo no formato HH:mm, se houver.' },
                 tags: { type: 'array', items: { type: 'string' } },
                 subtasks: {
                   type: 'array',
@@ -773,6 +791,7 @@ async function executeTaskCreate(args, userId) {
     status: 'todo',
     priority: parsed.priority || 'medium',
     due_date: dueDateFixed,
+    due_time: parsed.due_time || null,
     tags: parsed.tags || [],
     progress: 0,
     source: parsed.source || 'whatsapp',
@@ -798,6 +817,8 @@ async function executeTaskCreate(args, userId) {
     .single();
 
   if (error) throw new Error(`Falha ao criar tarefa: ${error.message}`);
+
+  await autoSyncGoogleCalendarTask({ userId, taskId: data.id, context: 'TaskCreate' });
 
   // Track behavioral event
   trackEvent(userId, 'task_created', {
@@ -868,6 +889,14 @@ async function executeTaskUpdate(args, userId) {
     rest.due_date = fixDueDate(rest.due_date);
     // Prazo mudou ÔåÆ reseta lembrete para poder disparar novamente
     rest.reminder_fired = false;
+  }
+
+  if (rest.remove_due_date) {
+    rest.due_date = null;
+    rest.due_time = null;
+    rest.reminder_days_before = null;
+    rest.reminder_fired = false;
+    delete rest.remove_due_date;
   }
 
   if (rest.subtasks) {
@@ -954,6 +983,8 @@ async function executeTaskUpdate(args, userId) {
     };
   }
 
+  await autoSyncGoogleCalendarTask({ userId, taskId: data.id, context: 'TaskUpdate' });
+
   const statusLabel = STATUS_LABEL[data.status] || data.status;
   const dateLabel = humanizeDate(data.due_date);
 
@@ -961,7 +992,9 @@ async function executeTaskUpdate(args, userId) {
   const changes = [];
   if (rest.status) changes.push(`status: ${statusLabel}`);
   if (rest.priority) changes.push(`prioridade: ${PRIORITY_LABEL[rest.priority]}`);
-  if (rest.due_date) changes.push(`prazo: ${dateLabel}`);
+  if (updates.due_date === null) changes.push('prazo: removido');
+  else if (rest.due_date) changes.push(`prazo: ${dateLabel}`);
+  if (rest.due_time) changes.push(`horario: ${rest.due_time}`);
   if (rest.title) changes.push(`título: "${data.title}"`);
   if (rest.subtasks && rest.status !== 'done' && rest.status !== 'todo' && rest.status !== 'doing') changes.push(`subtarefas: ${rest.subtasks.length} novos passos`);
   if (rest.timer_at === null) {
@@ -1121,6 +1154,8 @@ async function executeTaskDelete(args, userId) {
   }
 
   // confirmed === true: executa a exclusão definitiva
+  await autoSyncGoogleCalendarTask({ userId, taskId: deleteId, action: 'remove', context: 'TaskDelete' });
+
   const { error } = await supabase
     .from('tasks')
     .delete()
@@ -1289,6 +1324,7 @@ async function executeTaskBatchCreate(args, userId) {
       status: 'todo',
       priority: t.priority || 'medium',
       due_date: fixDueDate(t.due_date),
+      due_time: t.due_time || null,
       tags: t.tags || [],
       progress: 0,
       source: parsed.source || 'whatsapp',
@@ -1306,9 +1342,15 @@ async function executeTaskBatchCreate(args, userId) {
   const { data, error } = await supabase
     .from('tasks')
     .insert(insertData)
-    .select('title, priority, due_date, subtasks');
+    .select('id, title, priority, due_date, subtasks');
 
   if (error) throw new Error(`Falha ao criar tarefas: ${error.message}`);
+
+  await autoSyncGoogleCalendarTasks({
+    userId,
+    taskIds: (data || []).map(t => t.id),
+    context: 'TaskBatchCreate',
+  });
 
   const created = (data || []).map((t, i) => {
     const dateLabel = t.due_date ? ` - ${humanizeDate(t.due_date)}` : '';

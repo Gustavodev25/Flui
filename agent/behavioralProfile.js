@@ -347,7 +347,7 @@ export async function getProfileContext(userId) {
     } else if (tone.verbosity <= 0.5) {
       lines.push('TAMANHO: Este usuario e conciso. Responda de forma breve, 1-3 frases no maximo.');
     } else if (tone.verbosity >= 0.7) {
-      lines.push('TAMANHO: Este usuario escreve bastante. Pode elaborar um pouco mais nas respostas, mas ainda assim seja objetivo.');
+      lines.push('TAMANHO: Este usuario escreve bastante, mas ainda prefere clareza. Responda direto e detalhe so se ele pedir.');
     }
 
     // Pontuação

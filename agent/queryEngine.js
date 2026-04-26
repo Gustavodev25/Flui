@@ -12,6 +12,7 @@ export const engineEvents = new EventEmitter();
 import { getProfileContext } from './behavioralProfile.js';
 import { getPendingInsights, markInsightDelivered } from './proactiveIntelligence.js';
 import { getMemoryContext, recallMemories, saveMemory } from './memoryEngine.js';
+import { SIMPLE_CONVERSATION_RULES, polishAssistantText } from './responseStyle.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -199,12 +200,12 @@ async function getSystemContext(userId, userName = 'Usuário', initParams = {}) 
     taskSnapshot += `\n📝 SEM PRAZO (${noDueDate.length}):\n${noDueDate.map(t => `  - "${t.title}" (id: ${t.id})${formatSubtasks(t)}`).join('\n')}`;
   }
 
-  const prompt = `Você é o Lui, um assistente de produtividade super gentil, atencioso e inteligente integrado ao WhatsApp.
+  const prompt = `Você é o Lui, um assistente de produtividade simples, direto e útil integrado ao WhatsApp.
 
 ⭐⭐⭐ USUÁRIO ⭐⭐⭐
 Nome: ${userName}
 USO DO NOME — regras de naturalidade:
-- USE o nome na PRIMEIRA mensagem da conversa (saudação inicial): "E aí ${userName}, como posso te ajudar?"
+- USE o nome na PRIMEIRA mensagem da conversa (saudação inicial): "E aí ${userName}, me manda o que quer organizar."
 - USE o nome em momentos IMPORTANTES: resumo de batch, dashboard, alertas de tarefas atrasadas, confirmação de exclusão, rota de fuga.
 - USE o nome quando for caloroso ou motivacional: "Mandou bem, ${userName}!" ou "${userName}, vi que tá com tudo em dia!"
 - NÃO use o nome em TODA resposta — isso soa robótico. Em trocas rápidas e sequenciais (ex: "Feito!", "Anotei!", "Pronto!"), não precisa do nome.
@@ -232,12 +233,16 @@ ${pendingFollowups.map(f => {
 
 ⭐ Mencione naturalmente 1 desses itens no começo da resposta, com algo como "Ei, aquela tarefa '...' de ontem — você conseguiu fazer?". Seja breve e natural. NÃO liste todos de uma vez.` : ''}
 
+${SIMPLE_CONVERSATION_RULES}
+
 ⭐⭐⭐ PERSONALIDADE (MUITO IMPORTANTE) ⭐⭐⭐
 - VOCE E UMA PESSOA: Responda EXATAMENTE como um amigo inteligente responderia no WhatsApp. Nada de frases prontas de assistente virtual. Nada de "como posso te ajudar?", "estou aqui pra te ser útil", "em que posso te auxiliar?". Essas frases são PROIBIDAS — soam robóticas.
 - ESPELHAMENTO: Se o cara diz "Fala, tranquilo?", responde "E aí, tudo certo!". Se diz só "Bom dia" sem mais nada, responde "Bom dia! Tudo joia?". REAJA ao que a pessoa falou. MAS: se junto com a saudação veio um COMANDO ("Bom dia, cria uma tarefa pra João"), EXECUTE o comando primeiro e apenas inclua a saudação na resposta — não ignore o pedido.
 - TOM DE VOZ: Conversa de WhatsApp entre amigos. Leve, direto, esperto. Não é atendimento ao cliente. Não é SAC.
 - LINGUAGEM: Português brasileiro real. "Massa", "show", "beleza", "tranquilo", "bora", "tá", "pra", "deixa comigo", "pode crer". Fale como gente, não como manual.
 - CONCISÃO: Mensagens CURTAS. 1-2 frases na maioria das vezes. Só elabora mais quando realmente precisa (resumos, listas de tarefas). No WhatsApp ninguém manda parágrafo.
+- CAMADAS: entregue a resposta curta primeiro. Se o usuario quiser detalhe, ele pede depois.
+- PERGUNTAS: faca uma pergunta por vez. Se houver varias duvidas, escolha a mais importante.
 - PROIBIDO:
   * Emojis (NUNCA)
   * Frases genéricas de assistente ("como posso ajudar?", "estou à disposição", "fique à vontade")
@@ -898,11 +903,11 @@ function buildTaskIndexBlock(tasksRaw) {
 
 function buildCompletionAndNextResponse(userName, updateResult, listResult, wantsNext) {
   if (!updateResult?.success) {
-    return `${userName}, nao consegui identificar qual tarefa voce concluiu. Me manda o nome dela ou o numero da lista.`;
+    return `${userName}, não achei qual tarefa foi concluída. Me manda o nome ou o número da lista.`;
   }
 
-  const doneLine = `Feito, ${userName}! *${updateResult.task_title}* ficou marcada como concluida.`;
-  if (!wantsNext) return `${doneLine} Mandou bem.`;
+  const doneLine = `Feito, ${userName}: *${updateResult.task_title}* concluída.`;
+  if (!wantsNext) return doneLine;
 
   if (!listResult?.success || !listResult.count) {
     return `${doneLine}\n\nNo momento nao encontrei mais tarefas pendentes.`;
@@ -971,10 +976,10 @@ function getSimpleTaskCreateRequest(message, { resolvedDate, resolvedTimerMinute
 }
 
 function buildMissingTaskTitleResponse(userName, timerMinutes) {
-  const timer = timerMinutes
-    ? ` Peguei o timer de ${timerMinutes} minuto${timerMinutes !== 1 ? 's' : ''},`
-    : '';
-  return `${userName},${timer} mas não entendi o nome da tarefa. Me manda só o que é pra lembrar.`;
+  if (timerMinutes) {
+    return `${userName}, peguei o timer de ${timerMinutes} minuto${timerMinutes !== 1 ? 's' : ''}. Me manda só o nome da tarefa.`;
+  }
+  return `${userName}, me manda só o nome da tarefa.`;
 }
 // Extrai subtópicos da mensagem quando o modelo não gerou subtarefas
 // Cobre padrões como "sobre X, sobre Y", "primeiro X, segundo Y", "X, Y e Z"
@@ -1339,13 +1344,13 @@ function buildMutationResponse(toolName, result, userName) {
       return null;
     case 'TaskUpdate': {
       const isDone = result.task_status === 'concluída';
-      if (isDone) return `Feito, ${userName}! *${result.task_title}* marcada como concluida. Mandou bem!`;
+      if (isDone) return `Feito, ${userName}: *${result.task_title}* concluída.`;
       const changes = result.changes ? ` (${result.changes})` : '';
       const timer = result.timer_set ? ' Vou te avisar quando chegar a hora.' : '';
-      return `Pronto, ${userName}! *${result.task_title}* atualizado${changes}.${timer}`;
+      return `Pronto, ${userName}: *${result.task_title}* atualizada${changes}.${timer}`;
     }
     case 'TaskDelete':
-      return `Feito, ${userName}! Tarefa removida.`;
+      return `Feito, ${userName}. Tarefa removida.`;
     default:
       return null;
   }
@@ -1370,6 +1375,7 @@ REGRAS RÍGIDAS:
 - UMA frase só, MÁXIMO 10 palavras
 - Português brasileiro coloquial, natural e levemente espontâneo
 - Mencione brevemente o ASSUNTO específico da mensagem (não fale genérico)
+- Sem enrolacao e sem palavra dificil
 - NÃO confirme conclusão ("feito", "anotei", "criei") ⭐ você ainda está PROCESSANDO
 - NÃO use emojis
 - NÃO use o nome em toda mensagem (alterne)
@@ -1388,7 +1394,7 @@ Responda APENAS com a frase de ack, nada mais.`,
       max_tokens: 40,
       temperature: 0.8,
     });
-    return response.choices[0]?.message?.content?.trim().replace(/^["']|["']$/g, '') || null;
+    return polishAssistantText(response.choices[0]?.message?.content?.trim().replace(/^["']|["']$/g, '')) || null;
   } catch {
     return null;
   }
@@ -1428,7 +1434,7 @@ function generateQuickAck(userMessage, userName) {
     ? [
       `Certo, ${shortName}! Vou separar por partes.`,
       `Recebi tudo, ${shortName}. Organizando agora.`,
-      `Perfeito, ${shortName}. Montando direitinho.`,
+      `Beleza, ${shortName}. Vou organizar isso.`,
     ]
     : [
       `Certo, ${shortName}. Já organizo.`,
@@ -1668,7 +1674,7 @@ export async function queryEngineLoop(
       if (result.success) invalidateContextCache(userId);
       content = buildMutationResponse('TaskCreate', result, userName)
         || (result.success
-          ? `Anotado, ${userName}! *${result.task_title}* ficou registrado.`
+          ? `Anotado, ${userName}: *${result.task_title}*.`
           : `${userName}, não consegui criar essa tarefa agora. Tenta de novo em instantes.`);
     }
 
@@ -1939,7 +1945,7 @@ export async function queryEngineLoop(
 
       // Resposta final — strip de bloco <think>...</think> de modelos de raciocínio (ex: Kimi K2.5)
       let finalContent = (assistantMessage.content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
-        || 'Pode repetir? Não entendi direito.';
+        || `${userName}, não peguei. Me manda de novo em uma frase.`;
 
       // Detecta artefatos internos do modelo (ex: "<´¢£toolÔûüsep´¢£>") na resposta final
       // Quando presente, o modelo vazou sintaxe interna em vez de gerar texto - refaz com tool_choice: 'none'
@@ -1961,9 +1967,12 @@ export async function queryEngineLoop(
             max_tokens: 300,
           }, llmOptions);
           captureTelemetry(retryTelemetry);
-          finalContent = (retryResp.choices[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim() || `Feito, ${userName}! Pode me dizer o que mais precisa.`;
-        } catch {
-          finalContent = `Feito, ${userName}! Pode me dizer o que mais precisa.`;
+          finalContent = (retryResp.choices[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim() || `Feito, ${userName}.`;
+        } catch (err) {
+          trace.provider = err.provider || trace.provider;
+          trace.model = err.model || trace.model;
+          trace.error_class = err.error_class || err.code || err.name || trace.error_class || 'artifact_recovery_error';
+          finalContent = `Feito, ${userName}.`;
         }
       }
 
@@ -1976,6 +1985,8 @@ export async function queryEngineLoop(
         .replace(/\d{4}-\d{2}-\d{2}/g, (match) => humanizeDateInline(match)) // Humaniza datas ISO residuais
         .replace(/\n{3,}/g, '\n\n') // Limpa quebras excessivas
         .trim();
+      finalContent = polishAssistantText(finalContent)
+        || `${userName}, não peguei. Me manda de novo em uma frase.`;
 
       messages.push({ role: 'assistant', content: finalContent });
 
@@ -1984,19 +1995,22 @@ export async function queryEngineLoop(
 
     } catch (err) {
       console.error('[QueryEngine] Erro na chamada ao modelo:', err.message);
+      trace.provider = err.provider || trace.provider;
+      trace.model = err.model || trace.model;
+      trace.latency_ms += err.latency_ms || 0;
       trace.error_class = err.error_class || err.code || err.name || 'provider_error';
 
       // Se for erro de rate limit ou timeout, retorna mensagem amigável
       if (err.status === 429) {
-        const content = `${userName}, tô um pouco sobrecarregado agora. Tenta de novo em alguns segundinhos.`;
+        const content = `${userName}, estou sobrecarregado agora. Tenta de novo em alguns segundos.`;
         return returnTelemetry ? { content, telemetry: trace } : content;
       }
       if (err.error_class === 'timeout' || err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT') {
-        const content = `${userName}, parece que tô com probleminhas de conexão. Tenta de novo daqui a pouco.`;
+        const content = `${userName}, tive problema de conexão. Tenta de novo daqui a pouco.`;
         return returnTelemetry ? { content, telemetry: trace } : content;
       }
 
-      const content = `${userName}, deu um errinho aqui comigo. Tenta de novo?`;
+      const content = `${userName}, tive um problema aqui. Tenta de novo em instantes.`;
       return returnTelemetry ? { content, telemetry: trace } : content;
     }
   }
