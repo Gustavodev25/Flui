@@ -107,11 +107,6 @@ const formatDate = (dateStr: string) => {
   return `${day} ${months[month - 1]}`
 }
 
-const formatDueTime = (timeStr?: string) => {
-  if (!timeStr) return ''
-  return timeStr.slice(0, 5)
-}
-
 /** Retorna quantos dias faltam para a data de vencimento (negativo = atrasado) */
 function getDaysUntilDue(dateStr: string): number | null {
   if (!dateStr || dateStr === 'Sem prazo') return null
@@ -552,7 +547,6 @@ const TaskCardUI = React.forwardRef<
                     <span className={`relative flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 tabular-nums ${dateColor}`}>
                       <Calendar size={10} strokeWidth={2.5} />
                       {formatDate(task.dueDate)}
-                      {task.dueTime && <span className="text-[#37352f]/35">· {formatDueTime(task.dueTime)}</span>}
                     </span>
                   )}
                 </div>
@@ -615,12 +609,8 @@ const TaskCardUI = React.forwardRef<
                 <NumberFlow value={Math.floor(holdProgress / 10)} className="text-[13px] font-normal text-red-500 tabular-nums w-[18px] text-center" />
               ) : (
                 <>
-                  {timerParts.h > 0 && (
-                    <>
-                      <NumberFlow value={timerParts.h} format={{ minimumIntegerDigits: 2 }} className="text-[10px] font-semibold text-[#37352f] tabular-nums" />
-                      <span className="text-[10px] font-medium text-[#37352f]/40 mx-0.5">:</span>
-                    </>
-                  )}
+                  <NumberFlow value={timerParts.h} format={{ minimumIntegerDigits: 2 }} className="text-[10px] font-semibold text-[#37352f] tabular-nums" />
+                  <span className="text-[10px] font-medium text-[#37352f]/40 mx-0.5">:</span>
                   <NumberFlow value={timerParts.m} format={{ minimumIntegerDigits: 2 }} className="text-[10px] font-semibold text-[#37352f] tabular-nums" />
                   <span className="text-[10px] font-medium text-[#37352f]/40 mx-0.5">:</span>
                   <NumberFlow value={timerParts.s} format={{ minimumIntegerDigits: 2 }} className="text-[10px] font-semibold text-[#37352f] tabular-nums" />
@@ -1778,7 +1768,6 @@ const Tasks: React.FC = () => {
                                   <td className="py-4 px-5 text-right border-r border-[#f1f1f0]">
                                     <span className="text-[11px] font-extrabold text-[#37352f]/40 bg-[#f7f7f5] px-2 py-1 rounded-sm border border-[#e9e9e7]">
                                       {formatDate(task.dueDate)}
-                                      {task.dueTime ? ` · ${formatDueTime(task.dueTime)}` : ''}
                                     </span>
                                   </td>
                                   <td className="py-4 px-2 text-center relative">
@@ -1841,7 +1830,6 @@ const Tasks: React.FC = () => {
                                 </span>
                                 <span className="text-[10px] text-[#37352f]/40 font-medium">
                                   {formatDate(task.dueDate)}
-                                  {task.dueTime ? ` · ${formatDueTime(task.dueTime)}` : ''}
                                 </span>
                               </div>
                             </div>

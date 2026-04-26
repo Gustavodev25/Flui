@@ -73,11 +73,6 @@ function formatDate(dateStr: string) {
   return `${day} ${months[month - 1]} ${year}`
 }
 
-function formatDueTime(timeStr?: string) {
-  if (!timeStr) return ''
-  return timeStr.slice(0, 5)
-}
-
 function getTimerParts(timerAt: string): { h: number; m: number; s: number } | null {
   const diff = new Date(timerAt).getTime() - Date.now()
   if (diff <= 0) return null
@@ -162,7 +157,6 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           <DetailRow label="Prazo">
             <span className="text-[13px] text-[#37352f]">
               {formatDate(task.dueDate)}
-              {task.dueTime ? ` · ${formatDueTime(task.dueTime)}` : ''}
             </span>
           </DetailRow>
 
@@ -354,12 +348,8 @@ const TimerInline: React.FC<{ task: Task; onStopTimer: (id: string) => void }> =
         </div>
       ) : (
         <>
-          {timerParts.h > 0 && (
-            <>
-              <NumberFlow value={timerParts.h} format={{ minimumIntegerDigits: 2 }} className="text-[13px] font-semibold text-[#37352f] tabular-nums" />
-              <span className="text-[13px] text-[#37352f]/20">:</span>
-            </>
-          )}
+          <NumberFlow value={timerParts.h} format={{ minimumIntegerDigits: 2 }} className="text-[13px] font-semibold text-[#37352f] tabular-nums" />
+          <span className="text-[13px] text-[#37352f]/20">:</span>
           <NumberFlow value={timerParts.m} format={{ minimumIntegerDigits: 2 }} className="text-[13px] font-semibold text-[#37352f] tabular-nums" />
           <span className="text-[13px] text-[#37352f]/20">:</span>
           <NumberFlow value={timerParts.s} format={{ minimumIntegerDigits: 2 }} className="text-[13px] font-semibold text-[#37352f] tabular-nums" />
