@@ -11,14 +11,15 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
 );
 
-const nimClient = new OpenAI({
-  apiKey: process.env.NVIDIA_API_KEY,
-  baseURL: 'https://integrate.api.nvidia.com/v1',
-});
+const nimClient = process.env.OPENROUTER_API_KEY
+  ? new OpenAI({
+    apiKey: process.env.OPENROUTER_API_KEY,
+    baseURL: 'https://openrouter.ai/api/v1',
+    defaultHeaders: { 'HTTP-Referer': 'https://flui.ia.br', 'X-Title': 'Flui' },
+  })
+  : null;
 
 const MODEL_ID = process.env.PROACTIVE_MODEL_ID || PRIMARY_MODEL_ID;
-// low_effort: usa raciocínio leve para detectar padrões sem sacrificar latência
-const THINKING_LOW = { extra_body: { chat_template_kwargs: { thinking_mode: 'low_effort' } } };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -283,7 +284,6 @@ REGRAS — SIGA À RISCA:
       ],
       temperature: 0.75,
       max_tokens: 400,
-      ...THINKING_LOW,
     });
 
     const message = response.choices?.[0]?.message?.content?.trim();

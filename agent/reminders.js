@@ -19,13 +19,15 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
 );
 
-const nimClient = new OpenAI({
-  apiKey: process.env.NVIDIA_API_KEY,
-  baseURL: 'https://integrate.api.nvidia.com/v1',
-});
+const nimClient = process.env.OPENROUTER_API_KEY
+  ? new OpenAI({
+    apiKey: process.env.OPENROUTER_API_KEY,
+    baseURL: 'https://openrouter.ai/api/v1',
+    defaultHeaders: { 'HTTP-Referer': 'https://flui.ia.br', 'X-Title': 'Flui' },
+  })
+  : null;
 
 const REMINDER_MODEL_ID = process.env.REMINDER_MODEL_ID || PRIMARY_MODEL_ID;
-const THINKING_OFF = { extra_body: { chat_template_kwargs: { thinking_mode: 'off' } } };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -130,7 +132,6 @@ REGRAS:
       ],
       temperature: 0.7,
       max_tokens: 500,
-      ...THINKING_OFF,
     });
     return response.choices?.[0]?.message?.content?.trim() || null;
   } catch (err) {

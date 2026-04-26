@@ -4,8 +4,8 @@ dotenv.config();
 import OpenAI from 'openai';
 import { sanitizeChatMessagesForInput } from './chatMessageSanitizer.js';
 
-export const PRIMARY_PROVIDER = 'nvidia';
-export const RECOMMENDED_FAST_AGENT_MODEL = 'deepseek-ai/deepseek-v4-flash';
+export const PRIMARY_PROVIDER = 'openrouter';
+export const RECOMMENDED_FAST_AGENT_MODEL = 'openai/gpt-oss-120b:free';
 
 function resolvePrimaryModelId() {
   const configured = process.env.PRIMARY_MODEL_ID || process.env.MODEL_ID || '';
@@ -16,22 +16,26 @@ function resolvePrimaryModelId() {
 export const PRIMARY_MODEL_ID = resolvePrimaryModelId();
 export const PRIMARY_TIMEOUT_MS = Math.max(Number(process.env.PRIMARY_LLM_TIMEOUT_MS || 45000), 45000);
 
-export const FALLBACK_PROVIDER = 'nvidia';
-export const FALLBACK_MODEL_ID = process.env.FALLBACK_MODEL_ID || 'deepseek-ai/deepseek-v4-flash';
+export const FALLBACK_PROVIDER = 'openrouter';
+export const FALLBACK_MODEL_ID = process.env.FALLBACK_MODEL_ID || 'openai/gpt-oss-120b:free';
 export const FALLBACK_TIMEOUT_MS = Math.max(Number(process.env.FALLBACK_LLM_TIMEOUT_MS || 25000), 25000);
 export const TURN_BUDGET_MS = Math.max(Number(process.env.LLM_TURN_BUDGET_MS || 90000), 90000);
 const PRIMARY_FAILURE_THRESHOLD = Math.max(Number(process.env.PRIMARY_LLM_FAILURE_THRESHOLD || 1), 1);
 const PRIMARY_COOLDOWN_MS = Math.max(Number(process.env.PRIMARY_LLM_COOLDOWN_MS || 5 * 60 * 1000), 30_000);
 
-const nvidiaClient = process.env.NVIDIA_API_KEY
+const openrouterClient = process.env.OPENROUTER_API_KEY
   ? new OpenAI({
-    apiKey: process.env.NVIDIA_API_KEY,
-    baseURL: 'https://integrate.api.nvidia.com/v1',
+    apiKey: process.env.OPENROUTER_API_KEY,
+    baseURL: 'https://openrouter.ai/api/v1',
+    defaultHeaders: {
+      'HTTP-Referer': 'https://flui.ia.br',
+      'X-Title': 'Flui',
+    },
   })
   : null;
 
-const primaryClient = nvidiaClient;
-const fallbackClient = nvidiaClient;
+const primaryClient = openrouterClient;
+const fallbackClient = openrouterClient;
 
 const primaryCircuit = {
   failures: 0,
@@ -149,6 +153,7 @@ async function requestCompletion(client, provider, model, params, timeoutMs) {
 export async function createChatCompletion(params, options = {}) {
   const {
     preferFallback = false,
+    skipPrimary = false,
     turnBudgetMs = TURN_BUDGET_MS,
     primaryTimeoutMs = PRIMARY_TIMEOUT_MS,
     fallbackTimeoutMs = FALLBACK_TIMEOUT_MS,
@@ -202,7 +207,7 @@ export async function createChatCompletion(params, options = {}) {
 
   if (useFallbackFirst) {
     addAttempt('fallback', tryFallback);
-    addAttempt('primary', tryPrimary);
+    if (!skipPrimary) addAttempt('primary', tryPrimary);
   } else {
     addAttempt('primary', tryPrimary);
     addAttempt('fallback', tryFallback);

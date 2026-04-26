@@ -4030,6 +4030,49 @@ app.post('/api/workspace/accept-invite', async (req, res) => {
   }
 });
 
+app.post('/api/admin/changelog/format', requireAdmin, async (req, res) => {
+  const { text } = req.body;
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'text é obrigatório' });
+  }
+
+  try {
+    const { response } = await createChatCompletion(
+      {
+        messages: [
+          {
+            role: 'system',
+            content: `Você é um redator técnico especializado em changelogs de produto.
+Sua tarefa é formatar e melhorar textos brutos de changelog em Markdown limpo e profissional.
+
+Regras obrigatórias:
+- Use ## para seções principais (ex: ## O que há de novo, ## Melhorias, ## Correções)
+- Use - para listas de itens
+- Use **negrito** para destacar funcionalidades ou termos importantes
+- Use *itálico* para detalhes secundários
+- Mantenha o tom conciso, direto e positivo
+- Não invente informações — reformule apenas o que foi fornecido
+- Retorne SOMENTE o Markdown formatado, sem explicações, sem blocos de código, sem prefixo`,
+          },
+          {
+            role: 'user',
+            content: `Formate este texto de changelog em Markdown:\n\n${text.trim()}`,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 1024,
+      },
+      { skipPrimary: true, primaryTimeoutMs: 25000 }
+    );
+
+    const formatted = response?.choices?.[0]?.message?.content?.trim() || text;
+    res.json({ formatted });
+  } catch (error) {
+    console.error('[changelog/format] Erro:', error.message);
+    res.status(500).json({ error: 'Falha ao formatar com IA' });
+  }
+});
+
 app.get('/api/admin/model-info', requireAdmin, (req, res) => {
   res.json({
     modelId: PRIMARY_MODEL_ID,
@@ -4727,7 +4770,12 @@ if (!process.env.VERCEL) {
   });
 
   const PORT = process.env.PORT || 3001;
-  app.listen(PORT, () => console.log(`🚀 Rodando na porta ${PORT}`));
+  app.listen(PORT, () => {
+    const { primary, fallback } = getLlmStatus();
+    console.log(`🚀 Rodando na porta ${PORT}`);
+    console.log(`🤖 LLM primário  : [${primary.provider}] ${primary.model} ${primary.configured ? '✓' : '✗ SEM KEY'}`);
+    console.log(`🔁 LLM fallback  : [${fallback.provider}] ${fallback.model} ${fallback.configured ? '✓' : '✗ SEM KEY'}`);
+  });
 }
 
 export default app;
