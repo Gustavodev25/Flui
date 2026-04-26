@@ -49,7 +49,6 @@ import {
   checkAndMarkRateLimitNotify,
   deletePhoneLinkChallenge,
 } from './agent/whatsappState.js';
-import OpenAI from 'openai';
 import Stripe from 'stripe';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
