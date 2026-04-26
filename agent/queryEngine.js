@@ -600,6 +600,111 @@ function normalizeTextForIntent(message) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function getSaoPauloDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+
+  const mapped = Object.fromEntries(
+    parts
+      .filter(part => part.type !== 'literal')
+      .map(part => [part.type, part.value])
+  );
+
+  return {
+    dateISO: `${mapped.year}-${mapped.month}-${mapped.day}`,
+    hour: Number(mapped.hour),
+    minute: Number(mapped.minute),
+    second: Number(mapped.second || 0),
+  };
+}
+
+function getDateISOInSaoPaulo(date = new Date()) {
+  return getSaoPauloDateParts(date).dateISO;
+}
+
+function formatClockTime(hour, minute = 0) {
+  return `${pad2(hour)}:${pad2(minute)}`;
+}
+
+function extractAbsoluteClockReference(message) {
+  const lower = normalizeTextForIntent(message)
+    .replace(/[-–—]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (/\b(?:daqui|de\s+aqui|em)\s+(?:a\s+)?(?:uns?|umas?)?\s*\d+(?:[,.]\d+)?\s*(?:min|hora|h)\b/.test(lower)) {
+    return null;
+  }
+
+  if (/\bmeia\s+noite\b/.test(lower)) {
+    return { hour: 0, minute: 0, time: '00:00' };
+  }
+
+  if (/\bmeio\s+dia\b/.test(lower)) {
+    return { hour: 12, minute: 0, time: '12:00' };
+  }
+
+  const marked = lower.match(
+    /\b(?:as|a|ao|para as|pra as|pelas|por volta das|em torno das)\s+(\d{1,2})(?:\s*(?:h|:)\s*(\d{1,2}))?\s*(?:horas?)?\s*(?:da\s+(manha|tarde|noite))?\b/
+  );
+  const hasRelativePrefix = /\b(?:daqui|de\s+aqui|em)\s+(?:uns?|umas?)?\s*\d{1,2}\s*(?:h|:)/.test(lower);
+  const compact = hasRelativePrefix ? null : lower.match(
+    /\b(\d{1,2})\s*h\s*(\d{0,2})\s*(?:da\s+(manha|tarde|noite))?\b/
+  );
+  const colon = hasRelativePrefix ? null : lower.match(
+    /\b(\d{1,2}):(\d{2})\s*(?:da\s+(manha|tarde|noite))?\b/
+  );
+  const match = marked || compact || colon;
+  if (!match) return null;
+
+  let hour = Number(match[1]);
+  const minute = match[2] === '' || match[2] === undefined ? 0 : Number(match[2]);
+  const period = match[3] || '';
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+
+  if (period === 'manha') {
+    if (hour === 12) hour = 0;
+  } else if (period === 'tarde' || period === 'noite') {
+    if (hour < 12) hour += 12;
+  } else if (hour < 12) {
+    const now = getSaoPauloDateParts();
+    const currentTotal = now.hour * 60 + now.minute;
+    const targetTotal = hour * 60 + minute;
+    if (currentTotal >= targetTotal) hour += 12;
+  }
+
+  return { hour, minute, time: formatClockTime(hour, minute) };
+}
+
+function buildTimerAtFromClock(clock, { allowTomorrow = true } = {}) {
+  if (!clock?.time) return null;
+
+  const now = new Date();
+  const today = getDateISOInSaoPaulo(now);
+  let target = new Date(`${today}T${clock.time}:00-03:00`);
+
+  if (target.getTime() <= now.getTime()) {
+    if (!allowTomorrow) return null;
+    target = new Date(target.getTime() + 24 * 60 * 60 * 1000);
+  }
+
+  return Number.isNaN(target.getTime()) ? null : target.toISOString();
+}
+
 function extractBirthdayFact(message) {
   const text = String(message || '').trim();
   if (!text) return null;
@@ -1177,6 +1282,13 @@ function hasVagueTimeReference(message) {
  */
 function extractTimerMinutesFromMessage(message) {
   const lower = message.toLowerCase();
+  const absoluteClock = extractAbsoluteClockReference(message);
+  if (absoluteClock) {
+    const timerAt = buildTimerAtFromClock(absoluteClock);
+    if (timerAt) {
+      return Math.max(1, Math.round((new Date(timerAt).getTime() - Date.now()) / 60000));
+    }
+  }
 
   if (/\b(n[aã]o|não)\b/.test(lower)) {
     const correctedCandidates = [...lower.matchAll(timerPhraseRegex())]
@@ -1283,6 +1395,10 @@ function extractTimerMinutesFromMessage(message) {
 // Retorna ISO timestamp preciso em vez de minutos relativos (evita drift)
 function extractAbsoluteTimerAt(message) {
   const lower = message.toLowerCase();
+  const absoluteClock = extractAbsoluteClockReference(message);
+  if (absoluteClock) {
+    return buildTimerAtFromClock(absoluteClock);
+  }
 
   const absMatch = lower.match(
     /(?:às\s+|as\s+)(\d{1,2})(?:[h:](\d{2}))?\s*(?:horas?)?\s*(?:da\s+(manh[aã]|tarde|noite))?/
@@ -1338,10 +1454,15 @@ function buildMutationResponse(toolName, result, userName) {
 
   switch (toolName) {
     case 'TaskBatchCreate':
-    case 'TaskCreate':
-      // Deixa o LLM gerar a resposta de confirmação naturalmente
-      // em vez de usar templates fixos e robóticos
-      return null;
+      return `Anotado, ${userName}. Criei ${result.count || 0} tarefa${result.count === 1 ? '' : 's'}:\n${result.formatted_list}`;
+    case 'TaskCreate': {
+      const date = result.task_due_date && result.task_due_date !== 'sem prazo definido'
+        ? ` para ${result.task_due_date}`
+        : '';
+      const time = result.task_due_time ? ` às ${result.task_due_time}` : '';
+      const timer = result.timer_set ? ' Vou te avisar quando chegar a hora.' : '';
+      return `Anotado, ${userName}: *${result.task_title}*${date}${time}.${timer}`;
+    }
     case 'TaskUpdate': {
       const isDone = result.task_status === 'concluída';
       if (isDone) return `Feito, ${userName}: *${result.task_title}* concluída.`;
@@ -1357,6 +1478,73 @@ function buildMutationResponse(toolName, result, userName) {
 }
 
 // ── Query Engine Loop ────────────────────────────────────────────────────────
+
+function hasScheduleSignal(message) {
+  const lower = normalizeTextForIntent(message).replace(/[-–—]/g, ' ');
+  return (
+    /\b(hoje|amanha|depois de amanha|segunda|terca|quarta|quinta|sexta|sabado|domingo)\b/.test(lower) ||
+    /\b(meio\s+dia|meia\s+noite)\b/.test(lower) ||
+    /\b(?:as|a|ao|para as|pra as|pelas)\s+\d{1,2}\b/.test(lower) ||
+    /\b\d{1,2}\s*h\b/.test(lower) ||
+    /\b\d{1,2}:\d{2}\b/.test(lower)
+  );
+}
+
+function isScheduleCorrectionIntent(message) {
+  const lower = normalizeTextForIntent(message);
+  if (!hasScheduleSignal(message)) return false;
+  return (
+    /^(e|eh)\s+(pra|para|as|ao|meio|meia)\b/.test(lower) ||
+    /^(era|seria|ficou|fica|coloca|coloquei|bota|ajusta|corrige|arruma)\b/.test(lower) ||
+    /\b(eh|e|era|seria|ficou|fica)\s+pra\b/.test(lower) ||
+    /\b(corrige|arruma|ajusta|troca|muda|coloca|bota)\b/.test(lower)
+  );
+}
+
+async function getRecentPendingTaskForScheduleCorrection(userId) {
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('id, title, created_at')
+    .eq('user_id', userId)
+    .in('status', ['todo', 'doing'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data?.created_at) return data || null;
+
+  const ageMs = Date.now() - new Date(data.created_at).getTime();
+  if (Number.isFinite(ageMs) && ageMs > 2 * 60 * 60 * 1000) return null;
+  return data;
+}
+
+function buildScheduleUpdateArgs({ taskId, resolvedDate, resolvedClock, resolvedTimerAt }) {
+  const dueDate = resolvedDate
+    || (resolvedTimerAt ? getDateISOInSaoPaulo(new Date(resolvedTimerAt)) : null)
+    || (resolvedClock ? getTodayISO() : null);
+
+  const args = { task_id: taskId };
+  if (dueDate) args.due_date = dueDate;
+  if (resolvedClock?.time) args.due_time = resolvedClock.time;
+
+  const timerAtToday = resolvedClock && (!dueDate || dueDate === getTodayISO())
+    ? buildTimerAtFromClock(resolvedClock, { allowTomorrow: false })
+    : null;
+  if (timerAtToday) args.timer_at_override = timerAtToday;
+
+  return args;
+}
+
+function buildScheduleLabel({ dueDate, dueTime }) {
+  const dateLabel = dueDate === getTodayISO()
+    ? 'hoje'
+    : dueDate
+      ? humanizeDateInline(dueDate)
+      : '';
+  const timeLabel = dueTime ? ` às ${dueTime}` : '';
+  return `${dateLabel}${timeLabel}`.trim() || 'o novo horario';
+}
 
 // Ferramentas que modificam dados (invalidam cache)
 const MUTATING_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskDelete', 'TaskBatchCreate']);
@@ -1646,12 +1834,74 @@ export async function queryEngineLoop(
   }
   const resolvedDate = extractDateFromMessage(userMessage);
   const hasVagueTime = hasVagueTimeReference(userMessage);
+  const resolvedClock = hasVagueTime ? null : extractAbsoluteClockReference(userMessage);
   const resolvedTimerMinutes = hasVagueTime ? null : extractTimerMinutesFromMessage(userMessage);
   const resolvedTimerAt = hasVagueTime ? null : extractAbsoluteTimerAt(userMessage);
-  const resolvedDateWithTimerFallback = resolvedDate || (resolvedTimerMinutes ? getTodayISO() : null);
+  const resolvedDateFromTimerAt = resolvedTimerAt ? getDateISOInSaoPaulo(new Date(resolvedTimerAt)) : null;
+  const resolvedDateWithTimerFallback = resolvedDate || resolvedDateFromTimerAt || (resolvedTimerMinutes ? getTodayISO() : null);
   if (hasVagueTime) console.log(`[VagueTime] Tempo vago detectado, timer suprimido: "${userMessage.substring(0, 80)}"`);
   const creationIntent = isCreationIntent(userMessage);
   const multipleTasksIntent = hasMultipleTasks(userMessage);
+
+  if (!creationIntent && isScheduleCorrectionIntent(userMessage)) {
+    const startedAt = Date.now();
+    const history = await getHistory(sessionId);
+    const recentTask = await getRecentPendingTaskForScheduleCorrection(userId);
+
+    if (!recentTask?.id) {
+      const content = `${userName}, qual tarefa eu ajusto? Me manda o nome dela.`;
+      await saveHistory(sessionId, [
+        ...history,
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content },
+      ]);
+      trace.provider = 'direct';
+      trace.model = 'schedule-correction-clarify';
+      trace.latency_ms += Date.now() - startedAt;
+      return returnTelemetry ? { content, telemetry: trace } : content;
+    }
+
+    const updateArgs = buildScheduleUpdateArgs({
+      taskId: recentTask.id,
+      resolvedDate,
+      resolvedClock,
+      resolvedTimerAt,
+    });
+
+    if (!updateArgs.due_date && !updateArgs.due_time && !updateArgs.timer_at_override) {
+      const content = `${userName}, não entendi o novo dia ou horário. Me manda tipo "hoje às 12:00".`;
+      await saveHistory(sessionId, [
+        ...history,
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content },
+      ]);
+      trace.provider = 'direct';
+      trace.model = 'schedule-correction-clarify';
+      trace.latency_ms += Date.now() - startedAt;
+      return returnTelemetry ? { content, telemetry: trace } : content;
+    }
+
+    emit('Atualizando tarefa...', { task_id: recentTask.id, task_title: recentTask.title });
+    const result = await executeTool('TaskUpdate', updateArgs, { userId });
+    trace.provider = 'direct';
+    trace.model = 'schedule-correction';
+    trace.latency_ms += Date.now() - startedAt;
+    trace.tool_count += 1;
+    if (result.success) invalidateContextCache(userId);
+
+    const label = buildScheduleLabel({ dueDate: updateArgs.due_date, dueTime: updateArgs.due_time });
+    const content = result.success
+      ? `Pronto, ${userName}: ajustei *${result.task_title}* para ${label}.`
+      : `${userName}, não consegui ajustar essa tarefa agora. Me manda o nome dela e o horário de novo.`;
+
+    await saveHistory(sessionId, [
+      ...history,
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content },
+    ]);
+
+    return returnTelemetry ? { content, telemetry: trace } : content;
+  }
 
   const simpleTaskCreateRequest = getSimpleTaskCreateRequest(userMessage, {
     resolvedDate,
@@ -1818,10 +2068,45 @@ export async function queryEngineLoop(
                 args.due_date = resolvedDateWithTimerFallback;
                 console.log(`[DateInject] due_date=${resolvedDateWithTimerFallback} injetado em TaskCreate`);
               }
+              if (
+                (toolCall.function.name === 'TaskCreate' || toolCall.function.name === 'TaskUpdate') &&
+                args.due_date &&
+                args.due_date !== resolvedDateWithTimerFallback
+              ) {
+                console.log(`[DateOverride] LLM=${args.due_date} -> resolved=${resolvedDateWithTimerFallback} em ${toolCall.function.name}`);
+                args.due_date = resolvedDateWithTimerFallback;
+              }
               if (toolCall.function.name === 'TaskBatchCreate' && Array.isArray(args.tasks)) {
                 args.tasks = args.tasks.map(t => t.due_date ? t : { ...t, due_date: resolvedDateWithTimerFallback });
                 console.log(`[DateInject] due_date=${resolvedDateWithTimerFallback} injetado em TaskBatchCreate`);
               }
+            }
+
+            if (resolvedClock?.time) {
+              if ((toolCall.function.name === 'TaskCreate' || toolCall.function.name === 'TaskUpdate') && !args.due_time) {
+                args.due_time = resolvedClock.time;
+                console.log(`[TimeInject] due_time=${resolvedClock.time} injetado em ${toolCall.function.name}`);
+              }
+              if (toolCall.function.name === 'TaskBatchCreate' && Array.isArray(args.tasks)) {
+                args.tasks = args.tasks.map(t => t.due_time ? t : { ...t, due_time: resolvedClock.time });
+                console.log(`[TimeInject] due_time=${resolvedClock.time} injetado em TaskBatchCreate`);
+              }
+            }
+
+            const todayISO = getTodayISO();
+            const safeDueDate = (date) => {
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return date;
+              if (date >= todayISO) return date;
+              const replacement = resolvedDateWithTimerFallback || todayISO;
+              console.log(`[PastDateOverride] ${date} -> ${replacement} em ${toolCall.function.name}`);
+              return replacement;
+            };
+
+            if ((toolCall.function.name === 'TaskCreate' || toolCall.function.name === 'TaskUpdate') && args.due_date) {
+              args.due_date = safeDueDate(args.due_date);
+            }
+            if (toolCall.function.name === 'TaskBatchCreate' && Array.isArray(args.tasks)) {
+              args.tasks = args.tasks.map(t => t.due_date ? { ...t, due_date: safeDueDate(t.due_date) } : t);
             }
 
             // SEMPRE sobrescreve timer_minutes com o valor extraído por regex (mais preciso que o LLM)
@@ -1857,6 +2142,10 @@ export async function queryEngineLoop(
               if (toolCall.function.name === 'TaskCreate') {
                 args.timer_at_override = resolvedTimerAt;
                 console.log(`[TimerAtInject] timer_at_override=${resolvedTimerAt} injetado em TaskCreate`);
+              }
+              if (toolCall.function.name === 'TaskUpdate') {
+                args.timer_at_override = resolvedTimerAt;
+                console.log(`[TimerAtInject] timer_at_override=${resolvedTimerAt} injetado em TaskUpdate`);
               }
             }
 

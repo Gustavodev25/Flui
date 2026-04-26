@@ -76,6 +76,7 @@ const taskUpdateSchema = z.object({
   remove_due_date: z.boolean().optional(),
   subtasks: z.array(z.string()).optional(),
   timer_minutes: optionalPositiveInt(1440),
+  timer_at_override: z.string().optional(),
   remove_timer: z.boolean().optional(),
   reminder_days_before: optionalPositiveInt(365),
 });
@@ -240,6 +241,10 @@ export const TOOLS = [
             minimum: 0,
             maximum: 1440,
             description: 'Define ou redefine um timer em minutos a partir de AGORA. Use também quando o usuário quiser reativar uma tarefa concluída com um novo lembrete.',
+          },
+          timer_at_override: {
+            type: 'string',
+            description: 'Timestamp ISO exato do lembrete. Uso interno: prefira quando o sistema extraiu horario absoluto como "às 12h" ou "meio-dia".',
           },
           remove_timer: {
             type: 'boolean',
@@ -813,7 +818,7 @@ async function executeTaskCreate(args, userId) {
   const { data, error } = await supabase
     .from('tasks')
     .insert(insertData)
-    .select('id, title, status, priority, due_date, subtasks, timer_at')
+    .select('id, title, status, priority, due_date, due_time, subtasks, timer_at')
     .single();
 
   if (error) throw new Error(`Falha ao criar tarefa: ${error.message}`);
@@ -850,6 +855,7 @@ async function executeTaskCreate(args, userId) {
     task_title: data.title,
     task_priority: priorityLabel,
     task_due_date: dateLabel,
+    task_due_time: data.due_time || null,
     subtask_count: subtaskCount,
     timer_set: !!data.timer_at,
     timer_minutes: parsed.timer_minutes || null,
@@ -942,11 +948,21 @@ async function executeTaskUpdate(args, userId) {
     }
   }
 
-  // Quando definir timer_minutes: calcula timer_at e reseta flags
-  if (rest.timer_minutes !== undefined) {
-    rest.timer_at = new Date(Date.now() + rest.timer_minutes * 60 * 1000).toISOString();
+  // Quando definir timer_at_override: usa horario absoluto ja resolvido pelo agente.
+  if (rest.timer_at_override) {
+    rest.timer_at = rest.timer_at_override;
     rest.timer_fired = false;
     rest.timer_warned = false;
+    delete rest.timer_at_override;
+  }
+
+  // Quando definir timer_minutes: calcula timer_at e reseta flags
+  if (rest.timer_minutes !== undefined) {
+    if (!rest.timer_at) {
+      rest.timer_at = new Date(Date.now() + rest.timer_minutes * 60 * 1000).toISOString();
+      rest.timer_fired = false;
+      rest.timer_warned = false;
+    }
     delete rest.timer_minutes;
   }
 

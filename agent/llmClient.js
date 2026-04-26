@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import { sanitizeChatMessagesForInput } from './chatMessageSanitizer.js';
 
 export const PRIMARY_PROVIDER = 'nvidia';
-export const RECOMMENDED_FAST_AGENT_MODEL = 'deepseek-ai/deepseek-v4-pro';
+export const RECOMMENDED_FAST_AGENT_MODEL = 'deepseek-ai/deepseek-v4-flash';
 
 function resolvePrimaryModelId() {
   const configured = process.env.PRIMARY_MODEL_ID || process.env.MODEL_ID || '';
@@ -20,6 +20,8 @@ export const FALLBACK_PROVIDER = 'nvidia';
 export const FALLBACK_MODEL_ID = process.env.FALLBACK_MODEL_ID || 'deepseek-ai/deepseek-v4-flash';
 export const FALLBACK_TIMEOUT_MS = Math.max(Number(process.env.FALLBACK_LLM_TIMEOUT_MS || 25000), 25000);
 export const TURN_BUDGET_MS = Math.max(Number(process.env.LLM_TURN_BUDGET_MS || 90000), 90000);
+const PRIMARY_FAILURE_THRESHOLD = Math.max(Number(process.env.PRIMARY_LLM_FAILURE_THRESHOLD || 1), 1);
+const PRIMARY_COOLDOWN_MS = Math.max(Number(process.env.PRIMARY_LLM_COOLDOWN_MS || 5 * 60 * 1000), 30_000);
 
 const nvidiaClient = process.env.NVIDIA_API_KEY
   ? new OpenAI({
@@ -30,6 +32,11 @@ const nvidiaClient = process.env.NVIDIA_API_KEY
 
 const primaryClient = nvidiaClient;
 const fallbackClient = nvidiaClient;
+
+const primaryCircuit = {
+  failures: 0,
+  disabledUntil: 0,
+};
 
 function isAbortLikeError(err) {
   const message = String(err?.message || '').toLowerCase();
@@ -61,6 +68,31 @@ export function isRetryableModelError(err) {
   if (err.status === 408 || err.status === 409 || err.status === 429) return true;
   if (err.status >= 500) return true;
   return ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT'].includes(err.code);
+}
+
+function isSameModelAttempt(providerA, modelA, providerB, modelB) {
+  return providerA === providerB && modelA === modelB;
+}
+
+function isPrimaryCircuitOpen() {
+  return Date.now() < primaryCircuit.disabledUntil;
+}
+
+function shouldPreferFallbackModel() {
+  return PRIMARY_MODEL_ID.includes('deepseek-v4-pro') || isPrimaryCircuitOpen();
+}
+
+function markPrimarySuccess() {
+  primaryCircuit.failures = 0;
+  primaryCircuit.disabledUntil = 0;
+}
+
+function markPrimaryFailure(error) {
+  if (!isRetryableModelError(error)) return;
+  primaryCircuit.failures += 1;
+  if (primaryCircuit.failures >= PRIMARY_FAILURE_THRESHOLD) {
+    primaryCircuit.disabledUntil = Date.now() + PRIMARY_COOLDOWN_MS;
+  }
 }
 
 function withTimeout(promiseFactory, timeoutMs) {
@@ -124,8 +156,10 @@ export async function createChatCompletion(params, options = {}) {
 
   const startedAt = Date.now();
   const errors = [];
+  const useFallbackFirst = preferFallback || shouldPreferFallbackModel();
 
   const tryPrimary = async () => {
+    if (isPrimaryCircuitOpen()) return null;
     if (!primaryClient) return null;
     const result = await requestCompletion(
       primaryClient,
@@ -134,6 +168,7 @@ export async function createChatCompletion(params, options = {}) {
       params,
       primaryTimeoutMs
     );
+    markPrimarySuccess();
     return result;
   };
 
@@ -154,11 +189,28 @@ export async function createChatCompletion(params, options = {}) {
     return result;
   };
 
-  const orderedAttempts = preferFallback ? [tryFallback, tryPrimary] : [tryPrimary, tryFallback];
+  const attempts = [];
+  const addAttempt = (name, fn) => {
+    if (
+      name === 'fallback' &&
+      isSameModelAttempt(PRIMARY_PROVIDER, PRIMARY_MODEL_ID, FALLBACK_PROVIDER, FALLBACK_MODEL_ID)
+    ) {
+      return;
+    }
+    attempts.push({ name, fn });
+  };
 
-  for (const attempt of orderedAttempts) {
+  if (useFallbackFirst) {
+    addAttempt('fallback', tryFallback);
+    addAttempt('primary', tryPrimary);
+  } else {
+    addAttempt('primary', tryPrimary);
+    addAttempt('fallback', tryFallback);
+  }
+
+  for (const attempt of attempts) {
     try {
-      const result = await attempt();
+      const result = await attempt.fn();
       if (result) {
         if (result.telemetry?.fallback_used && errors.length > 0) {
           const previousError = errors[errors.length - 1];
@@ -168,10 +220,11 @@ export async function createChatCompletion(params, options = {}) {
       }
     } catch (error) {
       errors.push(error);
+      if (attempt.name === 'primary') markPrimaryFailure(error);
       console.warn(
         `[LLM] ${error.provider || 'provider'}:${error.model || 'model'} falhou com ${error.error_class || classifyError(error)} (${error.message})`
       );
-      // sempre tenta o próximo provider (Groq fallback)
+      // Sempre tenta a proxima opcao configurada.
     }
   }
 

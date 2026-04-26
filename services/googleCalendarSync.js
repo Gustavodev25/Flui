@@ -11,6 +11,7 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const GOOGLE_DEFAULT_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
 const GOOGLE_DEFAULT_TIME_ZONE = process.env.GOOGLE_CALENDAR_TIME_ZONE || 'America/Sao_Paulo';
 const GOOGLE_API_TIMEOUT_MS = Number(process.env.GOOGLE_API_TIMEOUT_MS || 15_000);
+const GOOGLE_CALENDAR_EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 
 let defaultSupabaseAdmin = null;
 
@@ -123,6 +124,13 @@ function resolveGoogleCalendarSchedule(task, timeZone) {
   }
 
   return null;
+}
+
+function hasCalendarEventsScope(integration) {
+  const scopes = String(integration?.scope || '')
+    .split(/\s+/)
+    .filter(Boolean);
+  return scopes.includes(GOOGLE_CALENDAR_EVENTS_SCOPE) || scopes.includes('https://www.googleapis.com/auth/calendar');
 }
 
 export async function googleApiFetchJson(url, options = {}) {
@@ -328,6 +336,14 @@ export async function syncGoogleCalendarTask({ userId, taskId, supabaseClient })
   const integration = await getGoogleIntegration(userId, supabaseClient);
   if (!integration) return { success: true, status: 'not_connected' };
   if (!integration.auto_sync_enabled) return { success: true, status: 'paused' };
+  if (!hasCalendarEventsScope(integration)) {
+    await setGoogleIntegrationError(
+      userId,
+      'Reconecte o Google Calendar para permitir criar e atualizar eventos.',
+      supabaseClient
+    );
+    return { success: false, status: 'missing_scope' };
+  }
 
   const supabaseAdmin = getSupabaseAdmin(supabaseClient);
   const { data: task, error: taskError } = await supabaseAdmin

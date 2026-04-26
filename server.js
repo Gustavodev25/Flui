@@ -48,8 +48,6 @@ import {
   checkRateLimit,
   checkAndMarkRateLimitNotify,
   deletePhoneLinkChallenge,
-  getPhoneLinkChallenge,
-  setPhoneLinkChallenge,
 } from './agent/whatsappState.js';
 import OpenAI from 'openai';
 import Stripe from 'stripe';
@@ -1131,14 +1129,6 @@ async function buildReminderSessions() {
   // Sessões pendentes (auth em andamento) ficam no Supabase com TTL curto;
   // usuários sem binding ativo ainda não têm lembretes configurados.
   return sessions;
-}
-
-const PHONE_LINK_CODE_TTL_SEC = 10 * 60;
-const PHONE_LINK_RESEND_COOLDOWN_MS = 60 * 1000;
-const PHONE_LINK_MAX_ATTEMPTS = 5;
-
-function generateVerificationCode() {
-  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 // ================== WHATSAPP ==================
@@ -4237,11 +4227,8 @@ app.get('/api/whatsapp/linked-phone', requireAuthenticatedUser, async (req, res)
   try {
     const userId = getAuthenticatedUserId(req, req.query.userId);
     const binding = await findBindingByUserId(userId, 'whatsapp');
-    const pendingChallenge = await getPhoneLinkChallenge(userId);
     res.json({
       phone: binding?.external_user_id || null,
-      pendingPhone: pendingChallenge?.phone || null,
-      verificationPending: Boolean(pendingChallenge?.phone),
     });
   } catch (error) {
     return sendApiError(res, req, error, 500);
@@ -4251,68 +4238,7 @@ app.get('/api/whatsapp/linked-phone', requireAuthenticatedUser, async (req, res)
 app.post('/api/whatsapp/link-phone', requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = getAuthenticatedUserId(req, req.body?.userId);
-    const normalizedCode = String(req.body?.code || '').replace(/\D/g, '');
     const rawPhone = String(req.body?.phone || '');
-
-    if (normalizedCode) {
-      const challenge = await getPhoneLinkChallenge(userId);
-      if (!challenge?.phone || !challenge?.code) {
-        throw createHttpError(400, 'verification_not_pending', 'Nenhuma verificaÃ§Ã£o pendente para este usuÃ¡rio.');
-      }
-
-      if (rawPhone) {
-        const challengePhone = rawPhone.replace(/\D/g, '');
-        if (challengePhone !== challenge.phone) {
-          throw createHttpError(400, 'phone_verification_mismatch', 'O nÃºmero informado nÃ£o corresponde ao desafio pendente.');
-        }
-      }
-
-      if (normalizedCode.length !== 6) {
-        throw createHttpError(400, 'invalid_verification_code', 'Informe o cÃ³digo de 6 dÃ­gitos enviado no WhatsApp.');
-      }
-
-      if (challenge.code !== normalizedCode) {
-        const attempts = Number(challenge.attempts || 0) + 1;
-        if (attempts >= PHONE_LINK_MAX_ATTEMPTS) {
-          await deletePhoneLinkChallenge(userId);
-          throw createHttpError(400, 'verification_locked', 'CÃ³digo invÃ¡lido muitas vezes. Solicite um novo cÃ³digo.');
-        }
-
-        await setPhoneLinkChallenge(
-          userId,
-          { ...challenge, attempts },
-          PHONE_LINK_CODE_TTL_SEC
-        );
-        throw createHttpError(400, 'invalid_verification_code', 'CÃ³digo invÃ¡lido. Confira a mensagem recebida no WhatsApp.');
-      }
-
-      const existingBinding = await findBindingByUserId(userId, 'whatsapp');
-      if (existingBinding?.external_user_id && existingBinding.external_user_id !== challenge.phone) {
-        await deleteChannelBinding('whatsapp', existingBinding.external_user_id);
-      }
-
-      const userName = req.authUser.user_metadata?.full_name || req.authUser.user_metadata?.name || 'voce';
-      await upsertChannelBinding({
-        userId,
-        channel: 'whatsapp',
-        externalUserId: challenge.phone,
-        displayName: userName,
-        authenticated: true,
-        metadata: {
-          email: req.authUser.email,
-          phone: challenge.phone,
-          authMethod: 'web_verification',
-          verified_at: new Date().toISOString(),
-        },
-      });
-
-      await deletePhoneLinkChallenge(userId);
-      await sendWhatsAppMessage(
-        challenge.phone,
-        `Conta conectada, *${userName}*.\n\nAgora voce pode falar comigo por aqui e eu vou reconhecer seu perfil.`
-      );
-      return res.json({ ok: true, phone: challenge.phone });
-    }
 
     if (!rawPhone) throw createHttpError(400, 'missing_phone', 'phone required');
 
@@ -4321,88 +4247,42 @@ app.post('/api/whatsapp/link-phone', requireAuthenticatedUser, async (req, res) 
       throw createHttpError(400, 'invalid_phone', 'NÃºmero invÃ¡lido');
     }
 
-    const existingBinding = await findBindingByUserId(userId, 'whatsapp');
-    if (existingBinding?.external_user_id === normalizedPhone) {
+    const phoneBinding = await findBindingByExternalUserId('whatsapp', normalizedPhone);
+    if (phoneBinding?.user_id && phoneBinding.user_id !== userId) {
+      throw createHttpError(409, 'phone_already_linked', 'Este numero ja esta vinculado a outra conta.');
+    }
+
+    const existingUserBinding = await findBindingByUserId(userId, 'whatsapp');
+    if (existingUserBinding?.external_user_id === normalizedPhone) {
       await deletePhoneLinkChallenge(userId);
       return res.json({ ok: true, phone: normalizedPhone, alreadyLinked: true });
     }
 
-    const pendingChallenge = await getPhoneLinkChallenge(userId);
-    if (pendingChallenge?.phone && pendingChallenge.phone !== normalizedPhone) {
-      throw createHttpError(
-        409,
-        'verification_already_pending',
-        'JÃ¡ existe uma verificaÃ§Ã£o pendente para outro nÃºmero. Conclua ou aguarde o cÃ³digo expirar.'
-      );
+    if (existingUserBinding?.external_user_id) {
+      await deleteChannelBinding('whatsapp', existingUserBinding.external_user_id);
     }
 
-    if (pendingChallenge?.phone === normalizedPhone && pendingChallenge.issued_at) {
-      const issuedAtMs = new Date(pendingChallenge.issued_at).getTime();
-      if (Number.isFinite(issuedAtMs) && (Date.now() - issuedAtMs) < PHONE_LINK_RESEND_COOLDOWN_MS) {
-        throw createHttpError(
-          429,
-          'verification_rate_limited',
-          'Aguarde 1 minuto antes de pedir um novo cÃ³digo.'
-        );
-      }
-    }
-
-    const verificationCode = generateVerificationCode();
-    const sent = await sendWhatsAppMessage(
-      normalizedPhone,
-      `Seu cÃ³digo para conectar o Lui Ã© *${verificationCode}*.\n\nDigite esse cÃ³digo na Flui para confirmar que este WhatsApp Ã© seu.\n\nSe nÃ£o foi vocÃª, pode ignorar esta mensagem.`
-    );
-
-    if (!sent) {
-      throw createHttpError(400, 'whatsapp_unreachable', 'Este nÃºmero nÃ£o foi encontrado no WhatsApp ou nÃ£o Ã© acessÃ­vel.');
-    }
-
-    await setPhoneLinkChallenge(
-      userId,
-      {
-        phone: normalizedPhone,
-        code: verificationCode,
-        attempts: 0,
-        issued_at: new Date().toISOString(),
-      },
-      PHONE_LINK_CODE_TTL_SEC
-    );
-
-    return res.json({
-      ok: true,
-      phone: normalizedPhone,
-      pendingVerification: true,
-      expiresInSec: PHONE_LINK_CODE_TTL_SEC,
-    });
-
-    /*
-    const normalizedPhone = phone.replace(/\D/g, '');
-    if (normalizedPhone.length < 10) throw createHttpError(400, 'invalid_phone', 'Número inválido');
-
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
-    if (userError || !user) throw createHttpError(404, 'user_not_found', 'Usuário não encontrado');
-
-    const userName = user.user_metadata?.full_name || user.user_metadata?.name || 'você';
-
-    await upsertChannelBinding({
+    const userName = req.authUser.user_metadata?.full_name || req.authUser.user_metadata?.name || 'voce';
+    const binding = await upsertChannelBinding({
       userId,
       channel: 'whatsapp',
       externalUserId: normalizedPhone,
       displayName: userName,
       authenticated: true,
-      metadata: { email: user.email, phone: normalizedPhone },
+      metadata: {
+        ...(phoneBinding?.metadata || {}),
+        email: req.authUser.email,
+        phone: normalizedPhone,
+        authMethod: 'web_phone_binding',
+        linked_at: new Date().toISOString(),
+      },
     });
 
-    const sent = await sendWhatsAppMessage(normalizedPhone,
-      `Conta conectada, *${userName}* 🚀\n\nAgora é só me mandar uma mensagem por aqui e eu te ajudo com suas tarefas!`
-    );
-
-    if (!sent) {
-      throw createHttpError(400, 'whatsapp_unreachable', 'Este número não foi encontrado no WhatsApp ou não é acessível.');
-    }
-
-    res.json({ ok: true, phone: normalizedPhone });
-    */
+    await deletePhoneLinkChallenge(userId);
+    return res.json({
+      ok: true,
+      phone: binding.external_user_id || normalizedPhone,
+    });
   } catch (error) {
     return sendApiError(res, req, error, 500);
   }
