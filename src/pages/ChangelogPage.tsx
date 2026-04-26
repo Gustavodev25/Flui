@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { supabase } from '../lib/supabase'
@@ -260,10 +260,7 @@ export default function ChangelogPage() {
                         )}
                       </div>
 
-                      <h2 className="text-base font-bold text-[#202020] tracking-tight mb-2 group-hover:text-black transition-colors">
-                        {entry.title}
-                      </h2>
-                      <MarkdownRenderer content={entry.description} className="text-sm text-[#37352f]/50 leading-relaxed max-w-xl" />
+                      <ExpandableDescription content={entry.description} />
                     </div>
                   </motion.article>
                 )
@@ -272,6 +269,44 @@ export default function ChangelogPage() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function ExpandableDescription({ content }: { content: string }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [showButton, setShowButton] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setShowButton(contentRef.current.scrollHeight > 160)
+    }
+  }, [content])
+
+  return (
+    <div className="relative">
+      <div 
+        ref={contentRef}
+        className={`transition-all duration-500 ease-in-out relative overflow-hidden ${
+          !isExpanded && showButton ? 'max-h-[160px]' : 'max-h-[2000px]'
+        }`}
+      >
+        <MarkdownRenderer content={content} className="text-sm text-[#37352f]/50 leading-relaxed max-w-xl" />
+        
+        {!isExpanded && showButton && (
+          <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none z-10" />
+        )}
+      </div>
+
+      {showButton && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="mt-3 text-[10px] font-bold text-[#202020]/40 hover:text-[#202020] transition-colors flex items-center gap-1"
+        >
+          {isExpanded ? 'Ver menos' : 'Ler mais'}
+        </button>
+      )}
     </div>
   )
 }

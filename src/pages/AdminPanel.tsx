@@ -594,6 +594,8 @@ export function AdminPanel() {
       setChangelogForm({ title: '', description: '', type: 'feature', version: '' })
       setShowChangelogForm(false)
       await loadChangelogs()
+      // Dispara preview para o admin
+      window.dispatchEvent(new CustomEvent('changelog-preview'))
     }
     setChangelogSubmitting(false)
   }
@@ -601,6 +603,8 @@ export function AdminPanel() {
   const handlePublishChangelog = async (id: string) => {
     await supabase.from('changelogs').update({ status: 'published' }).eq('id', id)
     setChangelogEntries(prev => prev.map(e => e.id === id ? { ...e, status: 'published' } : e))
+    // Dispara preview para o admin
+    window.dispatchEvent(new CustomEvent('changelog-preview'))
   }
 
   const handleDeleteChangelog = async (id: string) => {
@@ -627,6 +631,8 @@ export function AdminPanel() {
     if (!error) {
       setEditingEntry(null)
       await loadChangelogs()
+      // Dispara preview para o admin
+      window.dispatchEvent(new CustomEvent('changelog-preview'))
     }
     setEditSubmitting(false)
   }
@@ -1649,9 +1655,9 @@ export function AdminPanel() {
                     {changelogEntries.map(entry => {
                       const config = CHANGELOG_TYPE_CONFIG[entry.type] || CHANGELOG_TYPE_CONFIG.feature
                       return (
-                        <div key={entry.id} className="group relative flex items-center gap-6 p-6 bg-white border border-[#e9e9e7] rounded-[24px] hover:border-[#202020]/10 hover:shadow-[0_8px_30px_rgba(0,0,0,0.02)] transition-all duration-500 hover:scale-[1.01] hover:gap-0">
+                        <div key={entry.id} className="group relative flex items-center gap-6 p-6 bg-white border border-[#e9e9e7] rounded-[24px]">
                           {/* Icon container */}
-                          <div className="shrink-0 w-12 h-12 flex items-center justify-center rounded-2xl bg-[#f7f7f5] group-hover:w-0 group-hover:h-0 group-hover:opacity-0 group-hover:scale-0 overflow-hidden transition-all duration-500">
+                          <div className="shrink-0 w-12 h-12 flex items-center justify-center rounded-2xl bg-[#f7f7f5] overflow-hidden">
                             {config.icon}
                           </div>
                           
@@ -1680,10 +1686,17 @@ export function AdminPanel() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0 pr-1">
+                          <div className="flex items-center gap-2 pr-1">
+                            <button
+                              onClick={() => window.dispatchEvent(new CustomEvent('changelog-preview', { detail: entry }))}
+                              className="p-2.5 text-[#37352f]/30 hover:text-[#202020] hover:bg-[#f7f7f5] rounded-xl transition-all"
+                              title="Visualizar Modal"
+                            >
+                              <Eye size={15} />
+                            </button>
                             <button
                               onClick={() => openEditEntry(entry)}
-                              className="p-2.5 text-[#37352f]/30 hover:text-[#202020] hover:bg-[#f7f7f5] rounded-xl transition-all active:scale-90"
+                              className="p-2.5 text-[#37352f]/30 hover:text-[#202020] hover:bg-[#f7f7f5] rounded-xl transition-all"
                               title="Editar"
                             >
                               <Pencil size={15} />

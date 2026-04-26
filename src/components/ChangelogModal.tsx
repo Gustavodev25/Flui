@@ -11,6 +11,18 @@ import melhoriaIcon from '../assets/icones/melhoria.svg'
 import correcaoIcon from '../assets/icones/correcao.svg'
 import atencaoIcon from '../assets/icones/atencao.svg'
 
+function stripMarkdown(text: string) {
+  return text
+    .replace(/#{1,6}\s+/g, '') // Remove headers
+    .replace(/\*\*(.+?)\*\*/g, '$1') // Remove bold
+    .replace(/\*(.+?)\*/g, '$1') // Remove italic
+    .replace(/`(.+?)`/g, '$1') // Remove inline code
+    .replace(/\[(.+?)\]\(.+?\)/g, '$1') // Remove links
+    .replace(/^[\s\t]*[-*+]\s+/gm, '') // Remove list bullets
+    .replace(/\n+/g, ' ') // Texto corrido
+    .trim()
+}
+
 interface ChangelogEntry {
   id: string
   title: string
@@ -52,6 +64,35 @@ export default function ChangelogModal() {
       .then(() => setIsAdmin(true))
       .catch(() => {})
   }, [session])
+
+  useEffect(() => {
+    const handlePreview = (e: any) => {
+      // Apenas admins podem forçar preview ou ver rascunhos
+      if (!isAdmin) return
+
+      const data = e.detail
+      if (data) {
+        setEntry(data)
+        setVisible(true)
+      } else {
+        // Busca o mais recente (incluindo rascunhos já que é admin)
+        supabase
+          .from('changelogs')
+          .select('*')
+          .order('published_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+          .then(({ data }) => {
+            if (!data) return
+            setEntry(data as ChangelogEntry)
+            setVisible(true)
+          })
+      }
+    }
+
+    window.addEventListener('changelog-preview', handlePreview)
+    return () => window.removeEventListener('changelog-preview', handlePreview)
+  }, [])
 
   useEffect(() => {
     const base = supabase
@@ -146,8 +187,8 @@ export default function ChangelogModal() {
               <h3 className="text-sm font-semibold text-[#202020] tracking-tight leading-snug mb-1.5 text-start">
                 {entry.title}
               </h3>
-              <p className="text-xs text-[#37352f]/40 leading-relaxed text-start">
-                {entry.description}
+              <p className="text-xs text-[#37352f]/40 leading-relaxed text-start line-clamp-6 overflow-hidden">
+                {stripMarkdown(entry.description)}
               </p>
             </div>
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
 import NumberFlow from '@number-flow/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, MoreHorizontal, Layout, Table as TableIcon, Loader2, Edit2, Trash2, CheckCircle2, Circle, ChevronUp, Users, Lock, Calendar, Flag } from 'lucide-react'
+import { Plus, MoreHorizontal, Layout, Table as TableIcon, Loader2, Edit2, Trash2, CheckCircle2, Circle, ChevronUp, Users, Lock, Calendar, Flag, ChevronDown } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useSubscription } from '../contexts/SubscriptionContext'
 import Avvvatars from 'avvvatars-react'
@@ -17,6 +17,8 @@ import { Loading } from '../components/ui/Loading'
 import { InfiniteRibbon } from '../components/ui/infinite-ribbon'
 import swingingDoodle from '../assets/doodles/SwingingDoodle.png'
 import finlozLogo from '../assets/logo/lui.svg'
+import pessoalIcon from '../assets/icones/pessoal.svg'
+import workspaceIcon from '../assets/icones/workspace.svg'
 import {
   DndContext,
   closestCorners,
@@ -723,6 +725,10 @@ const Tasks: React.FC = () => {
   const [taskView, setTaskView] = useState<'personal' | 'workspace'>(initialView)
 
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [createDropdownOpen, setCreateDropdownOpen] = useState(false)
+  const [columnCreateDropdownId, setColumnCreateDropdownId] = useState<string | null>(null)
+  const createBtnRef = useRef<HTMLButtonElement>(null)
+  const createDropdownRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(lastTaskView === initialView ? cachedTasks.length === 0 : true)
   const [tasks, setTasks] = useState<Task[]>(lastTaskView === initialView ? cachedTasks : [])
   const [personalCount, setPersonalCount] = useState(0)
@@ -1180,10 +1186,40 @@ const Tasks: React.FC = () => {
     setActiveDropdownId(null)
   }, [])
 
-  const openCreateModal = useCallback(() => {
+  const createVisibilityRef = useRef<'personal' | 'workspace' | null>(null)
+
+  const openCreateModal = useCallback((forVisibility?: 'personal' | 'workspace') => {
     setEditingTask(null)
+    setCreateDropdownOpen(false)
+    setColumnCreateDropdownId(null)
+    createVisibilityRef.current = forVisibility ?? null
     setIsModalOpen(true)
   }, [])
+
+  const getDefaultVisibility = useCallback((): 'personal' | 'workspace' => {
+    if (isGuest) return 'workspace'
+    if (createVisibilityRef.current) return createVisibilityRef.current
+    return taskView === 'workspace' ? 'workspace' : 'personal'
+  }, [isGuest, taskView])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        createDropdownRef.current &&
+        !createDropdownRef.current.contains(e.target as Node) &&
+        createBtnRef.current &&
+        !createBtnRef.current.contains(e.target as Node)
+      ) {
+        setCreateDropdownOpen(false)
+      }
+      setColumnCreateDropdownId(null)
+    }
+    if (createDropdownOpen || columnCreateDropdownId) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [createDropdownOpen, columnCreateDropdownId])
 
   const handleAssignTask = async (taskId: string, assignedTo: string | null) => {
     try {
@@ -1463,16 +1499,68 @@ const Tasks: React.FC = () => {
               </p>
             </div>
             <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0 ml-auto">
-              <motion.button
-                onClick={openCreateModal}
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.98 }}
-                className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-5 bg-[#202020] text-white rounded-[6px] text-[11px] sm:text-xs font-semibold hover:bg-[#202020]/90 transition-all shadow-md shadow-black/10 h-[32px] sm:h-[38px] flex-shrink-0"
-              >
-                <Plus size={14} strokeWidth={2.5} />
-                <span className="hidden sm:inline">Nova Tarefa</span>
-                <span className="sm:hidden">Novo</span>
-              </motion.button>
+              {/* Botão Nova Tarefa com dropdown para escolher visibilidade */}
+              <div className="relative">
+                {hasWorkspaceAccess && isAdmin ? (
+                  <>
+                    <motion.button
+                      ref={createBtnRef}
+                      onClick={() => setCreateDropdownOpen(!createDropdownOpen)}
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-5 bg-[#202020] text-white rounded-[6px] text-[11px] sm:text-xs font-semibold hover:bg-[#202020]/90 transition-all shadow-md shadow-black/10 h-[32px] sm:h-[38px] flex-shrink-0"
+                    >
+                      <Plus size={14} strokeWidth={2.5} />
+                      <span className="hidden sm:inline">Nova Tarefa</span>
+                      <span className="sm:hidden">Novo</span>
+                      <ChevronDown size={12} strokeWidth={2.5} className={`ml-0.5 transition-transform duration-200 ${createDropdownOpen ? 'rotate-180' : ''}`} />
+                    </motion.button>
+                    <AnimatePresence>
+                      {createDropdownOpen && (
+                        <motion.div
+                          ref={createDropdownRef}
+                          initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 6, scale: 0.96 }}
+                          transition={{ duration: 0.15, ease: [0.2, 0.65, 0.3, 0.9] }}
+                          className="absolute right-0 top-full mt-1.5 w-[172px] bg-white rounded-[10px] border border-[#e9e9e7] shadow-lg shadow-black/8 p-1 z-[70]"
+                        >
+                          <button
+                            onClick={() => openCreateModal('personal')}
+                            className="w-full flex items-center gap-2 px-2.5 py-[7px] text-left rounded-lg hover:bg-[#f7f7f5] transition-colors group"
+                          >
+                            <div className="w-[22px] h-[22px] rounded-md bg-[#f5f5f3] flex items-center justify-center group-hover:bg-[#eeeeed] transition-colors">
+                              <img src={pessoalIcon} alt="" className="w-[13px] h-[13px] opacity-60 group-hover:opacity-80" />
+                            </div>
+                            <span className="text-[11.5px] font-semibold text-[#37352f]">Pessoal</span>
+                          </button>
+                          <div className="-mx-1 my-1 border-t border-[#f1f1f0]" />
+                          <button
+                            onClick={() => openCreateModal('workspace')}
+                            className="w-full flex items-center gap-2 px-2.5 py-[7px] text-left rounded-lg hover:bg-[#f7f7f5] transition-colors group"
+                          >
+                            <div className="w-[22px] h-[22px] rounded-md bg-[#f5f5f3] flex items-center justify-center group-hover:bg-[#eeeeed] transition-colors">
+                              <img src={workspaceIcon} alt="" className="w-[13px] h-[13px] opacity-60 group-hover:opacity-80" />
+                            </div>
+                            <span className="text-[11.5px] font-semibold text-[#37352f]">Workspace</span>
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </>
+                ) : (
+                  <motion.button
+                    onClick={() => openCreateModal()}
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.98 }}
+                    className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-5 bg-[#202020] text-white rounded-[6px] text-[11px] sm:text-xs font-semibold hover:bg-[#202020]/90 transition-all shadow-md shadow-black/10 h-[32px] sm:h-[38px] flex-shrink-0"
+                  >
+                    <Plus size={14} strokeWidth={2.5} />
+                    <span className="hidden sm:inline">Nova Tarefa</span>
+                    <span className="sm:hidden">Novo</span>
+                  </motion.button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1602,11 +1690,11 @@ const Tasks: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-x-hidden lg:overflow-x-auto lg:overflow-y-hidden bg-white">
+      <div className="flex-1 overflow-x-hidden lg:overflow-x-auto lg:overflow-y-hidden bg-white flex flex-col">
         {loading ? (
           <Loading fullScreen={false} />
         ) : tasks.length === 0 ? (
-          <div className="min-h-[50vh] w-full flex flex-col items-center justify-center p-8 sm:p-20 text-center bg-white">
+          <div className="flex-1 w-full flex flex-col items-center justify-center p-8 sm:p-20 text-center bg-white">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1625,15 +1713,7 @@ const Tasks: React.FC = () => {
                   ? 'Nenhuma tarefa foi compartilhada no workspace ainda. Crie uma tarefa e defina a visibilidade como Workspace para que todos vejam.'
                   : 'Você ainda não tem nenhuma tarefa cadastrada. Organize seu trabalho e acompanhe seu progresso criando sua primeira tarefa agora.'}
               </p>
-              <motion.button
-                onClick={openCreateModal}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="inline-flex items-center gap-2 sm:gap-3 px-5 sm:px-8 py-3 bg-[#202020] text-white rounded-xl text-xs sm:text-sm font-bold shadow-xl shadow-black/10 hover:bg-[#303030] transition-all"
-              >
-                <Plus size={18} strokeWidth={2.5} />
-                Criar Primeira Tarefa
-              </motion.button>
+
             </motion.div>
           </div>
         ) : (
@@ -1691,10 +1771,54 @@ const Tasks: React.FC = () => {
                               ))}
                             </div>
 
-                            <button onClick={openCreateModal} className="w-full py-3 sm:py-2.5 px-3 rounded-xl flex items-center gap-2 text-[#37352f]/30 hover:text-[#37352f]/60 hover:bg-[#f7f7f5] active:bg-[#f0f0ee] transition-all group/btn mt-auto">
-                              <Plus size={15} className="group-hover/btn:scale-110 transition-transform" />
-                              <span className="text-xs font-bold uppercase tracking-tight">Novo</span>
-                            </button>
+                            {hasWorkspaceAccess && isAdmin ? (
+                              <div className="relative mt-auto">
+                                <button
+                                  onClick={() => setColumnCreateDropdownId(columnCreateDropdownId === column.id ? null : column.id)}
+                                  className="w-full py-3 sm:py-2.5 px-3 rounded-xl flex items-center gap-2 text-[#37352f]/30 hover:text-[#37352f]/60 hover:bg-[#f7f7f5] active:bg-[#f0f0ee] transition-all group/btn"
+                                >
+                                  <Plus size={15} className="group-hover/btn:scale-110 transition-transform" />
+                                  <span className="text-xs font-bold uppercase tracking-tight">Novo</span>
+                                  <ChevronDown size={11} strokeWidth={2.5} className={`ml-auto transition-transform duration-200 ${columnCreateDropdownId === column.id ? 'rotate-180' : ''}`} />
+                                </button>
+                                <AnimatePresence>
+                                  {columnCreateDropdownId === column.id && (
+                                    <motion.div
+                                      initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                                      exit={{ opacity: 0, y: 6, scale: 0.96 }}
+                                      transition={{ duration: 0.15, ease: [0.2, 0.65, 0.3, 0.9] }}
+                                      className="absolute left-0 bottom-full mb-1.5 w-[162px] bg-white rounded-[10px] border border-[#e9e9e7] shadow-lg shadow-black/8 p-1 z-[70]"
+                                    >
+                                      <button
+                                        onClick={() => openCreateModal('personal')}
+                                        className="w-full flex items-center gap-2 px-2.5 py-[6px] text-left rounded-lg hover:bg-[#f7f7f5] transition-colors group"
+                                      >
+                                        <div className="w-[20px] h-[20px] rounded-md bg-[#f5f5f3] flex items-center justify-center group-hover:bg-[#eeeeed] transition-colors">
+                                          <img src={pessoalIcon} alt="" className="w-[12px] h-[12px] opacity-60 group-hover:opacity-80" />
+                                        </div>
+                                        <span className="text-[11px] font-semibold text-[#37352f]">Pessoal</span>
+                                      </button>
+                                      <div className="-mx-1 my-1 border-t border-[#f1f1f0]" />
+                                      <button
+                                        onClick={() => openCreateModal('workspace')}
+                                        className="w-full flex items-center gap-2 px-2.5 py-[6px] text-left rounded-lg hover:bg-[#f7f7f5] transition-colors group"
+                                      >
+                                        <div className="w-[20px] h-[20px] rounded-md bg-[#f5f5f3] flex items-center justify-center group-hover:bg-[#eeeeed] transition-colors">
+                                          <img src={workspaceIcon} alt="" className="w-[12px] h-[12px] opacity-60 group-hover:opacity-80" />
+                                        </div>
+                                        <span className="text-[11px] font-semibold text-[#37352f]">Workspace</span>
+                                      </button>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                            ) : (
+                              <button onClick={() => openCreateModal()} className="w-full py-3 sm:py-2.5 px-3 rounded-xl flex items-center gap-2 text-[#37352f]/30 hover:text-[#37352f]/60 hover:bg-[#f7f7f5] active:bg-[#f0f0ee] transition-all group/btn mt-auto">
+                                <Plus size={15} className="group-hover/btn:scale-110 transition-transform" />
+                                <span className="text-xs font-bold uppercase tracking-tight">Novo</span>
+                              </button>
+                            )}
                           </DroppableContainer>
                         </SortableContext>
                       </div>
@@ -1877,7 +2001,15 @@ const Tasks: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); setEditingTask(null); }}
-        title={editingTask ? 'Editar Tarefa' : 'Nova Tarefa'}
+        title={editingTask 
+          ? (editingTask.visibility === 'workspace' ? 'Editar Tarefa Workspace' : 'Editar Tarefa Pessoal')
+          : (getDefaultVisibility() === 'workspace' ? 'Nova Tarefa Workspace' : 'Nova Tarefa Pessoal')
+        }
+        headerIcon={
+          editingTask 
+            ? (editingTask.visibility === 'workspace' ? <img src={workspaceIcon} alt="" className="w-5 h-5 opacity-70" /> : <img src={pessoalIcon} alt="" className="w-5 h-5 opacity-70" />)
+            : (getDefaultVisibility() === 'workspace' ? <img src={workspaceIcon} alt="" className="w-5 h-5 opacity-70" /> : <img src={pessoalIcon} alt="" className="w-5 h-5 opacity-70" />)
+        }
         hideScrollbar={true}
         bodyClassName="!pb-0"
       >
@@ -1887,7 +2019,8 @@ const Tasks: React.FC = () => {
           onCancel={() => { setIsModalOpen(false); setEditingTask(null); }}
           isEditing={!!editingTask}
           hasWorkspaceAccess={isAdmin ? hasWorkspaceAccess : false}
-          defaultVisibility={isGuest ? 'workspace' : (taskView === 'workspace' ? 'workspace' : 'personal')}
+          defaultVisibility={getDefaultVisibility()}
+          hideVisibilitySelector={!editingTask && !!createVisibilityRef.current}
           workspaceName={isGuest ? (workspaceMembership?.ownerName || 'Workspace') : undefined}
           workspaceMembers={workspaceMembers}
           currentUserId={user?.id}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, CheckCircle2, Circle, Lock, Users, Check } from 'lucide-react'
+import { Plus, Trash2, CheckCircle2, Circle, Lock, Users, Check, Sparkles } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Select from './ui/Select'
 import DatePicker from './ui/DatePicker'
@@ -24,12 +24,13 @@ interface TaskFormProps {
   isEditing?: boolean
   hasWorkspaceAccess?: boolean
   defaultVisibility?: 'personal' | 'workspace'
+  hideVisibilitySelector?: boolean
   workspaceName?: string
   workspaceMembers?: WorkspaceMember[]
   currentUserId?: string
 }
 
-const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, isEditing, hasWorkspaceAccess, defaultVisibility, workspaceName, workspaceMembers = [], currentUserId }) => {
+const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, isEditing, hasWorkspaceAccess, defaultVisibility, hideVisibilitySelector, workspaceName, workspaceMembers = [], currentUserId }) => {
   const { user } = useAuth()
   const [avatarError, setAvatarError] = useState(false)
   const [typingDone, setTypingDone] = useState(false)
@@ -65,6 +66,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, is
     return []
   })
   const [subtasks, setSubtasks] = useState<{ id: string, title: string, completed: boolean }[]>(initialData?.subtasks || [])
+  const [suggestedSubtasks, setSuggestedSubtasks] = useState<{ id: string, title: string, completed: boolean }[]>([])
   const [newSubtask, setNewSubtask] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [lastAnalyzed, setLastAnalyzed] = useState(initialData?.title || '')
@@ -97,6 +99,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onSubmit, onCancel, is
     if (!textToAnalyze || isAnalyzing) return
     setIsAnalyzing(true)
     setLastAnalyzed(textToAnalyze)
+    setSuggestedSubtasks([])
 
     try {
       const data = await apiFetch<any>('/api/chat', {
@@ -154,7 +157,7 @@ REGRAS:
           }
         }
 
-        // Aplica subtarefas sugeridas (somente se não há subtarefas manuais já adicionadas)
+        // Sugere subtarefas — pergunta ao usuário antes de aplicar
         if (parsed.subtasks && Array.isArray(parsed.subtasks) && parsed.subtasks.length > 0 && subtasks.length === 0) {
           const aiSubtasks = parsed.subtasks
             .filter((s: any) => typeof s === 'string' && s.trim())
@@ -164,7 +167,7 @@ REGRAS:
               completed: false
             }))
           if (aiSubtasks.length > 0) {
-            setSubtasks(aiSubtasks)
+            setSuggestedSubtasks(aiSubtasks)
           }
         }
       }
@@ -319,7 +322,16 @@ REGRAS:
       )}
 
       <div className="space-y-1">
-        <label className="text-[10px] font-bold text-[#37352f]/30 flex items-center h-4 uppercase tracking-tight">Título da Tarefa</label>
+        <label className="text-[10px] font-bold text-[#37352f]/30 flex items-center h-4 uppercase tracking-tight gap-1.5">
+          Título da Tarefa
+          {isAnalyzing && (
+            <span className="flex items-center gap-0.5">
+              {[0, 150, 300].map(d => (
+                <span key={d} className="w-1 h-1 rounded-full bg-[#37352f]/20 animate-bounce" style={{ animationDelay: `${d}ms` }} />
+              ))}
+            </span>
+          )}
+        </label>
         <input
           type="text"
           placeholder="O que precisa ser feito?"
@@ -380,7 +392,7 @@ REGRAS:
       </div>
 
       {/* Visibilidade (membros/donos de workspace) */}
-      {hasWorkspaceAccess && (
+      {hasWorkspaceAccess && !hideVisibilitySelector && (
         <div className="space-y-1.5 mb-4">
           <label className="text-[10px] font-bold text-[#37352f]/30 flex items-center h-4 uppercase tracking-tight">Visibilidade</label>
           <div className="relative flex items-center bg-[#f7f7f5]/80 rounded-full p-1 border border-[#e9e9e7]/50">
@@ -423,6 +435,39 @@ REGRAS:
           </div>
         </div>
       )}
+
+      {/* AI subtask suggestion */}
+      <AnimatePresence>
+        {suggestedSubtasks.length > 0 && subtasks.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18 }}
+            className="flex items-center gap-2.5 bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl px-3 py-2.5"
+          >
+            <Sparkles size={11} className="text-[#37352f]/25 flex-shrink-0" />
+            <span className="text-[11px] text-[#37352f]/45 flex-1 leading-none">
+              Criar {suggestedSubtasks.length} subtarefas sugeridas?
+            </span>
+            <button
+              type="button"
+              onClick={() => { setSubtasks(suggestedSubtasks); setSuggestedSubtasks([]) }}
+              className="text-[10px] font-bold text-[#37352f] hover:underline transition-all"
+            >
+              Sim
+            </button>
+            <span className="text-[#37352f]/15 select-none">·</span>
+            <button
+              type="button"
+              onClick={() => setSuggestedSubtasks([])}
+              className="text-[10px] text-[#37352f]/30 hover:text-[#37352f]/60 transition-all"
+            >
+              Não
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Subtasks Section */}
       <div className="space-y-1.5 mt-1">

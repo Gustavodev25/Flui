@@ -343,8 +343,11 @@ PROIBIDO em qualquer mensagem de português compreensível: "Pode repetir?", "N�
    CRÍTICO: NUNCA passe "número 2", "é a 2", "a segunda", "número X" etc. como query para TaskSearch — sempre resolva para o ID ou título real da tarefa.
 
 ⭐⭐⭐ REGRAS DE SUBTAREFAS ⭐⭐⭐
-18. SUBTAREFAS PROATIVAS: Para QUALQUER tarefa — incluindo as que têm timer — tente incluir pelo menos 2 a 3 subtarefas que ajudem o usuário a começar. Não espere ele pedir. Timer e subtarefas NÃO são excludentes: use ambos quando couber.
-19. SUBTAREFAS PRÁTICAS: Gere passos curtos e acionáveis (ex: "Separar material", "Revisar rascunho").
+18. SUBTAREFAS PROATIVAS: Crie subtarefas quando a tarefa tiver fluxo real de execução, pesquisa, burocracia, planejamento, produção de material ou várias etapas implícitas. Não crie subtarefas para lembretes pontuais e simples.
+   COM subtarefas: acessar/ler edital, fazer inscrição, preparar apresentação, montar relatório, organizar viagem/evento, estudar para prova, revisar contrato, criar/configurar sistema.
+   SEM subtarefas: comprar pão, pagar boleto, ligar para alguém, mandar mensagem, buscar algo, confirmar horário.
+   Timer e subtarefas NÃO são excludentes: use ambos quando couber.
+19. SUBTAREFAS PRÁTICAS: Gere 2 a 4 passos curtos e acionáveis (ex: "Ler requisitos", "Separar documentos", "Conferir prazo"). Se for tarefa simples, deixe subtasks vazio.
 20. SUGESTÃO: Se a tarefa for muito complexa, crie as subtarefas iniciais e pergunte: "${userName}, dividi em algumas etapas pra você, quer que eu adicione mais alguma?"
 21. GESTÃO: Você também pode usar TaskUpdate para adicionar subtarefas a uma tarefa que já existe. REGRA CRÍTICA: ao usar TaskUpdate com o campo "subtasks", você DEVE enviar a lista COMPLETA (existentes + novas). As subtarefas atuais de cada tarefa estão listadas no PAINEL DO USUÁRIO acima. Nunca envie apenas a subtarefa nova — isso apagaria as anteriores.
 
@@ -1115,6 +1118,123 @@ function extractSubtasksFromMessage(message) {
   return [];
 }
 
+const SIMPLE_ONE_SHOT_TASK_RE = /\b(comprar|pagar|ligar|telefonar|enviar|mandar|responder|buscar|pegar|levar|trazer|retirar|agendar|marcar|cancelar|confirmar|avisar|chamar|devolver)\b/;
+const COMPLEX_SUBTASK_HINT_RE = /\b(edital|licitacao|pregao|chamada publica|processo seletivo|inscricao|cadastro|formulario|matricula|relatorio|apresentacao|proposta|orcamento|contrato|planilha|planejar|organizar|preparar|estudar|pesquisar|analisar|revisar|criar|montar|desenvolver|implementar|configurar|projeto|viagem|evento|mudanca|sistema|app|site|dashboard|automacao|integracao)\b/;
+
+const AUTO_SUBTASK_RULES = [
+  {
+    name: 'edital',
+    pattern: /\b(edital|licitacao|pregao|chamada publica)\b/,
+    subtasks: [
+      'Acessar o edital',
+      'Ler requisitos e prazos',
+      'Separar documentos necessarios',
+      'Anotar proximas acoes',
+    ],
+  },
+  {
+    name: 'inscricao',
+    pattern: /\b(inscrever|cadastrar|matricular)\b|\b(fazer|realizar|preencher|concluir)\b.{0,80}\b(inscricao|cadastro|formulario|matricula)\b/,
+    subtasks: [
+      'Conferir requisitos',
+      'Preencher dados necessarios',
+      'Separar documentos',
+      'Enviar ou confirmar inscricao',
+    ],
+  },
+  {
+    name: 'material',
+    pattern: /\b(montar|criar|preparar|fazer|revisar|analisar|finalizar|escrever|elaborar)\b.{0,80}\b(relatorio|apresentacao|proposta|orcamento|contrato|documento|planilha)\b|\b(relatorio|apresentacao|proposta|orcamento|contrato|documento|planilha)\b.{0,80}\b(montar|criar|preparar|fazer|revisar|analisar|finalizar|escrever|elaborar)\b/,
+    subtasks: [
+      'Levantar informacoes',
+      'Montar primeira versao',
+      'Revisar pontos importantes',
+      'Finalizar e enviar',
+    ],
+  },
+  {
+    name: 'planejamento',
+    pattern: /\b(planejar|organizar|preparar)\b.{0,80}\b(viagem|evento|mudanca|reuniao|projeto|semana|aula|treinamento)\b|\b(viagem|evento|mudanca|reuniao|projeto|semana|aula|treinamento)\b.{0,80}\b(planejar|organizar|preparar)\b/,
+    subtasks: [
+      'Definir objetivo e prazo',
+      'Listar pendencias principais',
+      'Organizar proximas acoes',
+      'Conferir detalhes finais',
+    ],
+  },
+  {
+    name: 'estudo',
+    pattern: /\b(estudar|revisar|preparar)\b.{0,80}\b(prova|concurso|curso|certificacao|aula)\b|\b(prova|concurso|curso|certificacao)\b.{0,80}\b(estudar|revisar|preparar)\b/,
+    subtasks: [
+      'Separar conteudo',
+      'Estudar pontos principais',
+      'Fazer revisao',
+      'Resolver duvidas',
+    ],
+  },
+  {
+    name: 'implementacao',
+    pattern: /\b(criar|montar|desenvolver|implementar|configurar|automatizar)\b.{0,80}\b(site|sistema|app|aplicativo|pagina|fluxo|automacao|integracao|campanha|dashboard)\b/,
+    subtasks: [
+      'Definir escopo',
+      'Montar estrutura inicial',
+      'Implementar parte principal',
+      'Testar e ajustar',
+    ],
+  },
+  {
+    name: 'pesquisa',
+    pattern: /\b(pesquisar|analisar|verificar|levantar)\b.{0,80}\b(opcoes|informacoes|dados|requisitos|precos|fornecedores)\b/,
+    subtasks: [
+      'Levantar fontes',
+      'Comparar informacoes',
+      'Registrar conclusoes',
+    ],
+  },
+];
+
+function normalizeSubtaskList(subtasks) {
+  const seen = new Set();
+  return (subtasks || [])
+    .map(title => String(title || '').replace(/\s+/g, ' ').trim())
+    .filter((title) => {
+      const key = normalizeTextForIntent(title);
+      if (title.length < 3 || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 4);
+}
+
+function hasExistingSubtasks(subtasks) {
+  return Array.isArray(subtasks) && subtasks.length > 0;
+}
+
+function shouldSkipAutoSubtasks(normalizedText) {
+  const wordCount = normalizedText.split(/\s+/).filter(Boolean).length;
+  return wordCount <= 12
+    && SIMPLE_ONE_SHOT_TASK_RE.test(normalizedText)
+    && !COMPLEX_SUBTASK_HINT_RE.test(normalizedText);
+}
+
+export function buildAutoSubtasksForTask(message, task = {}, { useExplicitSubtasks = true } = {}) {
+  if (useExplicitSubtasks) {
+    const explicit = normalizeSubtaskList(extractSubtasksFromMessage(message));
+    if (explicit.length >= 2) return explicit;
+  }
+
+  const normalizedText = normalizeTextForIntent([
+    message,
+    task.title,
+    task.description,
+  ].filter(Boolean).join(' '));
+
+  if (!normalizedText || shouldSkipAutoSubtasks(normalizedText)) return [];
+
+  const rule = AUTO_SUBTASK_RULES.find(item => item.pattern.test(normalizedText));
+  return rule ? normalizeSubtaskList(rule.subtasks) : [];
+}
+
 function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
@@ -1461,7 +1581,10 @@ function buildMutationResponse(toolName, result, userName) {
         : '';
       const time = result.task_due_time ? ` às ${result.task_due_time}` : '';
       const timer = result.timer_set ? ' Vou te avisar quando chegar a hora.' : '';
-      return `Anotado, ${userName}: *${result.task_title}*${date}${time}.${timer}`;
+      const subtasks = result.subtask_count > 0
+        ? ` Dividi em ${result.subtask_count} subtarefa${result.subtask_count === 1 ? '' : 's'}.`
+        : '';
+      return `Anotado, ${userName}: *${result.task_title}*${date}${time}.${subtasks}${timer}`;
     }
     case 'TaskUpdate': {
       const isDone = result.task_status === 'concluída';
@@ -2157,13 +2280,22 @@ export async function queryEngineLoop(
               args.source = sourceChannel === 'whatsapp' ? 'whatsapp' : 'user';
             }
 
-            // Injeta subtarefas se o modelo não gerou nenhuma e a mensagem tem sub-tópicos detectáveis
+            // Injeta subtarefas se o modelo não gerou nenhuma e a mensagem indica uma tarefa com fluxo real.
             if (toolCall.function.name === 'TaskCreate' && (!args.subtasks || args.subtasks.length === 0)) {
-              const autoSubs = extractSubtasksFromMessage(userMessage);
+              const autoSubs = buildAutoSubtasksForTask(userMessage, args);
               if (autoSubs.length >= 2) {
                 args.subtasks = autoSubs.map(title => ({ title }));
                 console.log(`[SubtaskInject] ${autoSubs.length} subtarefas injetadas:`, autoSubs);
               }
+            }
+            if (toolCall.function.name === 'TaskBatchCreate' && Array.isArray(args.tasks)) {
+              args.tasks = args.tasks.map((task) => {
+                if (hasExistingSubtasks(task.subtasks)) return task;
+                const autoSubs = buildAutoSubtasksForTask(userMessage, task, { useExplicitSubtasks: false });
+                if (autoSubs.length < 2) return task;
+                console.log(`[SubtaskInject:Batch] ${autoSubs.length} subtarefas injetadas em "${task.title}":`, autoSubs);
+                return { ...task, subtasks: autoSubs.map(title => ({ title })) };
+              });
             }
 
             console.log(`[Agent] ÔåÆ ${toolCall.function.name}`, JSON.stringify(args));
