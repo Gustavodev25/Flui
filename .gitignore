@@ -12,6 +12,8 @@ test-ai.js
 restore_tasks.py
 server.log
 INSTRUCOES_STRIPE.md
+scratch/
+temp_backend/
 
 
 # Logs

@@ -291,7 +291,7 @@ function fetchWithTimeout(timeout) {
   };
 }
 
-requireEnv('NVIDIA_API_KEY'); // validação na inicialização; consumido pelo queryEngine
+requireEnv('OPENROUTER_API_KEY'); // validação na inicialização; consumido pelo llmClient
 const WHATSAPP_ACCESS_TOKEN = requireEnv('WHATSAPP_ACCESS_TOKEN');
 const WHATSAPP_PHONE_NUMBER_ID = requireEnv('WHATSAPP_PHONE_NUMBER_ID');
 const WHATSAPP_VERIFY_TOKEN = requireEnv('WHATSAPP_VERIFY_TOKEN');
@@ -318,11 +318,6 @@ const GOOGLE_CALENDAR_SCOPES = [
   'profile',
   'https://www.googleapis.com/auth/calendar.events',
 ];
-const nimClient = new OpenAI({
-  apiKey: process.env.NVIDIA_API_KEY,
-  baseURL: 'https://integrate.api.nvidia.com/v1',
-});
-
 function isGoogleCalendarConfigured() {
   return Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
 }
@@ -2113,7 +2108,7 @@ app.get('/api/subscription/sync', async (req, res) => {
   }
 });
 
-// ================== CHAT API (DeepSeek/NIM) ==================
+// ================== CHAT API (OpenRouter) ==================
 app.post('/api/chat', async (req, res) => {
   try {
     const { messages, temperature = 0.7, max_tokens = 2048 } = req.body;
@@ -2249,8 +2244,7 @@ REGRAS GERAIS:
     let finalContent = '';
 
     for (let turn = 0; turn < MAX_CHAT_AGENT_TURNS; turn++) {
-      const response = await nimClient.chat.completions.create({
-        model: PRIMARY_MODEL_ID,
+      const { response } = await createChatCompletion({
         messages: sanitizeChatMessagesForInput(turnMessages),
         tools: CHAT_AGENT_TOOLS,
         tool_choice: 'auto',
@@ -2287,8 +2281,7 @@ REGRAS GERAIS:
 
     if (!finalContent) {
       // Força resposta final se o loop acabou sem texto
-      const finalResponse = await nimClient.chat.completions.create({
-        model: PRIMARY_MODEL_ID,
+      const { response: finalResponse } = await createChatCompletion({
         messages: sanitizeChatMessagesForInput(turnMessages),
         temperature: 0.6,
         max_tokens: 2048,
@@ -4074,10 +4067,11 @@ Regras obrigatórias:
 });
 
 app.get('/api/admin/model-info', requireAdmin, (req, res) => {
+  const { primary } = getLlmStatus();
   res.json({
     modelId: PRIMARY_MODEL_ID,
-    provider: 'NVIDIA NIM',
-    description: 'Nemotron 3 Nano 30B A3B (fast agentic tool-use default)'
+    provider: primary.provider,
+    description: primary.configured ? 'Modelo principal configurado via OpenRouter' : 'OpenRouter sem chave configurada'
   });
 });
 
