@@ -95,6 +95,8 @@ export default function ChangelogModal() {
   }, [])
 
   useEffect(() => {
+    if (!session) return
+
     const base = supabase
       .from('changelogs')
       .select('*')
@@ -110,7 +112,7 @@ export default function ChangelogModal() {
       setEntry(data as ChangelogEntry)
       setTimeout(() => setVisible(true), 1800)
     })
-  }, [isAdmin])
+  }, [session, isAdmin])
 
   const dismiss = () => {
     if (entry) localStorage.setItem(STORAGE_KEY, entry.id)

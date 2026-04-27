@@ -444,27 +444,28 @@ REGRAS:
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.18 }}
-            className="flex items-center gap-2.5 bg-[#f7f7f5] border border-[#e9e9e7] rounded-xl px-3 py-2.5"
+            className="flex items-center gap-2.5 py-1 px-1"
           >
-            <Sparkles size={11} className="text-[#37352f]/25 flex-shrink-0" />
-            <span className="text-[11px] text-[#37352f]/45 flex-1 leading-none">
+            <Sparkles size={11} className="text-[#37352f]/30 flex-shrink-0" />
+            <span className="text-[11px] text-[#37352f]/40 flex-1 leading-none">
               Criar {suggestedSubtasks.length} subtarefas sugeridas?
             </span>
-            <button
-              type="button"
-              onClick={() => { setSubtasks(suggestedSubtasks); setSuggestedSubtasks([]) }}
-              className="text-[10px] font-bold text-[#37352f] hover:underline transition-all"
-            >
-              Sim
-            </button>
-            <span className="text-[#37352f]/15 select-none">·</span>
-            <button
-              type="button"
-              onClick={() => setSuggestedSubtasks([])}
-              className="text-[10px] text-[#37352f]/30 hover:text-[#37352f]/60 transition-all"
-            >
-              Não
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => { setSubtasks(suggestedSubtasks); setSuggestedSubtasks([]) }}
+                className="text-[10px] font-bold text-[#37352f]/70 hover:text-[#37352f] transition-all"
+              >
+                Sim
+              </button>
+              <button
+                type="button"
+                onClick={() => setSuggestedSubtasks([])}
+                className="text-[10px] font-bold text-[#37352f]/20 hover:text-[#37352f]/40 transition-all"
+              >
+                Não
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
